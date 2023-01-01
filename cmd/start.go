@@ -25,7 +25,8 @@ var startCmd = &cobra.Command{
 		logger.Trace("connected to nats server")
 		defer nc.Close()
 		logger.Trace("connecting to database")
-		db := loadDatabase(cmd, &gorm.Config{})
+		glogger := internal.NewGormLogAdapter(logger)
+		db := loadDatabase(cmd, &gorm.Config{Logger: glogger})
 		logger.Trace("connected to database")
 		logger.Trace("creating message processor")
 		processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
