@@ -134,8 +134,9 @@ func (p *MessageProcessor) run(model string, sub *nats.Subscription) {
 				{
 					if err := p.db.Create(intf.GetAfter()).Error; err != nil {
 						p.logger.Error("insert error for change event: %s. %s", object, err)
+					} else {
+						p.logger.Trace("inserted db record for msgid: %s, took %v", msgid, time.Since(started))
 					}
-					p.logger.Trace("inserted db record for msgid: %s, took %v", msgid, time.Since(started))
 				}
 			case datatypes.ChangeEventUpdate:
 				{
@@ -143,15 +144,17 @@ func (p *MessageProcessor) run(model string, sub *nats.Subscription) {
 						UpdateAll: true,
 					}).Create(intf.GetAfter()).Error; err != nil {
 						p.logger.Error("upsert error for change event: %s. %s", object, err)
+					} else {
+						p.logger.Trace("upserted db record for msgid: %s, took %v", msgid, time.Since(started))
 					}
-					p.logger.Trace("upserted db record for msgid: %s, took %v", msgid, time.Since(started))
 				}
 			case datatypes.ChangeEventDelete:
 				{
 					if err := p.db.Delete(intf.GetBefore()).Error; err != nil {
 						p.logger.Error("delete error for change event: %s. %s", object, err)
+					} else {
+						p.logger.Trace("deleted db record for msgid: %s, took %v", msgid, time.Since(started))
 					}
-					p.logger.Trace("deleted db record for msgid: %s, took %v", msgid, time.Since(started))
 				}
 			}
 			msg.AckSync()

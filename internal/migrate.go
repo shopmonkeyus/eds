@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// Migrate will run migration for all tables
 func Migrate(logger logger.Interface, db *gorm.DB) error {
 	for index, name := range v3.ModelNames {
 		logger.Info(context.Background(), "migrating: %s", name)

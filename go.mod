@@ -3,7 +3,7 @@ module github.com/shopmonkeyus/eds-server
 go 1.19
 
 require (
-	github.com/shopmonkeyus/go-datamodel v0.0.3
+	github.com/shopmonkeyus/go-datamodel v0.0.4
 	gorm.io/gorm v1.24.3
 )
 

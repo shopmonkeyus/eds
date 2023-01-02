@@ -31,7 +31,7 @@ var startCmd = &cobra.Command{
 		logger.Trace("creating message processor")
 		processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
 			Logger:          logger,
-			CompanyID:       "6287a4154d1a72cc5ce091bb",
+			CompanyID:       "6287a4154d1a72cc5ce091bb", // FIXME: update once we have configuration loading
 			Database:        db,
 			NatsConnection:  nc,
 			TraceNats:       mustFlagBool(cmd, "trace-nats", false),
