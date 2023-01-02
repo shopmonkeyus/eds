@@ -15,16 +15,24 @@ You will need [Golang](https://go.dev/dl/) version 1.19 or later to use this pac
 You first need to migrate your database to load the schema into a database. The database must exist before running this command:
 
 ```bash
-go run . migrate --driver postgres --dsn "host=localhost user=root dbname=test port=26257 sslmode=disable TimeZone=US/Central"
+go run . migrate --url 'postgresql://root@localhost:26257/test?sslmode=disable'
 ```
 
-Replace the `--dsn` flag with your database connection setting. Replace the `--driver` flag with your database driver name.
+Replace the `--url` flag with your provider connection setting
 
 Once you have a database, you can start the server:
 
 ```bash
-go run . start --driver postgres --dsn "host=localhost user=root dbname=test port=26257 sslmode=disable TimeZone=US/Central"
+go run . start --url 'postgresql://root@localhost:26257/test?sslmode=disable'
 ```
+
+## Providers
+
+The following are the supported providers:
+
+- [PostgreSQL DB](https://www.postgresql.org/)
+- [Cockroach DB](https://www.cockroachlabs.com/) - use the postgres connection string
+- File - use `file://<PATH>` to stream files to a directory provided by PATH
 
 ## Advanced Usage
 

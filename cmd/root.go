@@ -5,9 +5,8 @@ import (
 	"os"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/provider"
 	"github.com/spf13/cobra"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 func mustFlagBool(cmd *cobra.Command, name string, required bool) bool {
@@ -32,24 +31,29 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	return val
 }
 
-func loadDatabase(cmd *cobra.Command, config *gorm.Config) *gorm.DB {
-	driver := mustFlagString(cmd, "driver", true)
-	dsn := mustFlagString(cmd, "dsn", true)
-	var dialector gorm.Dialector
-	// TODO: implement the other databases
-	switch driver {
-	case "postgres":
-		dialector = postgres.Open(dsn)
-	default:
-		fmt.Printf("error: unsupported driver: %s\n", driver)
-		os.Exit(1)
-	}
-	db, err := gorm.Open(dialector, config)
+type ProviderFunc func(p internal.Provider) error
+
+func runProvider(cmd *cobra.Command, logger internal.Logger, fn ProviderFunc) {
+	url := mustFlagString(cmd, "url", true)
+	provider, err := provider.NewProviderForURL(logger, url)
 	if err != nil {
-		fmt.Printf("error: connection to db: %s\n", err)
+		logger.Error("error creating provider: %s", err)
 		os.Exit(1)
 	}
-	return db
+	if err := provider.Start(); err != nil {
+		logger.Error("error starting provider: %s", err)
+		os.Exit(1)
+	}
+	ferr := fn(provider)
+	if ferr != nil {
+		provider.Stop()
+		logger.Error("error: %s", ferr)
+		os.Exit(1)
+	}
+	if err := provider.Stop(); err != nil {
+		logger.Error("error stopping provider: %s", err)
+		os.Exit(1)
+	}
 }
 
 func newLogger(cmd *cobra.Command) internal.Logger {
@@ -78,8 +82,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().String("dsn", "", "the database connection settings")
-	rootCmd.PersistentFlags().String("driver", "", "the database name")
+	rootCmd.PersistentFlags().String("url", "", "the connection string")
 	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
 	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
 }
