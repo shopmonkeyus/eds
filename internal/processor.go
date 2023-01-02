@@ -11,14 +11,12 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 	v3 "github.com/shopmonkeyus/go-datamodel/v3"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type MessageProcessor struct {
 	logger          Logger
 	companyID       string
-	db              *gorm.DB
+	provider        Provider
 	conn            *nats.Conn
 	js              nats.JetStreamContext
 	subs            []*nats.Subscription
@@ -31,7 +29,7 @@ type MessageProcessor struct {
 type MessageProcessorOpts struct {
 	Logger          Logger
 	CompanyID       string
-	Database        *gorm.DB
+	Provider        Provider
 	NatsConnection  *nats.Conn
 	DumpMessagesDir string
 	TraceNats       bool
@@ -64,7 +62,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 	processor := &MessageProcessor{
 		logger:          opts.Logger,
 		companyID:       opts.CompanyID,
-		db:              opts.Database,
+		provider:        opts.Provider,
 		conn:            opts.NatsConnection,
 		dumpMessagesDir: opts.DumpMessagesDir,
 		js:              js,
@@ -104,7 +102,7 @@ func (p *MessageProcessor) run(model string, sub *nats.Subscription) {
 			if strings.Contains(err.Error(), "invalid subscription") {
 				return
 			}
-			p.logger.Error("fetch error for model: %s. %s\n", model, err)
+			p.logger.Error("fetch error for model: %s. %s", model, err)
 			continue
 		}
 		for _, msg := range msgs {
@@ -122,42 +120,18 @@ func (p *MessageProcessor) run(model string, sub *nats.Subscription) {
 			p.logger.Trace("received msgid: %s, subject: %s", msgid, msg.Subject)
 			object, err := v3.NewFromChangeEvent(model, msg.Data, gzipped)
 			if err != nil {
-				p.logger.Error("decode error for change event: %s. %s", model, err)
+				p.logger.Error("decode error for change event: %s. %s", object, err)
 				msg.AckSync()
 				continue
 			}
-			intf := object.(datatypes.ChangeEventHelper)
+			data := object.(datatypes.ChangeEventPayload)
 			p.logger.Trace("decoded object: %s for msgid: %s", object, msgid)
-			started := time.Now()
-			switch intf.GetOperation() {
-			case datatypes.ChangeEventInsert:
-				{
-					if err := p.db.Create(intf.GetAfter()).Error; err != nil {
-						p.logger.Error("insert error for change event: %s. %s", object, err)
-					} else {
-						p.logger.Trace("inserted db record for msgid: %s, took %v", msgid, time.Since(started))
-					}
-				}
-			case datatypes.ChangeEventUpdate:
-				{
-					if err := p.db.Clauses(clause.OnConflict{
-						UpdateAll: true,
-					}).Create(intf.GetAfter()).Error; err != nil {
-						p.logger.Error("upsert error for change event: %s. %s", object, err)
-					} else {
-						p.logger.Trace("upserted db record for msgid: %s, took %v", msgid, time.Since(started))
-					}
-				}
-			case datatypes.ChangeEventDelete:
-				{
-					if err := p.db.Delete(intf.GetBefore()).Error; err != nil {
-						p.logger.Error("delete error for change event: %s. %s", object, err)
-					} else {
-						p.logger.Trace("deleted db record for msgid: %s, took %v", msgid, time.Since(started))
-					}
-				}
+			if err := p.provider.Process(data); err != nil {
+				p.logger.Error("error processing change event: %s. %s", object, err)
 			}
-			msg.AckSync()
+			if err := msg.AckSync(); err != nil {
+				p.logger.Error("error calling ack for message: %s. %s", object, err)
+			}
 		}
 	}
 }
