@@ -32,7 +32,7 @@ The following are the supported providers:
 
 - [PostgreSQL DB](https://www.postgresql.org/)
 - [Cockroach DB](https://www.cockroachlabs.com/) - use the postgres connection string
-- [File] - use `file://<PATH>` to stream files to a directory provided by PATH
+- File - use `file://<PATH>` to stream files to a directory provided by PATH
 
 ## Advanced Usage
 
