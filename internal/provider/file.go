@@ -15,12 +15,13 @@ import (
 type FileProvider struct {
 	logger internal.Logger
 	dir    string
+	opts   *ProviderOpts
 }
 
 var _ internal.Provider = (*FileProvider)(nil)
 
 // NewFileProvider returns a provider that will stream files to a folder provided in the url
-func NewFileProvider(logger internal.Logger, urlstring string) (internal.Provider, error) {
+func NewFileProvider(logger internal.Logger, urlstring string, opts *ProviderOpts) (internal.Provider, error) {
 	u, err := url.Parse(urlstring)
 	if err != nil {
 		return nil, err
@@ -38,6 +39,7 @@ func NewFileProvider(logger internal.Logger, urlstring string) (internal.Provide
 	return &FileProvider{
 		logger,
 		dir,
+		opts,
 	}, nil
 }
 
@@ -54,6 +56,10 @@ func (p *FileProvider) Stop() error {
 // Process data received and return an error or nil if processed ok
 func (p *FileProvider) Process(data datatypes.ChangeEventPayload) error {
 	fn := path.Join(p.dir, data.GetTable()+"_"+data.GetMvccTimestamp()+"_"+data.GetID()+".json.gz")
+	if p.opts != nil && p.opts.DryRun {
+		p.logger.Info("[dry-run] would write: %s", fn)
+		return nil
+	}
 	f, err := os.Open(fn)
 	if err != nil {
 		return fmt.Errorf("error opening file: %s. %s", fn, err)

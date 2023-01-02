@@ -56,4 +56,5 @@ func init() {
 	rootCmd.AddCommand(startCmd)
 	startCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
 	startCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
+	startCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
 }
