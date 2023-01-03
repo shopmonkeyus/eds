@@ -46,7 +46,7 @@ func runDockerDestroy(id string) error {
 
 // runDockerContainer will run a docker container in the background listen on ports and set optional
 // environment variables and return the docker container id if successful
-func runDockerContainer(name string, ports []int, env ...string) (string, error) {
+func runDockerContainer(name string, cmdargs []string, ports []int, env ...string) (string, error) {
 	args := []string{
 		"run", "-it", "-d", "-p", fmt.Sprintf("%d:%d", ports[0], ports[1]),
 	}
@@ -54,6 +54,9 @@ func runDockerContainer(name string, ports []int, env ...string) (string, error)
 		args = append(args, "-e", e)
 	}
 	args = append(args, name)
+	if len(cmdargs) > 0 {
+		args = append(args, cmdargs...)
+	}
 	var out bytes.Buffer
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout = &out
@@ -84,7 +87,13 @@ func runDockerContainer(name string, ports []int, env ...string) (string, error)
 }
 
 func NewTestProviderRunner(logger internal.Logger, driver string) (TestProviderRunner, error) {
-	return NewPostgresTestProviderRunner(logger), nil
+	switch driver {
+	case "postgresql":
+		return NewPostgresTestProviderRunner(logger), nil
+	case "cockroach":
+		return NewCockroachTestProviderRunner(logger), nil
+	}
+	return nil, fmt.Errorf("unsupported driver: %s", driver)
 }
 
 func compareJSON(a []byte, b []byte) error {

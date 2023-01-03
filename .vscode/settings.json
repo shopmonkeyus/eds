@@ -1,0 +1,4 @@
+{
+  "go.buildFlags": ["-tags=e2e"],
+  "editor.formatOnSave": true
+}

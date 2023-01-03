@@ -27,7 +27,7 @@ func NewPostgresTestProviderRunner(logger internal.Logger) TestProviderRunner {
 }
 
 func (r *postgresProviderRunner) Start() error {
-	id, err := runDockerContainer("postgres", []int{15432, 5432}, "POSTGRES_PASSWORD=password", "POSTGRES_DB=test", "POSTGRES_HOST_AUTH_METHOD=trust")
+	id, err := runDockerContainer("postgres",[]string{}, []int{15432, 5432}, "POSTGRES_PASSWORD=password", "POSTGRES_DB=test", "POSTGRES_HOST_AUTH_METHOD=trust")
 	if err != nil {
 		return err
 	}
