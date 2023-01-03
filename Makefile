@@ -10,3 +10,6 @@ lint:
 
 e2e:
 	@go run -tags e2e . e2e
+
+e2e_verbose:
+	@go run -tags e2e . e2e --verbose
