@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	glogger "gorm.io/gorm/logger"
@@ -158,15 +159,19 @@ func (a *gormLoggerAdapter) LogMode(level glogger.LogLevel) glogger.Interface {
 }
 
 func (a *gormLoggerAdapter) Info(ctx context.Context, msg string, data ...interface{}) {
-	a.logger.Info(msg, data...)
+	if strings.Contains(msg, "replacing callback `") {
+		a.logger.Trace(strings.TrimSpace(msg), data...)
+		return
+	}
+	a.logger.Info(strings.TrimSpace(msg), data...)
 }
 
 func (a *gormLoggerAdapter) Warn(ctx context.Context, msg string, data ...interface{}) {
-	a.logger.Warn(msg, data...)
+	a.logger.Warn(strings.TrimSpace(msg), data...)
 }
 
 func (a *gormLoggerAdapter) Error(ctx context.Context, msg string, data ...interface{}) {
-	a.logger.Error(msg, data...)
+	a.logger.Error(strings.TrimSpace(msg), data...)
 }
 
 func (a *gormLoggerAdapter) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {

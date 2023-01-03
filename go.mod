@@ -3,13 +3,17 @@ module github.com/shopmonkeyus/eds-server
 go 1.19
 
 require (
-	github.com/shopmonkeyus/go-datamodel v0.0.6
+	github.com/shopmonkeyus/go-datamodel v0.0.7
+	gorm.io/driver/sqlserver v1.4.1
 	gorm.io/gorm v1.24.3
 )
 
 require (
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/jackc/pgx/v5 v5.2.0 // indirect
+	github.com/microsoft/go-mssqldb v0.19.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 )
 

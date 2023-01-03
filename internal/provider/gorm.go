@@ -8,6 +8,7 @@ import (
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -30,6 +31,8 @@ func NewGormProvider(logger internal.Logger, url string, opts *ProviderOpts) (in
 	switch driver {
 	case "postgresql":
 		dialector = postgres.Open(url)
+	case "sqlserver":
+		dialector = sqlserver.Open(url)
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driver)
 	}
