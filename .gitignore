@@ -1,2 +1,3 @@
 /dump
-dist/
+/dist/
+/eds-server
