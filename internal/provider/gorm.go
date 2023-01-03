@@ -15,11 +15,12 @@ import (
 type GormProvider struct {
 	logger internal.Logger
 	db     *gorm.DB
+	opts   *ProviderOpts
 }
 
 var _ internal.Provider = (*GormProvider)(nil)
 
-func NewGormProvider(logger internal.Logger, url string) (internal.Provider, error) {
+func NewGormProvider(logger internal.Logger, url string, opts *ProviderOpts) (internal.Provider, error) {
 	driver, err := parseURLForProvider(url)
 	if err != nil {
 		return nil, err
@@ -40,6 +41,7 @@ func NewGormProvider(logger internal.Logger, url string) (internal.Provider, err
 	return &GormProvider{
 		logger,
 		db,
+		opts,
 	}, nil
 }
 
@@ -55,6 +57,10 @@ func (p *GormProvider) Stop() error {
 
 // Process data received and return an error or nil if processed ok
 func (p *GormProvider) Process(data datatypes.ChangeEventPayload) error {
+	if p.opts != nil && p.opts.DryRun {
+		p.logger.Info("[dry-run] would write: %v", data)
+		return nil
+	}
 	started := time.Now()
 	switch data.GetOperation() {
 	case datatypes.ChangeEventInsert:
