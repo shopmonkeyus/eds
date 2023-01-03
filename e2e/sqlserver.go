@@ -12,6 +12,7 @@ import (
 
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
+	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 )
@@ -46,7 +47,7 @@ func (r *sqlserverProviderRunner) Start() error {
 			continue
 		}
 		if strings.Contains(stdout.String(), "Launchpad is connecting to mssql") {
-			r.logger.Trace("sqlserver is ready")
+			r.logger.Info("sqlserver is ready")
 			break
 		}
 		time.Sleep(time.Second)
@@ -74,16 +75,20 @@ func (r *sqlserverProviderRunner) Validate(object datatypes.ChangeEventPayload) 
 	if err != nil {
 		return fmt.Errorf("error connecting to sql server: %s", err)
 	}
-	result := map[string]interface{}{}
+	var result any
+	for i, k := range v3.TableNames {
+		if k == object.GetTable() {
+			result = v3.ModelInstances[i]
+			break
+		}
+	}
 	if err := db.Raw(fmt.Sprintf(`SELECT * FROM "%s" WHERE "id" = '%s'`, object.GetTable(), object.GetKey()[0])).Scan(&result).Error; err != nil {
 		return fmt.Errorf("error querying table: %s", err)
 	}
-	buf, _ := json.MarshalIndent(result, "", " ")
-	fmt.Println(string(buf)) // FIXME:
-
-	// buf1, _ := json.Marshal(object.GetAfter())
-	// if err := compareJSON(sqlraw, buf1); err != nil {
-	// 	return err
-	// }
+	sqlraw, _ := json.Marshal(result)
+	buf1, _ := json.Marshal(object.GetAfter())
+	if err := compareJSON(sqlraw, buf1); err != nil {
+		return err
+	}
 	return nil
 }
