@@ -41,7 +41,8 @@ func processFile(logger internal.Logger, cmd *cobra.Command, name string, url st
 	data := object.(datatypes.ChangeEventPayload)
 	logger.Info("loaded: %s with object: %v", fn, object)
 	if url != "" {
-		runProvider(cmd, logger, func(provider internal.Provider) error {
+		dryRun := mustFlagBool(cmd, "dry-run", false)
+		runProvider(logger, url, dryRun, func(provider internal.Provider) error {
 			return provider.Process(data)
 		})
 	}
@@ -49,7 +50,7 @@ func processFile(logger internal.Logger, cmd *cobra.Command, name string, url st
 
 var validateCmd = &cobra.Command{
 	Use:   "validate [file_or_dir]",
-	Short: "validate dump files and optionally load them into the db",
+	Short: "Validate dump files and optionally load them into the db",
 	Long: `Validate dump files and optionally load them into the db
 
 You can validate files from a dump directory:

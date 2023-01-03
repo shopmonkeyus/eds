@@ -13,7 +13,7 @@ import (
 
 var startCmd = &cobra.Command{
 	Use:   "start",
-	Short: "start the server",
+	Short: "Start the server",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := newLogger(cmd)
 		logger.Trace("connecting to nats server")
@@ -24,7 +24,9 @@ var startCmd = &cobra.Command{
 		}
 		logger.Trace("connected to nats server")
 		defer nc.Close()
-		runProvider(cmd, logger, func(provider internal.Provider) error {
+		url := mustFlagString(cmd, "url", true)
+		dryRun := mustFlagBool(cmd, "dry-run", false)
+		runProvider(logger, url, dryRun, func(provider internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
 				Logger:          logger,

@@ -10,11 +10,13 @@ import (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "migrate to the latest datamodel schema changes",
+	Short: "Migrate to the latest datamodel schema changes",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := newLogger(cmd)
 		started := time.Now()
-		runProvider(cmd, logger, func(provider internal.Provider) error {
+		url := mustFlagString(cmd, "url", true)
+		dryRun := mustFlagBool(cmd, "dry-run", false)
+		runProvider(logger, url, dryRun, func(provider internal.Provider) error {
 			if err := provider.Migrate(); err != nil {
 				return fmt.Errorf("error running migrate: %s", err)
 			}
