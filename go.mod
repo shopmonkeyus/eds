@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/shopmonkeyus/go-datamodel v0.0.7
-	gorm.io/driver/sqlserver v1.4.1
+	gorm.io/driver/sqlserver v1.4.2
 	gorm.io/gorm v1.24.3
 )
 
