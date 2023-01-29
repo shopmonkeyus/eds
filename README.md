@@ -26,12 +26,19 @@ Once you have a database, you can start the server:
 go run . start --url 'postgresql://root@localhost:26257/test?sslmode=disable'
 ```
 
+You will also need to provide a server credentials file provided by Shopmonkey and your company id. These should be passed in as command line arguments as well:
+
+```bash
+--creds server.creds --company-id 1234
+```
+
 ## Providers
 
 The following are the supported providers:
 
 - [PostgreSQL DB](https://www.postgresql.org/)
 - [Cockroach DB](https://www.cockroachlabs.com/) - use the postgres connection string
+- [SQL Server DB](https://www.microsoft.com/en-us/sql-server)
 - File - use `file://<PATH>` to stream files to a directory provided by PATH
 
 ## Advanced Usage
