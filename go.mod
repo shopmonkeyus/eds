@@ -12,7 +12,7 @@ require (
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/jackc/pgx/v5 v5.2.0 // indirect
+	github.com/jackc/pgx/v5 v5.3.0 // indirect
 	github.com/microsoft/go-mssqldb v0.20.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 )
@@ -29,7 +29,7 @@ require (
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/crypto v0.5.0 // indirect
-	golang.org/x/text v0.6.0 // indirect
-	gorm.io/driver/postgres v1.4.6
+	golang.org/x/crypto v0.6.0 // indirect
+	golang.org/x/text v0.7.0 // indirect
+	gorm.io/driver/postgres v1.4.8
 )
