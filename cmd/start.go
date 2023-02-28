@@ -1,37 +1,18 @@
 package cmd
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
-	"path"
 	"strings"
 	"syscall"
-	"time"
 
+	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	snats "github.com/shopmonkeyus/go-common/nats"
 	"github.com/spf13/cobra"
 )
-
-// Credentials file contains the company id and the nats credentials encoded as base64
-type Credentials struct {
-	CompanyID   string `json:"companyId"`
-	Credentials string `json:"creds"`
-}
-
-func (c *Credentials) Load(fn string) error {
-	of, err := os.Open(fn)
-	if err != nil {
-		return fmt.Errorf("error: open %s. %s", fn, err)
-	}
-	defer of.Close()
-	dec := json.NewDecoder(of)
-	return dec.Decode(c)
-}
 
 var startCmd = &cobra.Command{
 	Use:   "start",
@@ -50,8 +31,6 @@ var startCmd = &cobra.Command{
 
 		natsurl := strings.Join(hosts, ",")
 
-		var credentials Credentials
-		var tmpfn string
 		var natsCredentials nats.Option
 		companyID, _ := cmd.Flags().GetString("company-id")
 
@@ -60,33 +39,34 @@ var startCmd = &cobra.Command{
 				logger.Error("error: invalid credential file: %s", creds)
 				os.Exit(1)
 			}
-			if err := credentials.Load(creds); err != nil {
-				logger.Error("%s", err)
-				os.Exit(1)
-			}
-			companyID = credentials.CompanyID
-			sDec, err := base64.StdEncoding.DecodeString(credentials.Credentials)
+			buf, err := os.ReadFile(creds)
 			if err != nil {
-				logger.Error("error: invalid credential file: %s. couldn't decoded credentials: %s", creds, err)
+				logger.Error("error: reading credentials file: %s", err)
 				os.Exit(1)
 			}
-			tmpfn = path.Join(os.TempDir(), fmt.Sprintf(".nats-creds-%v", time.Now().Unix()))
-			if err := os.WriteFile(tmpfn, sDec, 0444); err != nil {
-				logger.Error("error: writing temporary credentials file: %s", err)
+			natsCredentials = nats.UserCredentials(creds)
+
+			natsJWT, err := jwt.ParseDecoratedJWT(buf)
+			if err != nil {
+				logger.Error("error: parsing valid JWT: %s", err)
 				os.Exit(1)
 			}
-			fmt.Println(string(sDec))
-			natsCredentials = nats.UserCredentials(tmpfn)
-			defer os.Remove(tmpfn)
+			claim, err := jwt.DecodeUserClaims(natsJWT)
+			if err != nil {
+				logger.Error("error: decoding JWT claims: %s", err)
+				os.Exit(1)
+			}
+			companyID = claim.Audience
+			if companyID == "" {
+				logger.Error("error: invalid JWT claim. missing audience")
+				os.Exit(1)
+			}
 		}
 
 		nc, err := snats.NewNats(logger, "eds-server-"+companyID, natsurl, natsCredentials)
 		if err != nil {
 			logger.Error("nats: %s", err)
 			os.Exit(1)
-		}
-		if tmpfn != "" {
-			os.Remove(tmpfn) // remove as soon as possible
 		}
 		defer nc.Close()
 		url := mustFlagString(cmd, "url", true)

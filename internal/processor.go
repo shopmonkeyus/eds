@@ -26,6 +26,7 @@ type MessageProcessor struct {
 	consumerPrefix  string
 	context         context.Context
 	cancel          context.CancelFunc
+	tableLookup     map[string]bool
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -63,6 +64,10 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 			}
 		}
 	}
+	tableLookup := make(map[string]bool)
+	for _, name := range v3.TableNames {
+		tableLookup[name] = true
+	}
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
 		logger:          opts.Logger,
@@ -72,6 +77,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		dumpMessagesDir: opts.DumpMessagesDir,
 		consumerPrefix:  opts.ConsumerPrefix,
 		js:              js,
+		tableLookup:     tableLookup,
 		context:         context,
 		cancel:          cancel,
 	}
@@ -80,11 +86,16 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 
 // callback processes db change events
 func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *nats.Msg) error {
+	tok := strings.Split(msg.Subject, ".")
+	model := tok[1]
+	if !p.tableLookup[model] {
+		// skip any non EDS models
+		msg.AckSync()
+		return nil
+	}
 	msgid := msg.Header.Get("Nats-Msg-Id")
 	encoding := msg.Header.Get("content-encoding")
 	gzipped := encoding == "gzip/json"
-	tok := strings.Split(msg.Subject, ".")
-	model := tok[1]
 	p.logger.Trace("received msgid: %s, subject: %s", msgid, msg.Subject)
 	object, err := v3.NewFromChangeEvent(model, msg.Data, gzipped)
 	if err != nil {
@@ -117,7 +128,18 @@ func (p *MessageProcessor) Start() error {
 	p.logger.Trace("message processor starting")
 	name := fmt.Sprintf("%seds-server-%s", p.consumerPrefix, p.companyID)
 	description := fmt.Sprintf("EDS server consumer for %s", p.companyID)
-	c, err := snats.NewExactlyOnceConsumer(p.context, p.logger, p.js, "dbchange", name, description, "dbchange.*."+p.companyID+".>", p.callback)
+	c, err := snats.NewExactlyOnceConsumerWithConfig(snats.ExactlyOnceConsumerConfig{
+		Context:             p.context,
+		Logger:              p.logger,
+		JetStream:           p.js,
+		StreamName:          "dbchange",
+		DurableName:         name,
+		ConsumerDescription: description,
+		FilterSubject:       "dbchange.*.*." + p.companyID + ".>",
+		Handler:             p.callback,
+		DeliverPolicy:       nats.DeliverAllPolicy,
+		Deliver:             nats.DeliverAll(),
+	})
 	if err != nil {
 		return err
 	}
