@@ -10,18 +10,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type cockroachProviderRunner struct {
-	logger            internal.Logger
+	logger            logger.Logger
 	dockerContainerID string
 }
 
 var _ TestProviderRunner = (*cockroachProviderRunner)(nil)
 
-func NewCockroachTestProviderRunner(logger internal.Logger) TestProviderRunner {
+func NewCockroachTestProviderRunner(logger logger.Logger) TestProviderRunner {
 	return &cockroachProviderRunner{logger, ""}
 }
 

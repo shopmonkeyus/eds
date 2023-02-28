@@ -9,11 +9,12 @@ import (
 	"path"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type FileProvider struct {
-	logger internal.Logger
+	logger logger.Logger
 	dir    string
 	opts   *ProviderOpts
 }
@@ -21,7 +22,7 @@ type FileProvider struct {
 var _ internal.Provider = (*FileProvider)(nil)
 
 // NewFileProvider returns a provider that will stream files to a folder provided in the url
-func NewFileProvider(logger internal.Logger, urlstring string, opts *ProviderOpts) (internal.Provider, error) {
+func NewFileProvider(logger logger.Logger, urlstring string, opts *ProviderOpts) (internal.Provider, error) {
 	u, err := url.Parse(urlstring)
 	if err != nil {
 		return nil, err

@@ -13,6 +13,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
+	snats "github.com/shopmonkeyus/go-common/nats"
 	"github.com/spf13/cobra"
 )
 
@@ -48,10 +49,10 @@ var startCmd = &cobra.Command{
 		}
 
 		natsurl := strings.Join(hosts, ",")
-		natsOpts := make([]nats.Option, 0)
 
 		var credentials Credentials
 		var tmpfn string
+		var natsCredentials nats.Option
 		companyID, _ := cmd.Flags().GetString("company-id")
 
 		if creds != "" {
@@ -74,27 +75,19 @@ var startCmd = &cobra.Command{
 				logger.Error("error: writing temporary credentials file: %s", err)
 				os.Exit(1)
 			}
-			natsOpts = append(natsOpts, nats.UserCredentials(tmpfn))
+			fmt.Println(string(sDec))
+			natsCredentials = nats.UserCredentials(tmpfn)
 			defer os.Remove(tmpfn)
 		}
-		natsOpts = append(natsOpts, nats.Name("customer-"+companyID))
 
-		nc, err := nats.Connect(natsurl, natsOpts...)
+		nc, err := snats.NewNats(logger, "eds-server-"+companyID, natsurl, natsCredentials)
 		if err != nil {
-			logger.Error("error: nats connection: %s", err)
+			logger.Error("nats: %s", err)
 			os.Exit(1)
 		}
 		if tmpfn != "" {
 			os.Remove(tmpfn) // remove as soon as possible
 		}
-		logger.Trace("connected to nats server")
-		d, err := nc.RTT()
-		if err != nil {
-			nc.Close()
-			logger.Error("error: nats connection rtt: %s", err)
-			os.Exit(1)
-		}
-		logger.Info("server ping rtt: %vms, host: %s (%s)", d, nc.ConnectedUrl(), nc.ConnectedServerName())
 		defer nc.Close()
 		url := mustFlagString(cmd, "url", true)
 		dryRun := mustFlagBool(cmd, "dry-run", false)
@@ -107,6 +100,7 @@ var startCmd = &cobra.Command{
 				NatsConnection:  nc,
 				TraceNats:       mustFlagBool(cmd, "trace-nats", false),
 				DumpMessagesDir: mustFlagString(cmd, "dump-dir", false),
+				ConsumerPrefix:  mustFlagString(cmd, "consumer-prefix", false),
 			})
 			if err != nil {
 				return err
@@ -133,6 +127,7 @@ func init() {
 	startCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
 	startCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
 	startCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
-	startCmd.Flags().StringSlice("server", []string{"nats://nats.shopmonkey.cloud:4222"}, "the nats server url")
+	startCmd.Flags().StringSlice("server", []string{"nats://nats.shopmonkey.cloud"}, "the nats server url")
 	startCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
+	startCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
 }

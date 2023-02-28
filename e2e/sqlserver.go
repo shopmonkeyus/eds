@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 	"gorm.io/driver/sqlserver"
@@ -18,13 +19,13 @@ import (
 )
 
 type sqlserverProviderRunner struct {
-	logger            internal.Logger
+	logger            logger.Logger
 	dockerContainerID string
 }
 
 var _ TestProviderRunner = (*sqlserverProviderRunner)(nil)
 
-func NewSQLServerTestProviderRunner(logger internal.Logger) TestProviderRunner {
+func NewSQLServerTestProviderRunner(logger logger.Logger) TestProviderRunner {
 	return &sqlserverProviderRunner{logger, ""}
 }
 

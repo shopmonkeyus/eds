@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
@@ -86,7 +86,7 @@ func runDockerContainer(name string, cmdargs []string, ports []int, env ...strin
 	return id, nil
 }
 
-func NewTestProviderRunner(logger internal.Logger, driver string) (TestProviderRunner, error) {
+func NewTestProviderRunner(logger logger.Logger, driver string) (TestProviderRunner, error) {
 	switch driver {
 	case "postgresql":
 		return NewPostgresTestProviderRunner(logger), nil
