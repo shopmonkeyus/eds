@@ -1,4 +1,4 @@
-FROM golang:1.19-alpine as builder
+FROM golang:1.20-alpine as builder
 
 ENV APP_HOME /go/src/github.com/shopmonkeyus/eds-server
 
