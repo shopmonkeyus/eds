@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 	"gorm.io/driver/postgres"
@@ -14,14 +15,14 @@ import (
 )
 
 type GormProvider struct {
-	logger internal.Logger
+	logger logger.Logger
 	db     *gorm.DB
 	opts   *ProviderOpts
 }
 
 var _ internal.Provider = (*GormProvider)(nil)
 
-func NewGormProvider(logger internal.Logger, url string, opts *ProviderOpts) (internal.Provider, error) {
+func NewGormProvider(logger logger.Logger, url string, opts *ProviderOpts) (internal.Provider, error) {
 	driver, err := parseURLForProvider(url)
 	if err != nil {
 		return nil, err

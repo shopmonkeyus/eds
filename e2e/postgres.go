@@ -11,23 +11,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type postgresProviderRunner struct {
-	logger            internal.Logger
+	logger            logger.Logger
 	dockerContainerID string
 }
 
 var _ TestProviderRunner = (*postgresProviderRunner)(nil)
 
-func NewPostgresTestProviderRunner(logger internal.Logger) TestProviderRunner {
+func NewPostgresTestProviderRunner(logger logger.Logger) TestProviderRunner {
 	return &postgresProviderRunner{logger, ""}
 }
 
 func (r *postgresProviderRunner) Start() error {
-	id, err := runDockerContainer("postgres",[]string{}, []int{15432, 5432}, "POSTGRES_PASSWORD=password", "POSTGRES_DB=test", "POSTGRES_HOST_AUTH_METHOD=trust")
+	id, err := runDockerContainer("postgres", []string{}, []int{15432, 5432}, "POSTGRES_PASSWORD=password", "POSTGRES_DB=test", "POSTGRES_HOST_AUTH_METHOD=trust")
 	if err != nil {
 		return err
 	}

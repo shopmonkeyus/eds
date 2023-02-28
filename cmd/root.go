@@ -6,6 +6,7 @@ import (
 
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/provider"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -33,7 +34,7 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 
 type ProviderFunc func(p internal.Provider) error
 
-func runProvider(logger internal.Logger, url string, dryRun bool, fn ProviderFunc) {
+func runProvider(logger logger.Logger, url string, dryRun bool, fn ProviderFunc) {
 	opts := &provider.ProviderOpts{
 		DryRun: dryRun,
 	}
@@ -58,14 +59,8 @@ func runProvider(logger internal.Logger, url string, dryRun bool, fn ProviderFun
 	}
 }
 
-func newLogger(cmd *cobra.Command) internal.Logger {
-	var logger internal.Logger = internal.Default
-	if mustFlagBool(cmd, "verbose", false) {
-		logger = internal.Tracer
-	} else if mustFlagBool(cmd, "silent", false) {
-		logger = internal.Discard
-	}
-	return logger
+func newLogger(cmd *cobra.Command) logger.Logger {
+	return logger.NewConsoleLogger()
 }
 
 // rootCmd represents the base command when called without any subcommands

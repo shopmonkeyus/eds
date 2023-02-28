@@ -1,3 +1,4 @@
 /dump
 /dist/
 /eds-server
+*.creds

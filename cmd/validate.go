@@ -7,6 +7,7 @@ import (
 	"regexp"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-datamodel/datatypes"
 	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 	"github.com/spf13/cobra"
@@ -14,7 +15,7 @@ import (
 
 var filePattern = regexp.MustCompile(`^(\w+)_\d+_\w+\.json(\.gz)?$`)
 
-func processFile(logger internal.Logger, cmd *cobra.Command, name string, url string) {
+func processFile(logger logger.Logger, cmd *cobra.Command, name string, url string) {
 	fn := path.Base(name)
 	if !filePattern.MatchString(fn) {
 		return
