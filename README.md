@@ -4,7 +4,11 @@
 
 # Overview
 
-This repository contains the reference implementation of the Enterprise Data Streaming server.
+This repository contains the reference implementation of the Enterprise Data Streaming server. You can find more detailed information at the [Shopmonkey Developer Portal](https://shopmonkey.dev/eds).
+
+## Download Release Binary
+
+You can download release binary for different operation systems from the [Release](https://github.com/shopmonkeyus/eds-server/releases) section.
 
 ## Requirements
 
