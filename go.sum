@@ -77,6 +77,8 @@ github.com/rogpeppe/go-internal v1.6.1/go.mod h1:xXDCJY+GAPziupqXw64V24skbSoqbTE
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/shopmonkeyus/go-common v0.0.18 h1:BuTGX07JG5/FmmtyGa7oCJrUd5ZYaM8makBABiQkzTs=
 github.com/shopmonkeyus/go-common v0.0.18/go.mod h1:oNkasgL3cL/OQno+eh3h9vHHaXjc/xLE64afLPxeiO8=
+github.com/shopmonkeyus/go-common v0.0.19 h1:KwU1ZOhcoea/2G63EgIW1AtfAz201qqSGtl8fVGwwYg=
+github.com/shopmonkeyus/go-common v0.0.19/go.mod h1:9qWKxGPrqZyu0ELpnYh5YqnAKN/P0IJeRuNww43Q16k=
 github.com/shopmonkeyus/go-datamodel v0.0.9 h1:e7K/AFGQW7kQ3vutzoGO/N1DKcahFcSYFo3j+gyl93o=
 github.com/shopmonkeyus/go-datamodel v0.0.9/go.mod h1:l8Iie/oIsGCGL/wTScdj30OICjA+4K0yDjb3GBL/lZk=
 github.com/spf13/cobra v1.6.1 h1:o94oiPyS4KD1mPy2fmcYYHHfCxLqYjJOhGsCHFZtEzA=
