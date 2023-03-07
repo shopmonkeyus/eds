@@ -3,10 +3,10 @@ module github.com/shopmonkeyus/eds-server
 go 1.19
 
 require (
-	github.com/shopmonkeyus/go-common v0.0.18
+	github.com/shopmonkeyus/go-common v0.0.19
 	github.com/shopmonkeyus/go-datamodel v0.0.9
 	gorm.io/driver/sqlserver v1.4.2
-	gorm.io/gorm v1.24.5
+	gorm.io/gorm v1.24.6
 )
 
 require (
@@ -28,7 +28,7 @@ require (
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/crypto v0.6.0 // indirect
-	golang.org/x/text v0.7.0 // indirect
+	golang.org/x/crypto v0.7.0 // indirect
+	golang.org/x/text v0.8.0 // indirect
 	gorm.io/driver/postgres v1.4.8
 )

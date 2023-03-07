@@ -73,6 +73,7 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload) error {
 	}
 	w.Write(buf)
 	w.Flush()
+	p.logger.Trace("processed: %s", fn)
 	return nil
 }
 
