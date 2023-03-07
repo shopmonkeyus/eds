@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var allDrivers = []string{"postgresql", "cockroach", "sqlserver"}
+var allDrivers = []string{"postgresql", "cockroach", "sqlserver", "file"}
 
 var e2eCmd = &cobra.Command{
 	Use:   "e2e [driver]",

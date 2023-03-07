@@ -128,6 +128,10 @@ func (p *MessageProcessor) Start() error {
 	p.logger.Trace("message processor starting")
 	name := fmt.Sprintf("%seds-server-%s", p.consumerPrefix, p.companyID)
 	description := fmt.Sprintf("EDS server consumer for %s", p.companyID)
+	companyId := p.companyID
+	if companyId == "" {
+		companyId = "*"
+	}
 	c, err := snats.NewExactlyOnceConsumerWithConfig(snats.ExactlyOnceConsumerConfig{
 		Context:             p.context,
 		Logger:              p.logger,
@@ -135,7 +139,7 @@ func (p *MessageProcessor) Start() error {
 		StreamName:          "dbchange",
 		DurableName:         name,
 		ConsumerDescription: description,
-		FilterSubject:       "dbchange.*.*." + p.companyID + ".>",
+		FilterSubject:       "dbchange.*.*." + companyId + ".>",
 		Handler:             p.callback,
 		DeliverPolicy:       nats.DeliverAllPolicy,
 		Deliver:             nats.DeliverAll(),

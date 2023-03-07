@@ -94,6 +94,8 @@ func NewTestProviderRunner(logger logger.Logger, driver string) (TestProviderRun
 		return NewCockroachTestProviderRunner(logger), nil
 	case "sqlserver":
 		return NewSQLServerTestProviderRunner(logger), nil
+	case "file":
+		return NewFileTestProviderRunner(logger), nil
 	}
 	return nil, fmt.Errorf("unsupported driver: %s", driver)
 }
