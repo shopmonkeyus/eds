@@ -61,9 +61,9 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload) error {
 		p.logger.Info("[dry-run] would write: %s", fn)
 		return nil
 	}
-	f, err := os.Open(fn)
+	f, err := os.Create(fn)
 	if err != nil {
-		return fmt.Errorf("error opening file: %s. %s", fn, err)
+		return fmt.Errorf("error creating file: %s. %s", fn, err)
 	}
 	defer f.Close()
 	w := gzip.NewWriter(f)
