@@ -99,7 +99,12 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	p.logger.Trace("received msgid: %s, subject: %s", msgid, msg.Subject)
 	object, err := v3.NewFromChangeEvent(model, msg.Data, gzipped)
 	if err != nil {
-		p.logger.Error("decode error for change event: %s. %s", object, err)
+		if gzipped {
+			dec, _ := datatypes.Gunzip(msg.Data)
+			p.logger.Error("decode error for change event: %s. %s", string(dec), err)
+		} else {
+			p.logger.Error("decode error for change event: %s. %s", string(msg.Data), err)
+		}
 		msg.AckSync()
 		return nil
 	}
