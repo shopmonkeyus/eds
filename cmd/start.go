@@ -1,13 +1,18 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	jwt "github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	snats "github.com/shopmonkeyus/go-common/nats"
@@ -69,9 +74,15 @@ var startCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		defer nc.Close()
-		url := mustFlagString(cmd, "url", true)
+		url := mustFlagString(cmd, "url", false)
 		dryRun := mustFlagBool(cmd, "dry-run", false)
-		runProvider(logger, url, dryRun, func(provider internal.Provider) error {
+		embedNats := mustFlagBool(cmd, "embed-nats", false)
+
+		if url == "" && !embedNats {
+			fmt.Printf("error: EDS Server requires either --url or --embed-nats missing\n")
+			os.Exit(1)
+		}
+		var runProviderCallback func(internal.Provider) error = func(provider internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
 				Logger:          logger,
@@ -86,7 +97,9 @@ var startCmd = &cobra.Command{
 				return err
 			}
 			defer processor.Stop()
+
 			logger.Trace("starting message processor")
+
 			if err := processor.Start(); err != nil {
 				return fmt.Errorf("processor start: %s", err)
 			}
@@ -96,7 +109,50 @@ var startCmd = &cobra.Command{
 			<-c
 			logger.Info("stopped message processor")
 			return nil
-		})
+		}
+
+		var wg sync.WaitGroup
+
+		if embedNats {
+			serverConfigJSON, err := ioutil.ReadFile("server.conf")
+			if err != nil {
+				panic(err)
+			}
+			serverConfig := server.Options{}
+
+			err = json.Unmarshal([]byte(serverConfigJSON), &serverConfig)
+			if err != nil {
+				panic(err)
+			}
+			
+			ns, err := server.NewServer(&serverConfig)
+
+			if err != nil {
+				panic(err)
+			}
+
+			go ns.Start()
+
+			for !ns.ReadyForConnections(4 * time.Second) {
+				logger.Info("Waiting for nats server to start...")
+			}
+
+			logger.Info("Nats server started at url: %s", ns.ClientURL())
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				runProvider(logger, ns.ClientURL(), dryRun, runProviderCallback)
+			}()
+		}
+		if url != "" {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				runProvider(logger, url, dryRun, runProviderCallback)
+			}()
+		}
+		wg.Wait()
 	},
 }
 
@@ -110,4 +166,5 @@ func init() {
 	startCmd.Flags().StringSlice("server", []string{"nats://nats.shopmonkey.cloud"}, "the nats server url")
 	startCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	startCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
+	startCmd.Flags().Bool("embed-nats", false, "Run a local nats instance as a sink")
 }
