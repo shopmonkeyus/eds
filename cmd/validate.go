@@ -7,9 +7,8 @@ import (
 	"regexp"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
-	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -34,13 +33,13 @@ func processFile(logger logger.Logger, cmd *cobra.Command, name string, url stri
 		logger.Error("error reading file: %s. %s", name, err)
 		os.Exit(1)
 	}
-	object, err := v3.NewFromChangeEvent(model, buf, path.Ext(fn) == ".gz")
+	data, err := types.FromChangeEvent(buf, path.Ext(fn) == ".gz")
+
 	if err != nil {
 		logger.Error("error deserializing file: %s. %s", name, err)
 		os.Exit(1)
 	}
-	data := object.(datatypes.ChangeEventPayload)
-	logger.Info("loaded: %s with object: %v", fn, object)
+	logger.Info("loaded: %s with object: %v", fn, data)
 
 	if url != "" {
 		dryRun := mustFlagBool(cmd, "dry-run", false)

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type cockroachProviderRunner struct {
@@ -65,7 +65,7 @@ func (r *cockroachProviderRunner) URL() string {
 }
 
 // Validate that the object was committed to storage
-func (r *cockroachProviderRunner) Validate(object datatypes.ChangeEventPayload) error {
+func (r *cockroachProviderRunner) Validate(object types.ChangeEventPayload) error {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd := exec.Command("docker", "exec", r.dockerContainerID, "cockroach", "sql", "--insecure", "-d", "test", "--format", "records", "-e", fmt.Sprintf(`SELECT row_to_json(t) FROM (SELECT * FROM "%s" WHERE id = '%s') t`, object.GetTable(), object.GetKey()[0]))

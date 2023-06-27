@@ -10,8 +10,7 @@ import (
 
 	"github.com/shopmonkeyus/eds-server/e2e"
 	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
-	v3 "github.com/shopmonkeyus/go-datamodel/v3"
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/spf13/cobra"
 )
 
@@ -59,12 +58,12 @@ var e2eCmd = &cobra.Command{
 						runner.Stop()
 						return fmt.Errorf("error reading test file: %s. %s", fn, err)
 					}
-					object, err := v3.NewFromChangeEvent("order", buf, path.Ext(fn) == ".gz")
+					data, err := types.FromChangeEvent(buf, path.Ext(fn) == ".gz")
+
 					if err != nil {
 						runner.Stop()
 						return fmt.Errorf("error deserializing file: %s. %s", fn, err)
 					}
-					data := object.(datatypes.ChangeEventPayload)
 					if err := provider.Process(data); err != nil {
 						runner.Stop()
 						return fmt.Errorf("error processing file: %s. %s", fn, err)

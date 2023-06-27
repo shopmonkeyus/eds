@@ -113,6 +113,7 @@ var startCmd = &cobra.Command{
 
 		var wg sync.WaitGroup
 
+		// TODO: add in leaf-node configuration for this option eventually
 		if embedNats {
 			serverConfigJSON, err := ioutil.ReadFile("server.conf")
 			if err != nil {
@@ -124,7 +125,7 @@ var startCmd = &cobra.Command{
 			if err != nil {
 				panic(err)
 			}
-			
+
 			ns, err := server.NewServer(&serverConfig)
 
 			if err != nil {

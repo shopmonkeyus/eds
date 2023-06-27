@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type postgresProviderRunner struct {
@@ -69,7 +69,7 @@ func (r *postgresProviderRunner) fixSQLDates(sqlresult string) string {
 }
 
 // Validate that the object was committed to storage
-func (r *postgresProviderRunner) Validate(object datatypes.ChangeEventPayload) error {
+func (r *postgresProviderRunner) Validate(object types.ChangeEventPayload) error {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd := exec.Command("docker", "exec", r.dockerContainerID, "psql", "-d", "test", "-U", "postgres", "-t", "-c", fmt.Sprintf(`SELECT row_to_json(t) FROM (SELECT * FROM "%s" WHERE id = '%s') t`, object.GetTable(), object.GetKey()[0]))

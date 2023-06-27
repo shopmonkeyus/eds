@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type TestProviderRunner interface {
@@ -23,7 +23,7 @@ type TestProviderRunner interface {
 	// URL will return the url for testing against this runner
 	URL() string
 	// Validate that the object was committed to storage
-	Validate(datatypes.ChangeEventPayload) error
+	Validate(types.ChangeEventPayload) error
 }
 
 type DockerState struct {

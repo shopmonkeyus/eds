@@ -7,13 +7,13 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type NatsProvider struct {
 	logger logger.Logger
-	nc	   *nats.Conn
+	nc     *nats.Conn
 	js     nats.JetStreamContext
 	opts   *ProviderOpts
 }
@@ -27,7 +27,7 @@ func NewNatsProvider(logger logger.Logger, urlstring string, opts *ProviderOpts)
 		return nil, fmt.Errorf("1/2: unable to find and open stream config with error: %s", err)
 	}
 	streamConfig := nats.StreamConfig{}
-	err = json.Unmarshal([]byte(streamConfigJSON), &streamConfig )
+	err = json.Unmarshal([]byte(streamConfigJSON), &streamConfig)
 	if err != nil {
 		if e, ok := err.(*json.SyntaxError); ok {
 			logger.Error("syntax error at byte offset %d", e.Offset)
@@ -35,7 +35,6 @@ func NewNatsProvider(logger logger.Logger, urlstring string, opts *ProviderOpts)
 		return nil, fmt.Errorf("2/2: unable to parse stream config with error: %s", err)
 	}
 
-	
 	nc, err := nats.Connect(urlstring)
 	if err != nil {
 		return nil, fmt.Errorf("unable to connect to nats server: %s with error: %s", urlstring, err)
@@ -72,19 +71,19 @@ func (p *NatsProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *NatsProvider) Process(data datatypes.ChangeEventPayload) error {
-	p.logger.Debug("Republish Message to: dbchange.%s.%s.%s",  data.GetTable(), data.GetOperation(), data.GetLocationID())
+func (p *NatsProvider) Process(data types.ChangeEventPayload) error {
+	p.logger.Debug("Republish Message to: dbchange.%s.%s.%s", data.GetTable(), data.GetOperation(), data.GetLocationID())
 	location := "NONE"
-	if (data.GetLocationID() != nil) {
+	if data.GetLocationID() != nil {
 		location = *data.GetLocationID()
 	}
-	subject := fmt.Sprintf("dbchange.%s.%s.%s", data.GetTable(), data.GetOperation(), location )
+	subject := fmt.Sprintf("dbchange.%s.%s.%s", data.GetTable(), data.GetOperation(), location)
 
 	buf, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
 		return err
 	}
-	
+
 	p.logger.Debug("Republish Message with Payload", string(buf))
 	if p.opts != nil && p.opts.DryRun {
 		p.logger.Info("[dry-run] would publish to: %s", subject)
@@ -99,7 +98,7 @@ func (p *NatsProvider) Process(data datatypes.ChangeEventPayload) error {
 	return nil
 }
 
-// Migrate will tell the provider to do any migration work and return an error or nil if ok
-func (p *NatsProvider) Migrate() error {
+// ProcessSchema will process schema changes received and return an error or nil if processed ok
+func (p *NatsProvider) ProcessSchema(data map[string]interface{}) error {
 	return nil
 }

@@ -27,13 +27,12 @@ func NewProviderForURL(logger logger.Logger, url string, opts *ProviderOpts) (in
 		return nil, err
 	}
 	switch driver {
-	case "postgresql", "mysql", "sqlserver", "sqlite", "clickhouse":
-		return NewGormProvider(logger, url, opts)
 	case "file":
 		return NewFileProvider(logger, url, opts)
 	case "nats":
 		return NewNatsProvider(logger, url, opts)
 	default:
 		return nil, fmt.Errorf("no suitable provider found for url: %s", url)
+		// TODO: add STDIN based option for calling plugins/providers
 	}
 }

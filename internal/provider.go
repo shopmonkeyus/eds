@@ -1,6 +1,6 @@
 package internal
 
-import "github.com/shopmonkeyus/go-datamodel/datatypes"
+import "github.com/shopmonkeyus/eds-server/internal/types"
 
 type Provider interface {
 	// Start the provider and return an error or nil if ok
@@ -8,7 +8,7 @@ type Provider interface {
 	// Stop the provider and return an error or nil if ok
 	Stop() error
 	// Process data received and return an error or nil if processed ok
-	Process(data datatypes.ChangeEventPayload) error
-	// Migrate will tell the provider to do any migration work and return an error or nil if ok
-	Migrate() error
+	Process(data types.ChangeEventPayload) error
+	// ProcessSchema will process schema changes received and return an error or nil if processed ok
+	ProcessSchema(data map[string]interface{}) error
 }

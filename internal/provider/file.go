@@ -9,8 +9,8 @@ import (
 	"path"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type FileProvider struct {
@@ -55,7 +55,7 @@ func (p *FileProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *FileProvider) Process(data datatypes.ChangeEventPayload) error {
+func (p *FileProvider) Process(data types.ChangeEventPayload) error {
 	fn := path.Join(p.dir, data.GetTable()+"_"+data.GetMvccTimestamp()+"_"+data.GetID()+".json.gz")
 	if p.opts != nil && p.opts.DryRun {
 		p.logger.Info("[dry-run] would write: %s", fn)
@@ -82,7 +82,7 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload) error {
 	return nil
 }
 
-// Migrate will tell the provider to do any migration work and return an error or nil if ok
-func (p *FileProvider) Migrate() error {
+// ProcessSchema will process schema changes received and return an error or nil if processed ok
+func (p *FileProvider) ProcessSchema(data map[string]interface{}) error {
 	return nil
 }

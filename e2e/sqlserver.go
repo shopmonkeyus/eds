@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
@@ -70,7 +70,7 @@ func (r *sqlserverProviderRunner) URL() string {
 }
 
 // Validate that the object was committed to storage
-func (r *sqlserverProviderRunner) Validate(object datatypes.ChangeEventPayload) error {
+func (r *sqlserverProviderRunner) Validate(object types.ChangeEventPayload) error {
 	glogger := internal.NewGormLogAdapter(r.logger)
 	db, err := gorm.Open(sqlserver.Open(r.URL()), &gorm.Config{Logger: glogger})
 	if err != nil {

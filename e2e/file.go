@@ -9,8 +9,8 @@ import (
 	"path"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
 
 type fileProviderRunner struct {
@@ -41,7 +41,7 @@ func (r *fileProviderRunner) URL() string {
 }
 
 // Validate that the object was committed to storage
-func (r *fileProviderRunner) Validate(object datatypes.ChangeEventPayload) error {
+func (r *fileProviderRunner) Validate(object types.ChangeEventPayload) error {
 	fn := path.Join(r.dir, object.GetTable()+"_"+object.GetMvccTimestamp()+"_"+object.GetID()+".json.gz")
 	if _, err := os.Stat(fn); os.IsNotExist(err) {
 		return fmt.Errorf("error finding file: %s. %w", fn, err)
