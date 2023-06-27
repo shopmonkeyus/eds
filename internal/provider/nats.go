@@ -71,7 +71,7 @@ func (p *NatsProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *NatsProvider) Process(data types.ChangeEventPayload) error {
+func (p *NatsProvider) Process(data types.ChangeEventPayload, schema map[string]interface{}) error {
 	p.logger.Debug("Republish Message to: dbchange.%s.%s.%s", data.GetTable(), data.GetOperation(), data.GetLocationID())
 	location := "NONE"
 	if data.GetLocationID() != nil {
@@ -95,10 +95,5 @@ func (p *NatsProvider) Process(data types.ChangeEventPayload) error {
 		return err
 	}
 
-	return nil
-}
-
-// ProcessSchema will process schema changes received and return an error or nil if processed ok
-func (p *NatsProvider) ProcessSchema(data map[string]interface{}) error {
 	return nil
 }

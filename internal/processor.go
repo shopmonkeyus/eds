@@ -27,7 +27,7 @@ type MessageProcessor struct {
 	consumerPrefix  string
 	context         context.Context
 	cancel          context.CancelFunc
-	tableLookup     map[string]string
+	tableLookup     map[string]interface{}
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -66,11 +66,17 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		}
 	}
 
-	kv, err := js.CreateKeyValue(&nats.KeyValueConfig{
-		Bucket: "datamodel-version",
-	})
+	// kv, err := js.CreateKeyValue(&nats.KeyValueConfig{
+	// 	Bucket: "datamodel-version",
+	// })
+
+	kv, err := js.KeyValue("datamodel-version")
+
+	if err != nil {
+		return nil, err
+	}
 	// model version cache
-	tableLookup := make(map[string]string)
+	tableLookup := make(map[string]interface{})
 
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
@@ -131,31 +137,33 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	}
 
 	// TODO: lookup schema in nats KV and send s
-	modelVersion := data.GetModelVersion()
-	version, found := p.tableLookup[model]
+	incomingModelVersion := data.GetModelVersion()
 
-	if !found || version != *modelVersion {
+	var schema map[string]interface{}
+
+	currentModelVersion, found := p.tableLookup[model]
+
+	if currentModelVersion != nil {
+		schema = currentModelVersion.(map[string]interface{})
+	}
+
+	if !found || currentModelVersion != *incomingModelVersion {
 		// lookup version in nats kv
-		entry, err := p.kv.Get(fmt.Sprintf("%s.%s", model, *modelVersion))
+		entry, err := p.kv.Get(fmt.Sprintf("%s.%s", model, *incomingModelVersion))
 
 		if err != nil {
 			p.logger.Error("error processing change event schema: %s. %s", data, err)
 			return err
 		}
-		var versionSchema map[string]interface{}
 
-		err = json.Unmarshal(entry.Value(), &versionSchema)
+		err = json.Unmarshal(entry.Value(), &schema)
 		if err != nil {
 			p.logger.Error("error processing change event schema: %s. %s", data, err)
 			return err
-		}
-
-		if err := p.provider.ProcessSchema(versionSchema); err != nil {
-			p.logger.Error("error processing change event schema: %s. %s", data, err)
 		}
 
 	}
-	if err := p.provider.Process(data); err != nil {
+	if err := p.provider.Process(data, schema); err != nil {
 		p.logger.Error("error processing change event: %s. %s", data, err)
 	}
 	if err := msg.AckSync(); err != nil {

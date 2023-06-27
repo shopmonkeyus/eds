@@ -55,7 +55,7 @@ func (p *FileProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *FileProvider) Process(data types.ChangeEventPayload) error {
+func (p *FileProvider) Process(data types.ChangeEventPayload, schema map[string]interface{}) error {
 	fn := path.Join(p.dir, data.GetTable()+"_"+data.GetMvccTimestamp()+"_"+data.GetID()+".json.gz")
 	if p.opts != nil && p.opts.DryRun {
 		p.logger.Info("[dry-run] would write: %s", fn)
@@ -79,10 +79,5 @@ func (p *FileProvider) Process(data types.ChangeEventPayload) error {
 
 	w.Flush()
 	p.logger.Trace("processed: %s", fn)
-	return nil
-}
-
-// ProcessSchema will process schema changes received and return an error or nil if processed ok
-func (p *FileProvider) ProcessSchema(data map[string]interface{}) error {
 	return nil
 }
