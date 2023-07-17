@@ -1,12 +1,13 @@
 package types
 
 type Field struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Enum     bool   `json:"enum"`
-	Optional bool   `json:"optional"`
-	Scalar   bool   `json:"scalar"`
-	List     bool   `json:"list"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	PrimaryKey string `json:"primary_key"`
+	Enum       bool   `json:"enum"`
+	Optional   bool   `json:"optional"`
+	Scalar     bool   `json:"scalar"`
+	List       bool   `json:"list"`
 }
 
 type Constraint struct {
