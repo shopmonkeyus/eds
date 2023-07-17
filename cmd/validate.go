@@ -44,7 +44,7 @@ func processFile(logger logger.Logger, cmd *cobra.Command, name string, url stri
 	if url != "" {
 		dryRun := mustFlagBool(cmd, "dry-run", false)
 		runProvider(logger, url, dryRun, func(provider internal.Provider) error {
-			return provider.Process(data, nil)
+			return provider.Process(data)
 		})
 	}
 }

@@ -65,6 +65,7 @@ type ChangeEvent struct {
 	Before        json.RawMessage      `json:"before,omitempty"`
 	After         json.RawMessage      `json:"after,omitempty"`
 	Diff          []string             `json:"diff,omitempty"`
+	TableSchema   Table
 }
 
 var _ ChangeEventPayload = (*ChangeEvent)(nil)

@@ -27,7 +27,7 @@ type MessageProcessor struct {
 	consumerPrefix  string
 	context         context.Context
 	cancel          context.CancelFunc
-	tableLookup     map[string]interface{}
+	tableLookup     map[string]types.Table
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -76,7 +76,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		return nil, err
 	}
 	// model version cache
-	tableLookup := make(map[string]interface{})
+	tableLookup := make(map[string]types.Table)
 
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
@@ -136,34 +136,32 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		os.WriteFile(fn, msg.Data, 0644)
 	}
 
-	// TODO: lookup schema in nats KV and send s
-	incomingModelVersion := data.GetModelVersion()
+	var schema types.Table
+	modelVersion := *data.GetModelVersion()
+	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
+	currentModelVersion, found := p.tableLookup[modelVersionId]
 
-	var schema map[string]interface{}
-
-	currentModelVersion, found := p.tableLookup[model]
-
-	if currentModelVersion != nil {
-		schema = currentModelVersion.(map[string]interface{})
-	}
-
-	if !found || currentModelVersion != *incomingModelVersion {
+	if found {
+		schema = currentModelVersion
+	} else {
 		// lookup version in nats kv
-		entry, err := p.kv.Get(fmt.Sprintf("%s.%s", model, *incomingModelVersion))
+		emptyJsonObject, _ := json.Marshal(map[string]string{})
+		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJsonObject, time.Duration(time.Second*10))
 
 		if err != nil {
-			p.logger.Error("error processing change event schema: %s. %s", data, err)
+			p.logger.Error("error fetching change event schema: %s. %s", data, err)
 			return err
 		}
 
-		err = json.Unmarshal(entry.Value(), &schema)
+		err = json.Unmarshal(entry.Data, &schema)
 		if err != nil {
-			p.logger.Error("error processing change event schema: %s. %s", data, err)
+			p.logger.Error("error unmarshalling change event schema: %s. %s", data, err)
 			return err
 		}
-
 	}
-	if err := p.provider.Process(data, schema); err != nil {
+	data.TableSchema = schema
+
+	if err := p.provider.Process(data); err != nil {
 		p.logger.Error("error processing change event: %s. %s", data, err)
 	}
 	if err := msg.AckSync(); err != nil {
