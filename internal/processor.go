@@ -138,7 +138,6 @@ func (p *MessageProcessor) Start() error {
 	}
 	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".>", p.callback,
 		snats.WithExactlyOnceContext(p.context),
-		snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
 	)
 	if err != nil {
 		return err
