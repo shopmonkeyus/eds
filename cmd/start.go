@@ -124,7 +124,7 @@ var startCmd = &cobra.Command{
 			if err != nil {
 				panic(err)
 			}
-			
+
 			ns, err := server.NewServer(&serverConfig)
 
 			if err != nil {
@@ -163,7 +163,7 @@ func init() {
 	startCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
 	startCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
 	startCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
-	startCmd.Flags().StringSlice("server", []string{"nats://nats.shopmonkey.cloud"}, "the nats server url")
+	startCmd.Flags().StringSlice("server", []string{"nats://connect.nats.shopmonkey.pub"}, "the nats server url")
 	startCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	startCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
 	startCmd.Flags().Bool("embed-nats", false, "Run a local nats instance as a sink")
