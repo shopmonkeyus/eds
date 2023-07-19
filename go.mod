@@ -6,8 +6,8 @@ require (
 	github.com/nats-io/nats-server/v2 v2.9.17
 	github.com/shopmonkeyus/go-common v0.0.43
 	github.com/shopmonkeyus/go-datamodel v0.0.9
-	gorm.io/driver/sqlserver v1.4.2
-	gorm.io/gorm v1.24.5
+	gorm.io/driver/sqlserver v1.5.1
+	gorm.io/gorm v1.25.1
 )
 
 require (
@@ -15,7 +15,7 @@ require (
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/jackc/pgx/v5 v5.3.1 // indirect
 	github.com/klauspost/compress v1.16.5 // indirect
-	github.com/microsoft/go-mssqldb v0.20.0 // indirect
+	github.com/microsoft/go-mssqldb v1.1.0 // indirect
 	github.com/minio/highwayhash v1.0.2 // indirect
 	golang.org/x/sys v0.8.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
