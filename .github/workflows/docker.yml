@@ -19,7 +19,7 @@ jobs:
         run: echo "date=$(date +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
       - name: Get branch name
         id: branch-name
-        uses: tj-actions/branch-names@v6
+        uses: tj-actions/branch-names@v7
       - name: Get the build SHA
         id: sha
         env:
