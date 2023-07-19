@@ -59,6 +59,29 @@ func runProvider(logger logger.Logger, url string, dryRun bool, fn ProviderFunc)
 	}
 }
 
+func runFileSystemProvider(logger logger.Logger, url string, fn ProviderFunc) {
+	opts := &provider.ProviderOpts{}
+	provider, err := provider.NewFileProvider(logger, url, opts)
+	if err != nil {
+		logger.Error("error creating provider: %s", err)
+		os.Exit(1)
+	}
+	if err := provider.Start(); err != nil {
+		logger.Error("error starting provider: %s", err)
+		os.Exit(1)
+	}
+	ferr := fn(provider)
+	if ferr != nil {
+		provider.Stop()
+		logger.Error("error: %s", ferr)
+		os.Exit(1)
+	}
+	if err := provider.Stop(); err != nil {
+		logger.Error("error stopping provider: %s", err)
+		os.Exit(1)
+	}
+}
+
 func newLogger(cmd *cobra.Command) logger.Logger {
 	return logger.NewConsoleLogger()
 }

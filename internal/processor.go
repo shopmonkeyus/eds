@@ -21,7 +21,6 @@ type MessageProcessor struct {
 	provider        Provider
 	conn            *nats.Conn
 	js              nats.JetStreamContext
-	kv              nats.KeyValue
 	subscriber      snats.Subscriber
 	dumpMessagesDir string
 	consumerPrefix  string
@@ -66,12 +65,6 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		}
 	}
 
-	// kv, err := js.CreateKeyValue(&nats.KeyValueConfig{
-	// 	Bucket: "datamodel-version",
-	// })
-
-	kv, err := js.KeyValue("datamodel-version")
-
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +80,6 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		dumpMessagesDir: opts.DumpMessagesDir,
 		consumerPrefix:  opts.ConsumerPrefix,
 		js:              js,
-		kv:              kv,
 		context:         context,
 		cancel:          cancel,
 		tableLookup:     tableLookup,
@@ -137,14 +129,34 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	}
 
 	var schema types.Table
-	modelVersion := *data.GetModelVersion()
+
+	var meta = types.ObjectMeta{}
+	// p.logger.Trace("HERHEHRE Before: %v, After: %v", data.Before, data.After)
+
+	if data.After != nil {
+		err = json.Unmarshal(*data.After, &meta)
+	} else if data.Before != nil {
+		p.logger.Trace("HERHEHRE BEFORE")
+
+		err = json.Unmarshal(*data.Before, &meta)
+	}
+	p.logger.Trace("HERHEHRE with error %s", err.Error())
+
+	modelVersion := meta.Meta["modelVersion"]
+	// modelVersion := data.GetModelVersion()
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
+	p.logger.Trace("HERHEHRE")
+
 	currentModelVersion, found := p.tableLookup[modelVersionId]
 
 	if found {
 		schema = currentModelVersion
+		p.logger.Trace("found cached modelVersion for: %s for msgid: %s", modelVersionId, msgid)
+
 	} else {
 		// lookup version in nats kv
+		p.logger.Trace("looking up modelVersion for: %s for msgid: %s", modelVersionId, msgid)
+
 		emptyJsonObject, _ := json.Marshal(map[string]string{})
 		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJsonObject, time.Duration(time.Second*10))
 
@@ -152,13 +164,16 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			p.logger.Error("error fetching change event schema: %s. %s", data, err)
 			return err
 		}
-
-		err = json.Unmarshal(entry.Data, &schema)
+		foundSchema := types.Table{}
+		err = json.Unmarshal(entry.Data, &foundSchema)
+		p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema, msgid)
+		schema = foundSchema
 		if err != nil {
 			p.logger.Error("error unmarshalling change event schema: %s. %s", data, err)
 			return err
 		}
 	}
+
 	data.TableSchema = schema
 
 	if err := p.provider.Process(data); err != nil {
@@ -178,7 +193,10 @@ func (p *MessageProcessor) Start() error {
 	if companyId == "" {
 		companyId = "*"
 	}
-	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".>", p.callback, snats.WithExactlyOnceContext(p.context))
+	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".>", p.callback,
+		snats.WithExactlyOnceContext(p.context),
+		snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
+	)
 	if err != nil {
 		return err
 	}

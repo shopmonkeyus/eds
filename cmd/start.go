@@ -29,7 +29,7 @@ var startCmd = &cobra.Command{
 		hosts, _ := cmd.Flags().GetStringSlice("server")
 		creds, _ := cmd.Flags().GetString("creds")
 
-		if len(hosts) > 0 && creds == "" && strings.Contains(hosts[0], "nats.shopmonkey.cloud") {
+		if len(hosts) > 0 && creds == "" && strings.Contains(hosts[0], "connect.nats.shopmonkey.pub") {
 			logger.Error("error: missing required credentials file. use --creds and specify the location of your credentials file")
 			os.Exit(1)
 		}
@@ -77,6 +77,7 @@ var startCmd = &cobra.Command{
 		url := mustFlagString(cmd, "url", false)
 		dryRun := mustFlagBool(cmd, "dry-run", false)
 		embedNats := mustFlagBool(cmd, "embed-nats", false)
+		fileTarget := mustFlagBool(cmd, "to-file", false)
 
 		if url == "" && !embedNats {
 			fmt.Printf("error: EDS Server requires either --url or --embed-nats missing\n")
@@ -146,11 +147,18 @@ var startCmd = &cobra.Command{
 				runProvider(logger, ns.ClientURL(), dryRun, runProviderCallback)
 			}()
 		}
-		if url != "" {
+		if url != "" && !fileTarget {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				runProvider(logger, url, dryRun, runProviderCallback)
+			}()
+		}
+		if url != "" && fileTarget {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				runFileSystemProvider(logger, url, runProviderCallback)
 			}()
 		}
 		wg.Wait()
@@ -164,8 +172,10 @@ func init() {
 	startCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
 	startCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
 	startCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
-	startCmd.Flags().StringSlice("server", []string{"nats://nats.shopmonkey.cloud"}, "the nats server url")
+	startCmd.Flags().StringSlice("server", []string{"nats://connect.nats.shopmonkey.pub"}, "the nats server url")
 	startCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	startCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
 	startCmd.Flags().Bool("embed-nats", false, "Run a local nats instance as a sink")
+	startCmd.Flags().Bool("to-file", false, "Run with output to the local filesystem")
+
 }

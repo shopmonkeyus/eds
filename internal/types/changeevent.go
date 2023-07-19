@@ -15,6 +15,10 @@ const (
 	ChangeEventDelete ChangeEventOperation = "DELETE"
 )
 
+type ObjectMeta struct {
+	Meta map[string]string `json:"meta"`
+}
+
 type ChangeEventPayload interface {
 	// GetID returns the event payload id
 	GetID() string
@@ -35,15 +39,15 @@ type ChangeEventPayload interface {
 	// GetVersion returns a monotonically increasing version number for the change version to this record
 	GetVersion() int64
 	// GetModelVersion returns the model schema version hash, used for detecting schema changes
-	GetModelVersion() *string
+	GetModelVersion() string
 	// GetRegion returns the region where the change was processed
 	GetRegion() string
 	// GetOperation returns the ChangeEventOperation
 	GetOperation() ChangeEventOperation
 	// GetBefore returns the record as a json.RawMessage before this change or nil if not provided
-	GetBefore() json.RawMessage
+	GetBefore() *json.RawMessage
 	// GetAfter returns the record as a json.RawMessage after this change or nil if not provided
-	GetAfter() json.RawMessage
+	GetAfter() *json.RawMessage
 	// GetDiff returns an array of string keys of the properties that changed
 	GetDiff() []string
 }
@@ -59,11 +63,11 @@ type ChangeEvent struct {
 	UserID        *string              `json:"userId,omitempty"`
 	SessionID     *string              `json:"sessionId,omitempty"`
 	Version       int64                `json:"version"`
-	ModelVersion  *string              `json:"modelVersion,omitempty"`
+	ModelVersion  string               `json:"modelVersion,omitempty"`
 	Region        string               `json:"region"`
 	Operation     ChangeEventOperation `json:"operation"`
-	Before        json.RawMessage      `json:"before,omitempty"`
-	After         json.RawMessage      `json:"after,omitempty"`
+	Before        *json.RawMessage     `json:"before,omitempty"`
+	After         *json.RawMessage     `json:"after,omitempty"`
 	Diff          []string             `json:"diff,omitempty"`
 	TableSchema   Table
 }
@@ -115,8 +119,18 @@ func (c ChangeEvent) GetVersion() int64 {
 	return c.Version
 }
 
-func (c ChangeEvent) GetModelVersion() *string {
-	return c.ModelVersion
+func (c ChangeEvent) GetModelVersion() string {
+	if c.After != nil {
+		var after ObjectMeta
+		json.Unmarshal(*c.After, &after)
+		return after.Meta["modelVersion"]
+	}
+	if c.Before != nil {
+		var before ObjectMeta
+		json.Unmarshal(*c.Before, &before)
+		return before.Meta["modelVersion"]
+	}
+	return ""
 }
 
 func (c ChangeEvent) GetRegion() string {
@@ -127,11 +141,11 @@ func (c ChangeEvent) GetOperation() ChangeEventOperation {
 	return c.Operation
 }
 
-func (c ChangeEvent) GetBefore() json.RawMessage {
+func (c ChangeEvent) GetBefore() *json.RawMessage {
 	return c.Before
 }
 
-func (c ChangeEvent) GetAfter() json.RawMessage {
+func (c ChangeEvent) GetAfter() *json.RawMessage {
 	return c.After
 }
 
