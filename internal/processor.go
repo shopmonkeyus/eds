@@ -21,7 +21,7 @@ type MessageProcessor struct {
 	provider        Provider
 	conn            *nats.Conn
 	js              nats.JetStreamContext
-	subscriber      *snats.ExactlyOnceSubscriber
+	subscriber      snats.Subscriber
 	dumpMessagesDir string
 	consumerPrefix  string
 	context         context.Context
@@ -132,23 +132,14 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 func (p *MessageProcessor) Start() error {
 	p.logger.Trace("message processor starting")
 	name := fmt.Sprintf("%seds-server-%s", p.consumerPrefix, p.companyID)
-	description := fmt.Sprintf("EDS server consumer for %s", p.companyID)
 	companyId := p.companyID
 	if companyId == "" {
 		companyId = "*"
 	}
-	c, err := snats.NewExactlyOnceConsumerWithConfig(snats.ExactlyOnceConsumerConfig{
-		Context:             p.context,
-		Logger:              p.logger,
-		JetStream:           p.js,
-		StreamName:          "dbchange",
-		DurableName:         name,
-		ConsumerDescription: description,
-		FilterSubject:       "dbchange.*.*." + companyId + ".>",
-		Handler:             p.callback,
-		DeliverPolicy:       nats.DeliverAllPolicy,
-		Deliver:             nats.DeliverAll(),
-	})
+	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".>", p.callback,
+		snats.WithExactlyOnceContext(p.context),
+		snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
+	)
 	if err != nil {
 		return err
 	}
