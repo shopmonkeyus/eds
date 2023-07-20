@@ -71,7 +71,7 @@ func (p *NatsProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *NatsProvider) Process(data types.ChangeEventPayload) error {
+func (p *NatsProvider) Process(data types.ChangeEventPayload, schema types.Table) error {
 	p.logger.Debug("Republish Message to: dbchange.%s.%s.%s", data.GetTable(), data.GetOperation(), data.GetLocationID())
 	location := "NONE"
 	if data.GetLocationID() != nil {

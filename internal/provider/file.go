@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -55,8 +54,8 @@ func (p *FileProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *FileProvider) Process(data types.ChangeEventPayload) error {
-	fn := path.Join(p.dir, data.GetTable()+"_"+data.GetMvccTimestamp()+"_"+data.GetID()+".json.gz")
+func (p *FileProvider) Process(data types.ChangeEventPayload, schema types.Table) error {
+	fn := path.Join(p.dir, data.GetTable()+"_"+data.GetMvccTimestamp()+"_"+data.GetID()+".json")
 	if p.opts != nil && p.opts.DryRun {
 		p.logger.Info("[dry-run] would write: %s", fn)
 		return nil
@@ -66,18 +65,23 @@ func (p *FileProvider) Process(data types.ChangeEventPayload) error {
 		return fmt.Errorf("error creating file: %s. %s", fn, err)
 	}
 	defer f.Close()
-	w := gzip.NewWriter(f)
+	// w := gzip.NewWriter(f)
 	buf, err := json.MarshalIndent(data, "", " ")
+	schemaBuf, err := json.MarshalIndent(schema, "", " ")
+
 	if err != nil {
 		return fmt.Errorf("error converting to json: %s", err)
 	}
 
-	_, err = w.Write(buf)
+	_, err = f.Write(buf)
+	p.logger.Info("writing buf to file %s", string(buf))
+	p.logger.Info("writing schema to file %s", string(schemaBuf))
+
 	if err != nil {
 		return fmt.Errorf("error writing to file: %s", err)
 	}
 
-	w.Flush()
+	// w.Flush()
 	p.logger.Trace("processed: %s", fn)
 	return nil
 }

@@ -16,7 +16,14 @@ const (
 )
 
 type ObjectMeta struct {
-	Meta map[string]string `json:"meta"`
+	Meta MetaField `json:"meta"`
+}
+
+type MetaField struct {
+	ModelVersion string `json:"modelVersion"`
+	SessionId    string `json:"sessionId,omitempty"`
+	UserId       string `json:"userId,omitempty"`
+	Version      int    `json:"version"`
 }
 
 type ChangeEventPayload interface {
@@ -69,7 +76,6 @@ type ChangeEvent struct {
 	Before        *json.RawMessage     `json:"before,omitempty"`
 	After         *json.RawMessage     `json:"after,omitempty"`
 	Diff          []string             `json:"diff,omitempty"`
-	TableSchema   Table
 }
 
 var _ ChangeEventPayload = (*ChangeEvent)(nil)
@@ -123,12 +129,12 @@ func (c ChangeEvent) GetModelVersion() string {
 	if c.After != nil {
 		var after ObjectMeta
 		json.Unmarshal(*c.After, &after)
-		return after.Meta["modelVersion"]
+		return after.Meta.ModelVersion
 	}
 	if c.Before != nil {
 		var before ObjectMeta
 		json.Unmarshal(*c.Before, &before)
-		return before.Meta["modelVersion"]
+		return before.Meta.ModelVersion
 	}
 	return ""
 }

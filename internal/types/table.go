@@ -3,7 +3,7 @@ package types
 type Field struct {
 	Name       string `json:"name"`
 	Type       string `json:"type"`
-	PrimaryKey string `json:"primary_key"`
+	PrimaryKey bool   `json:"primary_key"`
 	Enum       bool   `json:"enum"`
 	Optional   bool   `json:"optional"`
 	Scalar     bool   `json:"scalar"`
@@ -35,9 +35,14 @@ type Related struct {
 type Table struct {
 	Name         string       `json:"name"`
 	Table        string       `json:"table"`
-	Fields       []string     `json:"fields"`
+	Fields       []Field      `json:"fields"`
 	Related      []Related    `json:"related,omitempty"`
 	Relations    []Relation   `json:"relations,omitempty"`
 	Constraints  []Constraint `json:"constraints,omitempty"`
 	ModelVersion string       `json:"modelVersion"`
+}
+
+type SchemaResponse struct {
+	Success bool  `json:"success"`
+	Data    Table `json:"data"`
 }

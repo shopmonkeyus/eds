@@ -134,15 +134,23 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	// p.logger.Trace("HERHEHRE Before: %v, After: %v", data.Before, data.After)
 
 	if data.After != nil {
+		p.logger.Trace("HERHEHRE After")
+
 		err = json.Unmarshal(*data.After, &meta)
+		if err != nil {
+			p.logger.Trace("HERHEHRE with error %s", err.Error())
+
+		}
 	} else if data.Before != nil {
 		p.logger.Trace("HERHEHRE BEFORE")
-
 		err = json.Unmarshal(*data.Before, &meta)
-	}
-	p.logger.Trace("HERHEHRE with error %s", err.Error())
+		if err != nil {
+			p.logger.Trace("HERHEHRE with error %s", err.Error())
 
-	modelVersion := meta.Meta["modelVersion"]
+		}
+	}
+
+	modelVersion := meta.Meta.ModelVersion
 	// modelVersion := data.GetModelVersion()
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
 	p.logger.Trace("HERHEHRE")
@@ -164,19 +172,21 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			p.logger.Error("error fetching change event schema: %s. %s", data, err)
 			return err
 		}
-		foundSchema := types.Table{}
+		foundSchema := types.SchemaResponse{}
 		err = json.Unmarshal(entry.Data, &foundSchema)
-		p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema, msgid)
-		schema = foundSchema
 		if err != nil {
-			p.logger.Error("error unmarshalling change event schema: %s. %s", data, err)
+			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
+			return err
+		}
+		p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+		schema = foundSchema.Data
+		if err != nil {
+			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
 			return err
 		}
 	}
 
-	data.TableSchema = schema
-
-	if err := p.provider.Process(data); err != nil {
+	if err := p.provider.Process(data, schema); err != nil {
 		p.logger.Error("error processing change event: %s. %s", data, err)
 	}
 	if err := msg.AckSync(); err != nil {
