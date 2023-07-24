@@ -59,9 +59,10 @@ func runProvider(logger logger.Logger, url string, dryRun bool, fn ProviderFunc)
 	}
 }
 
-func runFileSystemProvider(logger logger.Logger, url string, fn ProviderFunc) {
+func runFileSystemProvider(logger logger.Logger, cmd []string, fn ProviderFunc) {
 	opts := &provider.ProviderOpts{}
-	provider, err := provider.NewFileProvider(logger, url, opts)
+	logger.Info("starting fileprovider")
+	provider, err := provider.NewFileProvider(logger, cmd, opts)
 	if err != nil {
 		logger.Error("error creating provider: %s", err)
 		os.Exit(1)
@@ -70,6 +71,7 @@ func runFileSystemProvider(logger logger.Logger, url string, fn ProviderFunc) {
 		logger.Error("error starting provider: %s", err)
 		os.Exit(1)
 	}
+	logger.Info("calling fileprovider")
 	ferr := fn(provider)
 	if ferr != nil {
 		provider.Stop()

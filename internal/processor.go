@@ -97,14 +97,6 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	gzipped := encoding == "gzip/json"
 	p.logger.Trace("received msgid: %s, subject: %s", msgid, msg.Subject)
 
-	/* TODO:
-	- unpack data as json (moving away from go-datamodel)
-	- lookup object version in object version kv
-	- compare against current version and determine schema change needs
-		- generate schema change object
-	- send data item and schema change needs to provider
-	*/
-
 	// unpack as json based change  event
 	data, err := types.FromChangeEvent(msg.Data, gzipped)
 	if err != nil {
@@ -130,30 +122,8 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 
 	var schema types.Table
 
-	var meta = types.ObjectMeta{}
-	// p.logger.Trace("HERHEHRE Before: %v, After: %v", data.Before, data.After)
-
-	if data.After != nil {
-		p.logger.Trace("HERHEHRE After")
-
-		err = json.Unmarshal(*data.After, &meta)
-		if err != nil {
-			p.logger.Trace("HERHEHRE with error %s", err.Error())
-
-		}
-	} else if data.Before != nil {
-		p.logger.Trace("HERHEHRE BEFORE")
-		err = json.Unmarshal(*data.Before, &meta)
-		if err != nil {
-			p.logger.Trace("HERHEHRE with error %s", err.Error())
-
-		}
-	}
-
-	modelVersion := meta.Meta.ModelVersion
-	// modelVersion := data.GetModelVersion()
+	modelVersion := data.ModelVersion
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
-	p.logger.Trace("HERHEHRE")
 
 	currentModelVersion, found := p.tableLookup[modelVersionId]
 

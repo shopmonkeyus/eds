@@ -1,18 +1,14 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	jwt "github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	snats "github.com/shopmonkeyus/go-common/nats"
@@ -24,6 +20,7 @@ var startCmd = &cobra.Command{
 	Short: "Start the server",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := newLogger(cmd)
+		logger.Info("the args %v", args)
 		logger.Trace("connecting to nats server")
 
 		hosts, _ := cmd.Flags().GetStringSlice("server")
@@ -74,15 +71,7 @@ var startCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		defer nc.Close()
-		url := mustFlagString(cmd, "url", false)
-		dryRun := mustFlagBool(cmd, "dry-run", false)
-		embedNats := mustFlagBool(cmd, "embed-nats", false)
-		fileTarget := mustFlagBool(cmd, "to-file", false)
 
-		if url == "" && !embedNats {
-			fmt.Printf("error: EDS Server requires either --url or --embed-nats missing\n")
-			os.Exit(1)
-		}
 		var runProviderCallback func(internal.Provider) error = func(provider internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
@@ -114,51 +103,11 @@ var startCmd = &cobra.Command{
 
 		var wg sync.WaitGroup
 
-		// TODO: add in leaf-node configuration for this option eventually
-		if embedNats {
-			serverConfigJSON, err := ioutil.ReadFile("server.conf")
-			if err != nil {
-				panic(err)
-			}
-			serverConfig := server.Options{}
-
-			err = json.Unmarshal([]byte(serverConfigJSON), &serverConfig)
-			if err != nil {
-				panic(err)
-			}
-
-			ns, err := server.NewServer(&serverConfig)
-
-			if err != nil {
-				panic(err)
-			}
-
-			go ns.Start()
-
-			for !ns.ReadyForConnections(4 * time.Second) {
-				logger.Info("Waiting for nats server to start...")
-			}
-
-			logger.Info("Nats server started at url: %s", ns.ClientURL())
-
+		if len(args) > 0 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				runProvider(logger, ns.ClientURL(), dryRun, runProviderCallback)
-			}()
-		}
-		if url != "" && !fileTarget {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				runProvider(logger, url, dryRun, runProviderCallback)
-			}()
-		}
-		if url != "" && fileTarget {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				runFileSystemProvider(logger, url, runProviderCallback)
+				runFileSystemProvider(logger, args, runProviderCallback)
 			}()
 		}
 		wg.Wait()

@@ -27,8 +27,8 @@ func NewProviderForURL(logger logger.Logger, url string, opts *ProviderOpts) (in
 		return nil, err
 	}
 	switch driver {
-	case "file":
-		return NewFileProvider(logger, url, opts)
+	// case "file":
+	// 	return NewFileProvider(logger, url, opts)
 	case "nats":
 		return NewNatsProvider(logger, url, opts)
 	default:
