@@ -34,9 +34,10 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 
 type ProviderFunc func(p internal.Provider) error
 
-func runProvider(logger logger.Logger, url string, dryRun bool, fn ProviderFunc) {
+func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, fn ProviderFunc) {
 	opts := &provider.ProviderOpts{
-		DryRun: dryRun,
+		DryRun:  dryRun,
+		Verbose: verbose,
 	}
 	provider, err := provider.NewProviderForURL(logger, url, opts)
 	if err != nil {
@@ -47,31 +48,6 @@ func runProvider(logger logger.Logger, url string, dryRun bool, fn ProviderFunc)
 		logger.Error("error starting provider: %s", err)
 		os.Exit(1)
 	}
-	ferr := fn(provider)
-	if ferr != nil {
-		provider.Stop()
-		logger.Error("error: %s", ferr)
-		os.Exit(1)
-	}
-	if err := provider.Stop(); err != nil {
-		logger.Error("error stopping provider: %s", err)
-		os.Exit(1)
-	}
-}
-
-func runFileSystemProvider(logger logger.Logger, cmd []string, fn ProviderFunc) {
-	opts := &provider.ProviderOpts{}
-	logger.Info("starting fileprovider")
-	provider, err := provider.NewFileProvider(logger, cmd, opts)
-	if err != nil {
-		logger.Error("error creating provider: %s", err)
-		os.Exit(1)
-	}
-	if err := provider.Start(); err != nil {
-		logger.Error("error starting provider: %s", err)
-		os.Exit(1)
-	}
-	logger.Info("calling fileprovider")
 	ferr := fn(provider)
 	if ferr != nil {
 		provider.Stop()

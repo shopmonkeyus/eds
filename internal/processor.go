@@ -15,18 +15,22 @@ import (
 	snats "github.com/shopmonkeyus/go-common/nats"
 )
 
+var emptyJSON = []byte("{}")
+
+const modelRequestTimeout = time.Duration(time.Second * 30)
+
 type MessageProcessor struct {
-	logger          logger.Logger
-	companyID       string
-	provider        Provider
-	conn            *nats.Conn
-	js              nats.JetStreamContext
-	subscriber      snats.Subscriber
-	dumpMessagesDir string
-	consumerPrefix  string
-	context         context.Context
-	cancel          context.CancelFunc
-	tableLookup     map[string]types.Table
+	logger            logger.Logger
+	companyID         string
+	provider          Provider
+	conn              *nats.Conn
+	js                nats.JetStreamContext
+	subscriber        snats.Subscriber
+	dumpMessagesDir   string
+	consumerPrefix    string
+	context           context.Context
+	cancel            context.CancelFunc
+	modelVersionCache map[string]types.Table
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -65,24 +69,18 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		}
 	}
 
-	if err != nil {
-		return nil, err
-	}
-	// model version cache
-	tableLookup := make(map[string]types.Table)
-
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
-		logger:          opts.Logger,
-		companyID:       opts.CompanyID,
-		provider:        opts.Provider,
-		conn:            opts.NatsConnection,
-		dumpMessagesDir: opts.DumpMessagesDir,
-		consumerPrefix:  opts.ConsumerPrefix,
-		js:              js,
-		context:         context,
-		cancel:          cancel,
-		tableLookup:     tableLookup,
+		logger:            opts.Logger.WithPrefix("[nats]"),
+		companyID:         opts.CompanyID,
+		provider:          opts.Provider,
+		conn:              opts.NatsConnection,
+		dumpMessagesDir:   opts.DumpMessagesDir,
+		consumerPrefix:    opts.ConsumerPrefix,
+		js:                js,
+		context:           context,
+		cancel:            cancel,
+		modelVersionCache: make(map[string]types.Table),
 	}
 	return processor, nil
 }
@@ -125,7 +123,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	modelVersion := data.ModelVersion
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
 
-	currentModelVersion, found := p.tableLookup[modelVersionId]
+	currentModelVersion, found := p.modelVersionCache[modelVersionId]
 
 	if found {
 		schema = currentModelVersion
@@ -135,14 +133,13 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		// lookup version in nats kv
 		p.logger.Trace("looking up modelVersion for: %s for msgid: %s", modelVersionId, msgid)
 
-		emptyJsonObject, _ := json.Marshal(map[string]string{})
-		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJsonObject, time.Duration(time.Second*10))
+		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJSON, modelRequestTimeout)
 
 		if err != nil {
 			p.logger.Error("error fetching change event schema: %s. %s", data, err)
 			return err
 		}
-		foundSchema := types.SchemaResponse{}
+		var foundSchema types.SchemaResponse
 		err = json.Unmarshal(entry.Data, &foundSchema)
 		if err != nil {
 			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
@@ -150,17 +147,15 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		}
 		p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		schema = foundSchema.Data
-		if err != nil {
-			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
-			return err
-		}
+		p.modelVersionCache[modelVersionId] = schema
 	}
-
 	if err := p.provider.Process(data, schema); err != nil {
 		p.logger.Error("error processing change event: %s. %s", data, err)
+		return err
 	}
 	if err := msg.AckSync(); err != nil {
 		p.logger.Error("error calling ack for message: %s. %s", data, err)
+		return err
 	}
 	return nil
 }
@@ -173,7 +168,7 @@ func (p *MessageProcessor) Start() error {
 	if companyId == "" {
 		companyId = "*"
 	}
-	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".>", p.callback,
+	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".*.PUBLIC.>", p.callback,
 		snats.WithExactlyOnceContext(p.context),
 		snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
 	)
@@ -190,7 +185,9 @@ func (p *MessageProcessor) Stop() error {
 	p.logger.Trace("message processor stopping")
 	p.cancel()
 	if p.subscriber != nil {
-		p.subscriber.Close()
+		if err := p.subscriber.Close(); err != nil {
+			return err
+		}
 	}
 	p.logger.Trace("message processor stopped")
 	return nil

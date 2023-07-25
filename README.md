@@ -16,18 +16,12 @@ You will need [Golang](https://go.dev/dl/) version 1.19 or later to use this pac
 
 ## Basic Usage
 
-You first need to migrate your database to load the schema into a database. The database must exist before running this command:
+> TODO: rewrite this
+
+You can start the server:
 
 ```bash
-go run . migrate --url 'postgresql://root@localhost:26257/test?sslmode=disable'
-```
-
-Replace the `--url` flag with your provider connection setting
-
-Once you have a database, you can start the server:
-
-```bash
-go run . start --url 'postgresql://root@localhost:26257/test?sslmode=disable'
+go run . server --url 'postgresql://root@localhost:26257/test?sslmode=disable'
 ```
 
 You will also need to provide a server credentials file provided by Shopmonkey and your company id. These should be passed in as command line arguments as well:

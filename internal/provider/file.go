@@ -1,102 +1,91 @@
 package provider
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"sync"
+	"syscall"
 
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
+var EOL = []byte("\n")
+
 type FileProvider struct {
 	logger logger.Logger
-	cmd    []string
+	cmd    *exec.Cmd
 	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	opts   *ProviderOpts
+	once   sync.Once
 }
 
 var _ internal.Provider = (*FileProvider)(nil)
 
-func ReadOutput(output chan string, rc io.ReadCloser) {
-	r := bufio.NewReader(rc)
-	for {
-		x, _ := r.ReadString('\n')
-		output <- string(x)
-	}
-}
-
 // NewFileProvider returns a provider that will stream files to a folder provided in the url
-func NewFileProvider(logger logger.Logger, cmd []string, opts *ProviderOpts) (internal.Provider, error) {
+func NewFileProvider(plogger logger.Logger, cmd []string, opts *ProviderOpts) (internal.Provider, error) {
+	logger := plogger.WithPrefix("[file]")
 	logger.Info("file provider will execute program: %s", cmd[0])
-	theCmd := exec.Command(cmd[0], cmd[1:]...)
-	stdout, err := theCmd.StdoutPipe()
-	if err != nil {
-		logger.Error("error occured %v", err)
+	if _, err := os.Stat(cmd[0]); os.IsNotExist(err) {
+		return nil, fmt.Errorf("couldn't find: %s", cmd[0])
 	}
-
+	theCmd := exec.Command(cmd[0], cmd[1:]...)
+	if opts.Verbose {
+		theCmd.Stdout = os.Stdout
+	} else {
+		theCmd.Stdout = io.Discard
+	}
+	theCmd.Stderr = os.Stderr
 	stdin, err := theCmd.StdinPipe()
 	if err != nil {
-		logger.Error("error occured %v", err)
+		return nil, fmt.Errorf("stdin: %w", err)
 	}
-	err = theCmd.Start()
-	if err != nil {
-		logger.Error("error occured %v", err)
-	}
-
-	output := make(chan string)
-	go func(out chan string) {
-		for o := range out {
-			logger.Info("got some output: %s", o)
-		}
-	}(output)
-
-	go ReadOutput(output, stdout)
-
 	return &FileProvider{
-		logger,
-		cmd,
-		stdin,
-		stdout,
-		opts,
+		logger: logger,
+		cmd:    theCmd,
+		stdin:  stdin,
 	}, nil
 }
 
 // Start the provider and return an error or nil if ok
 func (p *FileProvider) Start() error {
+	p.logger.Info("start")
+	if err := p.cmd.Start(); err != nil {
+		return err
+	}
 	return nil
 }
 
 // Stop the provider and return an error or nil if ok
 func (p *FileProvider) Stop() error {
+	p.logger.Info("stop")
+	p.once.Do(func() {
+		p.logger.Debug("sending kill signal to pid: %d", p.cmd.Process.Pid)
+		if p.cmd.Process != nil {
+			syscall.Kill(-p.cmd.Process.Pid, syscall.SIGINT)
+			p.stdin.Close()
+		}
+		p.logger.Debug("stopped")
+	})
 	return nil
 }
 
 // Process data received and return an error or nil if processed ok
 func (p *FileProvider) Process(data types.ChangeEventPayload, schema types.Table) error {
-	p.logger.Info("[file] starting processing")
 	transport := types.Transport{
 		DBChange: data,
 		Schema:   schema,
 	}
 	buf, err := json.Marshal(transport)
-
 	if err != nil {
 		return fmt.Errorf("error converting to json: %s", err)
 	}
-	_, err = io.WriteString(p.stdin, fmt.Sprintf("%s/n", (buf)))
-	if err != nil {
-		return fmt.Errorf("error writing to file: %s", err)
+	if _, err := p.stdin.Write(buf); err != nil {
+		return fmt.Errorf("stdin: %w", err)
 	}
-
-	// p.logger.Info("writing buf to file %s", string(buf))
-	// p.logger.Info("writing schema to file %s", string(schemaBuf))
-
-	// w.Flush()
-	// p.logger.Trace("processed: %s", fn)
+	p.stdin.Write(EOL)
 	return nil
 }

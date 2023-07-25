@@ -3,28 +3,34 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
+
+	glog "log"
 
 	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	snats "github.com/shopmonkeyus/go-common/nats"
+	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 )
 
-var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start the server",
+var serverCmd = &cobra.Command{
+	Use:   "server",
+	Short: "Run the server",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := newLogger(cmd)
-		logger.Info("the args %v", args)
-		logger.Trace("connecting to nats server")
-
 		hosts, _ := cmd.Flags().GetStringSlice("server")
 		creds, _ := cmd.Flags().GetString("creds")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		timestamp, _ := cmd.Flags().GetBool("timestamp")
+
+		if !timestamp {
+			glog.SetFlags(0)
+		}
+
+		logger := newLogger(cmd)
 
 		if len(hosts) > 0 && creds == "" && strings.Contains(hosts[0], "connect.nats.shopmonkey.pub") {
 			logger.Error("error: missing required credentials file. use --creds and specify the location of your credentials file")
@@ -94,37 +100,34 @@ var startCmd = &cobra.Command{
 				return fmt.Errorf("processor start: %s", err)
 			}
 			logger.Info("started message processor")
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-			<-c
+			<-csys.CreateShutdownChannel()
 			logger.Info("stopped message processor")
 			return nil
 		}
 
 		var wg sync.WaitGroup
-
-		if len(args) > 0 {
+		for _, url := range args {
 			wg.Add(1)
-			go func() {
+			go func(url string) {
 				defer wg.Done()
-				runFileSystemProvider(logger, args, runProviderCallback)
-			}()
+				runProvider(logger, url, dryRun, verbose, runProviderCallback)
+			}(url)
 		}
 		wg.Wait()
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(startCmd)
-	startCmd.Flags().String("company-id", "", "the customer id")
-	startCmd.Flags().MarkHidden("company-id") // only for testing, otherwise should come from the credentials file
-	startCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
-	startCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
-	startCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
-	startCmd.Flags().StringSlice("server", []string{"nats://connect.nats.shopmonkey.pub"}, "the nats server url")
-	startCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
-	startCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
-	startCmd.Flags().Bool("embed-nats", false, "Run a local nats instance as a sink")
-	startCmd.Flags().Bool("to-file", false, "Run with output to the local filesystem")
-
+	rootCmd.AddCommand(serverCmd)
+	serverCmd.Flags().String("company-id", "", "the customer id")
+	serverCmd.Flags().MarkHidden("company-id") // only for testing, otherwise should come from the credentials file
+	serverCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
+	serverCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
+	serverCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
+	serverCmd.Flags().StringSlice("server", []string{"nats://connect.nats.shopmonkey.pub"}, "the nats server url")
+	serverCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
+	serverCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
+	serverCmd.Flags().Bool("embed-nats", false, "Run a local nats instance as a sink")
+	serverCmd.Flags().Bool("to-file", false, "Run with output to the local filesystem")
+	serverCmd.Flags().Bool("timestamp", false, "Add timestamps to logging")
 }
