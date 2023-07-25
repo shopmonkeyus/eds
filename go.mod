@@ -1,6 +1,6 @@
 module github.com/shopmonkeyus/eds-server
 
-go 1.19
+go 1.20
 
 require github.com/shopmonkeyus/go-common v0.0.44
 
