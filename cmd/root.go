@@ -34,9 +34,10 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 
 type ProviderFunc func(p internal.Provider) error
 
-func runProvider(logger logger.Logger, url string, dryRun bool, fn ProviderFunc) {
+func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, fn ProviderFunc) {
 	opts := &provider.ProviderOpts{
-		DryRun: dryRun,
+		DryRun:  dryRun,
+		Verbose: verbose,
 	}
 	provider, err := provider.NewProviderForURL(logger, url, opts)
 	if err != nil {

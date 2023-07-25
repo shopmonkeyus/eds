@@ -1,88 +1,91 @@
 package provider
 
 import (
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"io"
 	"os"
-	"path"
+	"os/exec"
+	"sync"
+	"syscall"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
 )
+
+var EOL = []byte("\n")
 
 type FileProvider struct {
 	logger logger.Logger
-	dir    string
-	opts   *ProviderOpts
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	once   sync.Once
 }
 
 var _ internal.Provider = (*FileProvider)(nil)
 
 // NewFileProvider returns a provider that will stream files to a folder provided in the url
-func NewFileProvider(logger logger.Logger, urlstring string, opts *ProviderOpts) (internal.Provider, error) {
-	u, err := url.Parse(urlstring)
+func NewFileProvider(plogger logger.Logger, cmd []string, opts *ProviderOpts) (internal.Provider, error) {
+	logger := plogger.WithPrefix("[file]")
+	logger.Info("file provider will execute program: %s", cmd[0])
+	if _, err := os.Stat(cmd[0]); os.IsNotExist(err) {
+		return nil, fmt.Errorf("couldn't find: %s", cmd[0])
+	}
+	theCmd := exec.Command(cmd[0], cmd[1:]...)
+	if opts.Verbose {
+		theCmd.Stdout = os.Stdout
+	} else {
+		theCmd.Stdout = io.Discard
+	}
+	theCmd.Stderr = os.Stderr
+	stdin, err := theCmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stdin: %w", err)
 	}
-	dir := u.Path
-	if dir == "/" {
-		return nil, fmt.Errorf("refusing to save files in the root directory. please choose a path")
-	}
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, fmt.Errorf("couldn't create directory: %s", dir)
-		}
-	}
-	logger.Info("file provider will save files to: %s", dir)
 	return &FileProvider{
-		logger,
-		dir,
-		opts,
+		logger: logger,
+		cmd:    theCmd,
+		stdin:  stdin,
 	}, nil
 }
 
 // Start the provider and return an error or nil if ok
 func (p *FileProvider) Start() error {
+	p.logger.Info("start")
+	if err := p.cmd.Start(); err != nil {
+		return err
+	}
 	return nil
 }
 
 // Stop the provider and return an error or nil if ok
 func (p *FileProvider) Stop() error {
+	p.logger.Info("stop")
+	p.once.Do(func() {
+		p.logger.Debug("sending kill signal to pid: %d", p.cmd.Process.Pid)
+		if p.cmd.Process != nil {
+			syscall.Kill(-p.cmd.Process.Pid, syscall.SIGINT)
+			p.stdin.Close()
+		}
+		p.logger.Debug("stopped")
+	})
 	return nil
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *FileProvider) Process(data datatypes.ChangeEventPayload) error {
-	fn := path.Join(p.dir, data.GetTable()+"_"+data.GetMvccTimestamp()+"_"+data.GetID()+".json.gz")
-	if p.opts != nil && p.opts.DryRun {
-		p.logger.Info("[dry-run] would write: %s", fn)
-		return nil
+func (p *FileProvider) Process(data types.ChangeEventPayload, schema types.Table) error {
+	transport := types.Transport{
+		DBChange: data,
+		Schema:   schema,
 	}
-	f, err := os.Create(fn)
-	if err != nil {
-		return fmt.Errorf("error creating file: %s. %s", fn, err)
-	}
-	defer f.Close()
-	w := gzip.NewWriter(f)
-	buf, err := json.MarshalIndent(data, "", " ")
+	buf, err := json.Marshal(transport)
 	if err != nil {
 		return fmt.Errorf("error converting to json: %s", err)
 	}
-
-	_, err = w.Write(buf)
-	if err != nil {
-		return fmt.Errorf("error writing to file: %s", err)
+	if _, err := p.stdin.Write(buf); err != nil {
+		return fmt.Errorf("stdin: %w", err)
 	}
-
-	w.Flush()
-	p.logger.Trace("processed: %s", fn)
-	return nil
-}
-
-// Migrate will tell the provider to do any migration work and return an error or nil if ok
-func (p *FileProvider) Migrate() error {
+	p.stdin.Write(EOL)
 	return nil
 }
