@@ -127,7 +127,5 @@ func init() {
 	serverCmd.Flags().StringSlice("server", []string{"nats://connect.nats.shopmonkey.pub"}, "the nats server url")
 	serverCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	serverCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
-	serverCmd.Flags().Bool("embed-nats", false, "Run a local nats instance as a sink")
-	serverCmd.Flags().Bool("to-file", false, "Run with output to the local filesystem")
 	serverCmd.Flags().Bool("timestamp", false, "Add timestamps to logging")
 }
