@@ -9,6 +9,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/shirou/gopsutil/v3/process"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -65,7 +66,8 @@ func (p *FileProvider) Stop() error {
 	p.once.Do(func() {
 		p.logger.Debug("sending kill signal to pid: %d", p.cmd.Process.Pid)
 		if p.cmd.Process != nil {
-			syscall.Kill(-p.cmd.Process.Pid, syscall.SIGINT)
+			toKill, _ := process.NewProcess(int32(p.cmd.Process.Pid))
+			toKill.SendSignal(syscall.SIGINT)
 			p.stdin.Close()
 		}
 		p.logger.Debug("stopped")
