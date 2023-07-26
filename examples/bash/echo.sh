@@ -1,5 +1,5 @@
 #!/bin/bash
 
 while read INPUT; do
-  echo $INPUT | jq
+  echo $INPUT | jq .data
 done
