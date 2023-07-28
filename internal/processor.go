@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
 	snats "github.com/shopmonkeyus/go-common/nats"
@@ -30,7 +31,7 @@ type MessageProcessor struct {
 	consumerPrefix    string
 	context           context.Context
 	cancel            context.CancelFunc
-	modelVersionCache map[string]types.Table
+	modelVersionCache map[string]dm.Model
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -80,7 +81,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		js:                js,
 		context:           context,
 		cancel:            cancel,
-		modelVersionCache: make(map[string]types.Table),
+		modelVersionCache: make(map[string]dm.Model),
 	}
 	return processor, nil
 }
@@ -118,7 +119,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		os.WriteFile(fn, msg.Data, 0644)
 	}
 
-	var schema types.Table
+	var schema dm.Model
 
 	modelVersion := data.ModelVersion
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)

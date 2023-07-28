@@ -38,6 +38,8 @@ func NewProviderForURL(logger logger.Logger, urlstr string, opts *ProviderOpts) 
 			}
 		}
 		return NewFileProvider(logger, args, opts)
+	case "postgresql":
+		return NewPostgresProvider(logger, urlstr, opts)
 	default:
 		return nil, fmt.Errorf("no suitable provider found for url: %s", urlstr)
 	}
