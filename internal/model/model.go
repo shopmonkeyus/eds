@@ -175,7 +175,7 @@ func (f *Field) SQLTypePostgres() string {
 	}
 
 	if f.IsList {
-		builder.WriteString("ARRAY")
+		builder.WriteString(" ARRAY")
 	}
 	return builder.String()
 }

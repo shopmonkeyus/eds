@@ -90,5 +90,16 @@ func (p *FileProvider) Process(data types.ChangeEventPayload, schema dm.Model) e
 		return fmt.Errorf("stdin: %w", err)
 	}
 	p.stdin.Write(EOL)
+	// for {
+	// 	select {
+	// 	case <-output:
+	// 	default:
+	// 		sleep(10)
+	// 	}
+	// }
+
+	// TODO: wait on channel for STDOUT OK\n ERR\n
+	// with configurable timer
+
 	return nil
 }

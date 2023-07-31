@@ -121,8 +121,9 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 
 	var schema dm.Model
 
-	modelVersion := data.ModelVersion
+	modelVersion := data.GetModelVersion()
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
+	p.logger.Trace("got modelVersionId for: %s %s %s for msgid: %s", modelVersionId, model, modelVersion, msgid)
 
 	currentModelVersion, found := p.modelVersionCache[modelVersionId]
 

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -98,9 +99,106 @@ func (p *PostgresProvider) Process(data types.ChangeEventPayload, schema dm.Mode
 	err := p.ensureTableSchema(schema)
 	if err != nil {
 		p.logger.Error("error ensuring table schema %s", err)
+		return err
+	}
+
+	err = p.upsertData(data, schema)
+	if err != nil {
+		p.logger.Error("error updating model %s", err)
+		return err
+	}
+	return nil
+}
+
+// upsertData will ensure the table schema is compatible with the incoming message
+func (p *PostgresProvider) upsertData(data types.ChangeEventPayload, model dm.Model) error {
+
+	// lookup model for data type
+	sql, values, err := p.getSQL(data, model)
+	if err != nil {
+
+		return err
+	}
+	p.logger.Debug("with sql: %s and values: %v", sql, values)
+	_, err = p.db.Exec(p.ctx, sql, values...)
+	if err != nil {
+		p.logger.Error("error executing sql: %v", err)
 	}
 
 	return nil
+}
+
+func (p *PostgresProvider) getSQL(c types.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
+	var sql strings.Builder
+	var values []interface{}
+
+	switch c.GetOperation() {
+	case types.ChangeEventInsert:
+		var sqlColumns, sqlValues strings.Builder
+
+		data := c.GetAfter()
+		p.logger.Debug("after object: %v", data)
+		columnCount := 1
+
+		for i, field := range m.Fields {
+			// check if field is in payload
+			if _, ok := data[field.Name]; !ok {
+				continue
+			}
+			// if yes, then add column
+			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
+			sqlValues.WriteString(fmt.Sprintf(`$%d`, columnCount))
+			values = append(values, data[field.Name])
+
+			if i+1 < len(m.Fields) {
+				sqlColumns.WriteString(",")
+				sqlValues.WriteString(",")
+			}
+			columnCount += 1
+		}
+		sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValues.String()) + ";\n")
+
+	case types.ChangeEventUpdate:
+		var updateColumns, insertColumns, insertValues strings.Builder
+		var updateValues []interface{}
+		data := c.GetAfter()
+		p.logger.Debug("after object: %v", data)
+		columnCount := 1
+
+		for i, field := range m.Fields {
+			// check if field is in payload
+			if _, ok := data[field.Name]; !ok {
+				continue
+			}
+			// if yes, then add column
+			if field.Name != "id" {
+				updateColumns.WriteString(fmt.Sprintf(`"%s" = $%d`, field.Name, columnCount))
+
+			}
+			insertColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
+			insertValues.WriteString(fmt.Sprintf(`$%d`, columnCount))
+			values = append(values, data[field.Name])
+			updateValues = append(updateValues, data[field.Name])
+			if i+1 < len(m.Fields) {
+				if field.Name != "id" {
+					updateColumns.WriteString(",")
+				}
+				insertColumns.WriteString(",")
+				insertValues.WriteString(",")
+			}
+			columnCount += 1
+		}
+		values = append(values, updateValues...)
+		sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT ("id") DO UPDATE SET %s WHERE "id"='%s' AND "meta"->>'version'>%d`, m.Table, insertColumns.String(), insertValues.String(), updateColumns.String(), data["id"], c.GetVersion()) + ";\n")
+
+	case types.ChangeEventDelete:
+		data := c.GetBefore()
+		p.logger.Debug("before object: %v", data)
+		sql.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE id='%s'`, m.Table, data["id"]) + ";\n")
+
+	}
+
+	return sql.String(), values, nil
 }
 
 // ensureTableSchema will ensure the table schema is compatible with the incoming message
