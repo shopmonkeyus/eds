@@ -18,9 +18,11 @@ def read_stream_from_stdin():
             # Process the input (you can add your own logic here)
             eds_input = json.loads(eds_input_raw)
             input_data = eds_input.get("data")
-            sys.stdout.write(f"[EDS Echo Python] data: {json.dumps(input_data, indent=4)}'\n")
+            sys.stdout.write(f"[EDS Echo Python] data: {json.dumps(input_data, indent=4)}\n")
+            sys.stdout.write("OK\n")
         except Exception as err:
              sys.stdout.write(f"\n[EDS Echo Python] error:{err}")
+             sys.stdout.write("ERR\n")
         except KeyboardInterrupt:
             sys.stdout.write("\n[EDS Echo Python] Shutting down...")
             break
