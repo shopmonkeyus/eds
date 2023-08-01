@@ -147,9 +147,13 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
 			return err
 		}
-		p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		schema = foundSchema.Data
-		p.modelVersionCache[modelVersionId] = schema
+		if foundSchema.Success {
+			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+			p.modelVersionCache[modelVersionId] = schema
+		} else {
+			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+		}
 	}
 	if err := p.provider.Process(data, schema); err != nil {
 		p.logger.Error("error processing change event: %s. %s", data, err)

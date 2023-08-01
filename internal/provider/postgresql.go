@@ -2,10 +2,12 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/migrator"
@@ -132,68 +134,81 @@ func (p *PostgresProvider) getSQL(c types.ChangeEventPayload, m dm.Model) (strin
 	var sql strings.Builder
 	var values []interface{}
 
-	switch c.GetOperation() {
-	case types.ChangeEventInsert:
+	if c.GetOperation() == types.ChangeEventInsert || c.GetOperation() == types.ChangeEventUpdate {
+
 		var sqlColumns, sqlValues strings.Builder
 
 		data := c.GetAfter()
 		p.logger.Debug("after object: %v", data)
 		columnCount := 1
 
-		for i, field := range m.Fields {
-			// check if field is in payload
-			if _, ok := data[field.Name]; !ok {
-				continue
-			}
-			// if yes, then add column
-			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
-			sqlValues.WriteString(fmt.Sprintf(`$%d`, columnCount))
-			values = append(values, data[field.Name])
+		// check if record exists.
+		// using explicit check for existance results in much simpler queries
+		// vs ON CONFLICT checks. This is also much more portable across db engines
+		existsSql := fmt.Sprintf(`SELECT 1 from "%s" where "id"='%s';`, m.Table, data["id"])
 
-			if i+1 < len(m.Fields) {
-				sqlColumns.WriteString(",")
-				sqlValues.WriteString(",")
+		shouldCreate := false
+
+		var scanned interface{}
+		if err := p.db.QueryRow(p.ctx, existsSql).Scan(&scanned); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				p.logger.Debug("no rows found for: %s, %s", m.Table, data["id"])
+				shouldCreate = true
+			} else {
+				p.logger.Error("error checking existance: %s, %s, %v", m.Table, data["id"], err)
+
 			}
-			columnCount += 1
 		}
-		sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValues.String()) + ";\n")
 
-	case types.ChangeEventUpdate:
-		var updateColumns, insertColumns, insertValues strings.Builder
-		var updateValues []interface{}
-		data := c.GetAfter()
-		p.logger.Debug("after object: %v", data)
-		columnCount := 1
+		if shouldCreate {
+			for i, field := range m.Fields {
+				// check if field is in payload
+				if _, ok := data[field.Name]; !ok {
+					continue
+				}
+				// if yes, then add column
+				sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
+				sqlValues.WriteString(fmt.Sprintf(`$%d`, columnCount))
+				values = append(values, data[field.Name])
 
-		for i, field := range m.Fields {
-			// check if field is in payload
-			if _, ok := data[field.Name]; !ok {
-				continue
+				if i+1 < len(m.Fields) {
+					sqlColumns.WriteString(",")
+					sqlValues.WriteString(",")
+				}
+				columnCount += 1
 			}
-			// if yes, then add column
-			if field.Name != "id" {
+			sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValues.String()) + ";\n")
+		} else {
+			var updateColumns strings.Builder
+			var updateValues []interface{}
+			data := c.GetAfter()
+			p.logger.Debug("after object: %v", data)
+			columnCount := 1
+
+			for i, field := range m.Fields {
+				// check if field is in payload since we do not drop columns automatically
+				if _, ok := data[field.Name]; !ok {
+					continue
+				}
+				if field.Name == "id" {
+					// can't update the id!
+					continue
+				}
+
 				updateColumns.WriteString(fmt.Sprintf(`"%s" = $%d`, field.Name, columnCount))
-
-			}
-			insertColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
-			insertValues.WriteString(fmt.Sprintf(`$%d`, columnCount))
-			values = append(values, data[field.Name])
-			updateValues = append(updateValues, data[field.Name])
-			if i+1 < len(m.Fields) {
-				if field.Name != "id" {
+				updateValues = append(updateValues, data[field.Name])
+				if i+1 < len(m.Fields) {
 					updateColumns.WriteString(",")
 				}
-				insertColumns.WriteString(",")
-				insertValues.WriteString(",")
+				columnCount += 1
 			}
-			columnCount += 1
+			values = append(values, updateValues...)
+			sql.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"='%s' AND "meta"->>'version'>'%d'`, m.Table, updateColumns.String(), data["id"], c.GetVersion()) + ";\n")
 		}
-		values = append(values, updateValues...)
-		sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT ("id") DO UPDATE SET %s WHERE "id"='%s' AND "meta"->>'version'>%d`, m.Table, insertColumns.String(), insertValues.String(), updateColumns.String(), data["id"], c.GetVersion()) + ";\n")
-
-	case types.ChangeEventDelete:
+	} else if c.GetOperation() == types.ChangeEventDelete {
 		data := c.GetBefore()
 		p.logger.Debug("before object: %v", data)
+		// TODO: maybe add soft-delete here? meta->>deleted=true, meta->>deletedAt=NOW()?
 		sql.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE id='%s'`, m.Table, data["id"]) + ";\n")
 
 	}
