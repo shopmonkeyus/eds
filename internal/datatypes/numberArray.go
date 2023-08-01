@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	// "gorm.io/gorm"
-	// "gorm.io/gorm/schema"
 )
 
 type NumberArray []float64
@@ -46,13 +44,3 @@ func (arr NullableNumberArray) Value() (driver.Value, error) {
 	}
 	return json.Marshal(arr)
 }
-
-// // GormDBDataType gorm db data type
-// func (NumberArray) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-// 	return getJSONDataType(db)
-// }
-
-// // GormDBDataType gorm db data type
-// func (NullableNumberArray) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-// 	return getJSONDataType(db)
-// }

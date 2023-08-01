@@ -48,7 +48,3 @@ func (m *Meta) Scan(value interface{}) error {
 
 	return json.Unmarshal(bytes, m)
 }
-
-// func (Meta) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-// 	return getJSONDataType(db)
-// }

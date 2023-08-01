@@ -1,10 +1,7 @@
-package types
+package datatypes
 
 import (
-	"bytes"
-	"compress/gzip"
 	"encoding/json"
-	"io"
 )
 
 type ChangeEventOperation string
@@ -153,26 +150,6 @@ func (c *ChangeEvent) GetDiff() []string {
 	return c.Diff
 }
 
-// Gunzip will unzip data and return buffer inline
-func Gunzip(data []byte) (resData []byte, err error) {
-	b := bytes.NewBuffer(data)
-
-	var r io.Reader
-	r, err = gzip.NewReader(b)
-	if err != nil {
-		return
-	}
-
-	var resB bytes.Buffer
-	_, err = resB.ReadFrom(r)
-	if err != nil {
-		return
-	}
-
-	resData = resB.Bytes()
-	return
-}
-
 func FromChangeEvent(buf []byte, gzip bool) (*ChangeEvent, error) {
 	var result ChangeEvent
 	var decompressed = buf
@@ -189,82 +166,3 @@ func FromChangeEvent(buf []byte, gzip bool) (*ChangeEvent, error) {
 	}
 	return &result, nil
 }
-
-// func (c *ChangeEvent) GetSQL(m dm.Model) (string, []interface{}, error) {
-// 	var sql strings.Builder
-// 	var values []interface{}
-
-// 	switch c.Operation {
-// 	case ChangeEventInsert:
-// 		var sqlColumns, sqlValues strings.Builder
-
-// 		// unmarshall before
-// 		var data map[string]interface{}
-// 		err := json.Unmarshal([]byte(c.Before), &data)
-
-// 		if err != nil {
-// 			return "", nil, fmt.Errorf("error unmarshaling JSON: %v", err)
-// 		}
-
-// 		for key, value := range data {
-// 			valueType := reflect.TypeOf(value)
-// 			fmt.Printf("Key: %s, Value: %v, Type: %s\n", key, value, valueType)
-// 		}
-
-// 		pks := m.PrimaryKey()
-// 		columnCount := 1
-
-// 		for i, field := range m.Fields {
-// 			// check if field is in payload
-// 			if _, ok := data[field.Name]; !ok {
-// 				continue
-// 			}
-// 			// if yes, then add column
-// 			sqlColumns.WriteString(field.Name)
-// 			sqlValues.WriteString(fmt.Sprintf(`$%d`, columnCount))
-// 			values = append(values, data[field.Name])
-
-// 			if i+1 < len(m.Fields) || len(pks) > 0 {
-// 				sqlColumns.WriteString(",")
-// 				sqlValues.WriteString(",")
-// 			}
-// 		}
-// 		sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s);`, m.Table, sqlColumns.String(), sqlValues.String()) + ";\n")
-
-// 	case ChangeEventUpdate:
-// 		// for _, change := range m.Fields {
-// 		// 	// column := migrator.NewColumnFromField(m.Table, change.Field)
-
-// 		// }
-// 	case ChangeEventDelete:
-
-// 	}
-
-// 	return sql.String(), values, nil
-// }
-
-// func main() {
-// 	jsonData := `{
-// 		"name": "John Doe",
-// 		"age": 30,
-// 		"isMarried": false,
-// 		"height": 175.5,
-// 		"pets": ["dog", "cat"],
-// 		"address": {
-// 			"city": "New York",
-// 			"zipcode": "10001"
-// 		}
-// 	}`
-
-// 	var data map[string]interface{}
-// 	err := json.Unmarshal([]byte(jsonData), &data)
-// 	if err != nil {
-// 		fmt.Println("Error unmarshaling JSON:", err)
-// 		return
-// 	}
-
-// 	for key, value := range data {
-// 		valueType := reflect.TypeOf(value)
-// 		fmt.Printf("Key: %s, Value: %v, Type: %s\n", key, value, valueType)
-// 	}
-// }

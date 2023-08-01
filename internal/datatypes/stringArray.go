@@ -78,13 +78,3 @@ func (arr NullableStringArray) Value() (driver.Value, error) {
 	}
 	return string(buf), nil
 }
-
-// // GormDBDataType gorm db data type
-// func (StringArray) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-// 	return getJSONDataType(db)
-// }
-
-// // GormDBDataType gorm db data type
-// func (NullableStringArray) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-// 	return getJSONDataType(db)
-// }

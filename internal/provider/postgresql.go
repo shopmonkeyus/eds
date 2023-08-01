@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	"github.com/shopmonkeyus/eds-server/internal/migrator"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
-	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -92,7 +92,7 @@ func (p *PostgresProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *PostgresProvider) Process(data types.ChangeEventPayload, schema dm.Model) error {
+func (p *PostgresProvider) Process(data datatypes.ChangeEventPayload, schema dm.Model) error {
 	if p.opts != nil && p.opts.DryRun {
 		p.logger.Info("[dry-run] would write: %v %v", data, schema)
 		return nil
@@ -113,7 +113,7 @@ func (p *PostgresProvider) Process(data types.ChangeEventPayload, schema dm.Mode
 }
 
 // upsertData will ensure the table schema is compatible with the incoming message
-func (p *PostgresProvider) upsertData(data types.ChangeEventPayload, model dm.Model) error {
+func (p *PostgresProvider) upsertData(data datatypes.ChangeEventPayload, model dm.Model) error {
 
 	// lookup model for data type
 	sql, values, err := p.getSQL(data, model)
@@ -130,11 +130,11 @@ func (p *PostgresProvider) upsertData(data types.ChangeEventPayload, model dm.Mo
 	return nil
 }
 
-func (p *PostgresProvider) getSQL(c types.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
+func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
 	var sql strings.Builder
 	var values []interface{}
 
-	if c.GetOperation() == types.ChangeEventInsert || c.GetOperation() == types.ChangeEventUpdate {
+	if c.GetOperation() == datatypes.ChangeEventInsert || c.GetOperation() == datatypes.ChangeEventUpdate {
 
 		var sqlColumns, sqlValues strings.Builder
 
@@ -205,7 +205,7 @@ func (p *PostgresProvider) getSQL(c types.ChangeEventPayload, m dm.Model) (strin
 			values = append(values, updateValues...)
 			sql.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"='%s' AND "meta"->>'version'>'%d'`, m.Table, updateColumns.String(), data["id"], c.GetVersion()) + ";\n")
 		}
-	} else if c.GetOperation() == types.ChangeEventDelete {
+	} else if c.GetOperation() == datatypes.ChangeEventDelete {
 		data := c.GetBefore()
 		p.logger.Debug("before object: %v", data)
 		// TODO: maybe add soft-delete here? meta->>deleted=true, meta->>deletedAt=NOW()?

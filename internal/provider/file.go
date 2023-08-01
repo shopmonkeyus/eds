@@ -11,8 +11,8 @@ import (
 
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
-	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -77,8 +77,8 @@ func (p *FileProvider) Stop() error {
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *FileProvider) Process(data types.ChangeEventPayload, schema dm.Model) error {
-	transport := types.Transport{
+func (p *FileProvider) Process(data datatypes.ChangeEventPayload, schema dm.Model) error {
+	transport := datatypes.Transport{
 		DBChange: data,
 		Schema:   schema,
 	}

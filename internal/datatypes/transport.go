@@ -1,4 +1,4 @@
-package types
+package datatypes
 
 import (
 	dm "github.com/shopmonkeyus/eds-server/internal/model"

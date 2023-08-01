@@ -7,26 +7,6 @@ import (
 	"fmt"
 )
 
-// 	"gorm.io/gorm"
-// 	"gorm.io/gorm/clause"
-// 	"gorm.io/gorm/schema"
-// )
-
-// func getJSONDataType(db *gorm.DB) string {
-// 	switch db.Dialector.Name() {
-// 	case "sqlite":
-// 		return "JSON"
-// 	case "mysql":
-// 		return "JSON"
-// 	case "postgres":
-// 		return "JSONB"
-// 	case "sqlserver":
-// 		return "TEXT"
-// 	}
-// 	return "JSON"
-
-// }
-
 // JSON defined JSON data type, need to implements driver.Valuer, sql.Scanner interface
 type JSON json.RawMessage
 
@@ -142,31 +122,3 @@ func (j *JSON) UnmarshalJSON(b []byte) error {
 func (j JSON) String() string {
 	return string(j)
 }
-
-// GormDataType gorm common data type
-func (JSON) GormDataType() string {
-	return "json"
-}
-
-// // GormDBDataType gorm db data type
-// func (JSON) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-// 	return getJSONDataType(db)
-// }
-
-// func (js JSON) GormValue(ctx context.Context, db *gorm.DB) clause.Expr {
-// 	if len(js) == 0 || string(js) == "null" {
-// 		return gorm.Expr("NULL")
-// 	}
-
-// 	data, _ := js.MarshalJSON()
-// 	if string(data) == "null" {
-// 		return gorm.Expr("NULL")
-// 	}
-
-// 	switch db.Dialector.Name() {
-// 	case "mysql":
-// 		return gorm.Expr("CAST(? AS JSON)", string(data))
-// 	}
-
-// 	return gorm.Expr("?", string(data))
-// }

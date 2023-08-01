@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
-	"github.com/shopmonkeyus/eds-server/internal/types"
 	"github.com/shopmonkeyus/go-common/logger"
 	snats "github.com/shopmonkeyus/go-common/nats"
 )
@@ -97,10 +97,10 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	p.logger.Trace("received msgid: %s, subject: %s", msgid, msg.Subject)
 
 	// unpack as json based change  event
-	data, err := types.FromChangeEvent(msg.Data, gzipped)
+	data, err := datatypes.FromChangeEvent(msg.Data, gzipped)
 	if err != nil {
 		if gzipped {
-			dec, _ := types.Gunzip(msg.Data)
+			dec, _ := datatypes.Gunzip(msg.Data)
 			p.logger.Error("decode error for change event: %s. %s", string(dec), err)
 		} else {
 			p.logger.Error("decode error for change event: %s. %s", string(msg.Data), err)
@@ -141,7 +141,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			p.logger.Error("error fetching change event schema: %s. %s", data, err)
 			return err
 		}
-		var foundSchema types.SchemaResponse
+		var foundSchema datatypes.SchemaResponse
 		err = json.Unmarshal(entry.Data, &foundSchema)
 		if err != nil {
 			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
