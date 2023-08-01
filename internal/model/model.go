@@ -40,23 +40,6 @@ type Model struct {
 	Related      []*Related    `json:"related,omitempty"`
 }
 
-// func (m *Model) FindAnnotation(name string) *Annotation {
-// 	for _, annotation := range m.Annotations {
-// 		if annotation.Name == name {
-// 			return annotation
-// 		}
-// 	}
-// 	return nil
-// }
-
-// func (m *Model) AddUnique(fields []string) {
-// 	m.Uniques = append(m.Uniques, fields)
-// }
-
-// func (m *Model) AddIndex(fields []string) {
-// 	m.Indexes = append(m.Indexes, fields)
-// }
-
 func (m *Model) String() string {
 	return fmt.Sprintf("Model[name=%s,table=%s,fields=%s]", m.Name, m.Table, m.Fields)
 }
@@ -112,28 +95,11 @@ type Field struct {
 	IsPrivate    bool   `json:"private"`
 	IsList       bool   `json:"list"`
 	IsEnum       bool   `json:"enum"`
-
-	// IsScalar     bool          `json:"scalar"`
-	// IsUpgrade    bool          `json:"upgrade"`
-	// Default      *string       `json:"default,omitempty"`
-	// Comment      string        `json:"comment"`
-	// Annotations  []*Annotation `json:"annotations,omitempty"`
-	// Attributes   []*Annotation `json:"attributes,omitempty"`
-	// Computed     *Computed     `json:"computed,omitempty"`
 }
 
 func (f *Field) String() string {
 	return fmt.Sprintf("Field[name=%s,type=%s]", f.Name, f.Type)
 }
-
-// func (f *Field) FindAnnotation(name string) *Annotation {
-// 	for _, annotation := range f.Annotations {
-// 		if annotation.Name == name {
-// 			return annotation
-// 		}
-// 	}
-// 	return nil
-// }
 
 func (f *Field) SQLTypePostgres() string {
 	var builder strings.Builder
@@ -162,12 +128,6 @@ func (f *Field) SQLTypePostgres() string {
 		builder.WriteString("BYTES")
 	case "Decimal":
 		builder.WriteString("DECIMAL")
-		// default:
-		// 	if strings.HasPrefix(f.Type, `"`) {
-		// 		builder.WriteString(f.Type)
-		// 	} else {
-		// 		builder.WriteString(`"` + f.Type + `"`)
-		// 	}
 	}
 
 	if f.IsEnum {

@@ -2,10 +2,11 @@ package migrator
 
 import (
 	"fmt"
-	dm "github.com/shopmonkeyus/eds-server/internal/model"
-	"github.com/shopmonkeyus/eds-server/internal/util"
 	"sort"
 	"strings"
+
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
 type SQL interface {
@@ -104,22 +105,15 @@ type Column struct {
 	DataType            string
 	MaxLength           *string
 	UserDefinedTypeName *string
-	// CRDBType            string
-	// Expression          *string
 }
 
 func NewColumnFromField(table string, field *dm.Field) Column {
-	// var expr *string
-	// if field.Computed != nil {
-	// 	expr = &field.Computed.Expression
-	// }
+
 	return Column{
-		Table: table,
-		Name:  field.Name,
-		// Default:    field.Default,
-		IsNullable: true, // TODO: al
+		Table:      table,
+		Name:       field.Name,
+		IsNullable: true,
 		DataType:   field.SQLTypePostgres(),
-		// Expression: expr,
 	}
 }
 

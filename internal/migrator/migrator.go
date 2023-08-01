@@ -6,17 +6,18 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mitchellh/colorstring"
 	"github.com/schollz/progressbar/v3"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/go-common/logger"
-	"io"
-	"os"
-	"regexp"
-	"strings"
-	"time"
 )
 
 type MigrateOpts struct {
@@ -155,33 +156,6 @@ func (w *sqlWriter) run(logger logger.Logger, db *pgxpool.Pool) error {
 	total := len(w.sql)
 
 	var bar *progressbar.ProgressBar
-	// if !opts.NoProgress {
-	// 	ansi.CursorHide()
-	// 	bar = progressbar.NewOptions(total,
-	// 		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
-	// 		progressbar.OptionEnableColorCodes(true),
-	// 		progressbar.OptionShowBytes(false),
-	// 		progressbar.OptionSetWidth(35),
-	// 		progressbar.OptionUseANSICodes(true),
-	// 		progressbar.OptionSetPredictTime(true),
-	// 		progressbar.OptionSetDescription(fmt.Sprintf("[magenta][0/%d][reset] Starting...", len(w.sql))),
-	// 		progressbar.OptionShowDescriptionAtLineEnd(),
-	// 		progressbar.OptionSetRenderBlankState(true),
-	// 		progressbar.OptionClearOnFinish(),
-	// 		progressbar.OptionOnCompletion(func() {
-	// 			ansi.CursorShow()
-	// 			ansi.EraseInLine(3)
-	// 		}),
-	// 		progressbar.OptionSetTheme(progressbar.Theme{
-	// 			Saucer:        "-",
-	// 			AltSaucerHead: "[yellow]<[reset]",
-	// 			SaucerHead:    "[yellow]-[reset]",
-	// 			SaucerPadding: "[white]•",
-	// 			BarStart:      "[blue]|[reset]",
-	// 			BarEnd:        "[blue]|[reset]",
-	// 		}))
-	// 	defer bar.Close()
-	// }
 
 	var offset int
 	for _, sql := range w.sql {
@@ -222,39 +196,16 @@ func MigrateTable(logger logger.Logger, db *pgxpool.Pool, datamodel *dm.Model, t
 	if change.Action == AddAction {
 		newTables[tableName] = true
 	}
-	// if !opts.Quiet {
-	// 	change.Format(tableName, "sql", stdout)
-	// }
+
 	change.Format(tableName, "sql", &output)
 
 	stdout.Flush()
 
-	// if output.buf.Len() == 0 {
-	// 	if !opts.Quiet {
-	// 		logger.Info("no changes detected")
-	// 	}
-	// 	return nil
-	// }
-
-	// if !opts.DryRun {
-	// 	if !opts.NoConfirm {
-	// 		fmt.Print("Apply changes [y/N]? ")
-	// 		reader := bufio.NewReader(os.Stdin)
-	// 		ru, _, err := reader.ReadRune()
-	// 		if err == io.EOF {
-	// 			return nil
-	// 		}
-	// 		if unicode.ToLower(ru) != 'y' {
-	// 			fmt.Println("Cancelled!")
-	// 			return nil
-	// 		}
-	// 	}
 	started := time.Now()
 	logger.Info("running migrations ...")
 	if err := output.run(logger, db); err != nil {
 		return err
 	}
 	logger.Info("executed %d sql statements in %v", len(output.sql), time.Since(started))
-	// }
 	return nil
 }
