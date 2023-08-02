@@ -97,13 +97,11 @@ func (p *PostgresProvider) Process(data datatypes.ChangeEventPayload, schema dm.
 
 	err := p.ensureTableSchema(schema)
 	if err != nil {
-		p.logger.Error("error ensuring table schema %s", err)
 		return err
 	}
 
 	err = p.upsertData(data, schema)
 	if err != nil {
-		p.logger.Error("error updating model %s", err)
 		return err
 	}
 	return nil
@@ -121,7 +119,7 @@ func (p *PostgresProvider) upsertData(data datatypes.ChangeEventPayload, model d
 	p.logger.Debug("with sql: %s and values: %v", sql, values)
 	_, err = p.db.Exec(p.ctx, sql, values...)
 	if err != nil {
-		return fmt.Errorf("error executing sql: %v", err)
+		return err
 	}
 
 	return nil
@@ -202,11 +200,11 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 			values = append(values, updateValues...)
 
 			// add the id and version to the values array for safe substitution
-			values = append(values, data["id"], c.GetVersion())
+			values = append(values, data["id"].(string), c.GetVersion())
 			idPlaceholder := fmt.Sprintf(`$%d`, columnCount)
 			versionPlaceholder := fmt.Sprintf(`$%d`, columnCount+1)
 
-			sql.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND "meta"->>'version'>%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
+			sql.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND ("meta"->>'version')::bigint>%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
 		}
 	} else if c.GetOperation() == datatypes.ChangeEventDelete {
 		data := c.GetBefore()
