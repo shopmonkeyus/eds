@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/shopmonkeyus/eds-server/internal/types"
+	"github.com/shopmonkeyus/eds-server/internal/datatypes"
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/go-common/logger"
 	snats "github.com/shopmonkeyus/go-common/nats"
 )
@@ -30,7 +31,7 @@ type MessageProcessor struct {
 	consumerPrefix    string
 	context           context.Context
 	cancel            context.CancelFunc
-	modelVersionCache map[string]types.Table
+	modelVersionCache map[string]dm.Model
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -80,7 +81,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		js:                js,
 		context:           context,
 		cancel:            cancel,
-		modelVersionCache: make(map[string]types.Table),
+		modelVersionCache: make(map[string]dm.Model),
 	}
 	return processor, nil
 }
@@ -96,10 +97,10 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	p.logger.Trace("received msgid: %s, subject: %s", msgid, msg.Subject)
 
 	// unpack as json based change  event
-	data, err := types.FromChangeEvent(msg.Data, gzipped)
+	data, err := datatypes.FromChangeEvent(msg.Data, gzipped)
 	if err != nil {
 		if gzipped {
-			dec, _ := types.Gunzip(msg.Data)
+			dec, _ := datatypes.Gunzip(msg.Data)
 			p.logger.Error("decode error for change event: %s. %s", string(dec), err)
 		} else {
 			p.logger.Error("decode error for change event: %s. %s", string(msg.Data), err)
@@ -118,10 +119,11 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		os.WriteFile(fn, msg.Data, 0644)
 	}
 
-	var schema types.Table
+	var schema dm.Model
 
-	modelVersion := data.ModelVersion
+	modelVersion := data.GetModelVersion()
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
+	p.logger.Trace("got modelVersionId for: %s %s %s for msgid: %s", modelVersionId, model, modelVersion, msgid)
 
 	currentModelVersion, found := p.modelVersionCache[modelVersionId]
 
@@ -136,18 +138,20 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJSON, modelRequestTimeout)
 
 		if err != nil {
-			p.logger.Error("error fetching change event schema: %s. %s", data, err)
 			return err
 		}
-		var foundSchema types.SchemaResponse
+		var foundSchema datatypes.SchemaResponse
 		err = json.Unmarshal(entry.Data, &foundSchema)
 		if err != nil {
-			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
-			return err
+			return fmt.Errorf("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
 		}
-		p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		schema = foundSchema.Data
-		p.modelVersionCache[modelVersionId] = schema
+		if foundSchema.Success {
+			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+			p.modelVersionCache[modelVersionId] = schema
+		} else {
+			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+		}
 	}
 	if err := p.provider.Process(data, schema); err != nil {
 		p.logger.Error("error processing change event: %s. %s", data, err)

@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/shopmonkeyus/eds-server/internal/types"
+import (
+	"github.com/shopmonkeyus/eds-server/internal/datatypes"
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
+)
 
 type Provider interface {
 	// Start the provider and return an error or nil if ok
@@ -8,5 +11,5 @@ type Provider interface {
 	// Stop the provider and return an error or nil if ok
 	Stop() error
 	// Process data received and return an error or nil if processed ok
-	Process(data types.ChangeEventPayload, schema types.Table) error
+	Process(data datatypes.ChangeEventPayload, schema dm.Model) error
 }
