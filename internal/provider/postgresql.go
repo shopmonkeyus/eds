@@ -142,7 +142,7 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 		// vs ON CONFLICT checks. This is also much more portable across db engines
 		existsSql := fmt.Sprintf(`SELECT 1 from "%s" where "id"=$1;`, m.Table)
 
-		shouldCreate := false
+		var shouldCreate bool
 
 		var scanned interface{}
 		if err := p.db.QueryRow(p.ctx, existsSql, data["id"].(string)).Scan(&scanned); err != nil {
