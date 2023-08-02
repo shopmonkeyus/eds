@@ -138,14 +138,12 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJSON, modelRequestTimeout)
 
 		if err != nil {
-			p.logger.Error("error fetching change event schema: %s. %s", data, err)
 			return err
 		}
 		var foundSchema datatypes.SchemaResponse
 		err = json.Unmarshal(entry.Data, &foundSchema)
 		if err != nil {
-			p.logger.Error("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
-			return err
+			return fmt.Errorf("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
 		}
 		schema = foundSchema.Data
 		if foundSchema.Success {
