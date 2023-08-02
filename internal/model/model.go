@@ -115,7 +115,7 @@ func (f *Field) SQLTypePostgres() string {
 	case "BigInt":
 		builder.WriteString("INT8")
 	case "Int":
-		builder.WriteString("INT8") // NOTE: for Prisma, this is INT4 which is 32bit. we want to default to 64bit
+		builder.WriteString("INT8")
 	case "Double":
 		builder.WriteString("DOUBLE")
 	case "Float":

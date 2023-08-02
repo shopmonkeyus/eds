@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	// "gorm.io/gorm"
-	// "gorm.io/gorm/schema"
 )
 
 type Meta struct {
-	UserID    *string `json:"userId,omitempty"`
-	SessionID *string `json:"sessionId,omitempty"`
-	Version   *int64  `json:"version,omitempty"`
+	UserID       *string `json:"userId,omitempty"`
+	SessionID    *string `json:"sessionId,omitempty"`
+	Version      *int64  `json:"version,omitempty"`
+	ModelVersion *string `json:"modelVersion,omitempty"`
 }
 
 // Value return Meta value, implement driver.Valuer interface

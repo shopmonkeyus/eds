@@ -92,8 +92,6 @@ ORDER BY
 			DataType:            dt,
 			MaxLength:           maxlength,
 			UserDefinedTypeName: udtName,
-			// CRDBType:            crd,
-			// Expression:          genExpr,
 		})
 	}
 	logger.Trace("loaded up schema in %v", time.Since(started))

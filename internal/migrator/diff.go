@@ -83,8 +83,7 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 
 		if model != nil {
 			for _, field := range model.Fields {
-				// we can skip crdb_region field changes
-				if !foundcolumns[field.Table] && field.Name != "crdb_region" {
+				if !foundcolumns[field.Table] {
 					if change == nil {
 						change = &ModelChange{
 							Table:        model.Table,

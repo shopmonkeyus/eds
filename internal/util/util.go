@@ -119,23 +119,3 @@ func Dedupe(vals []string) []string {
 	}
 	return results
 }
-
-// var treeConfig = tree.PrettyCfg{
-// 	LineWidth:      80,
-// 	TabWidth:       2,
-// 	UseTabs:        false,
-// 	Simplify:       true,
-// 	JSONFmt:        true,
-// 	ValueRedaction: false,
-// 	Align:          tree.PrettyNoAlign,
-// 	Case:           strings.ToUpper,
-// }
-
-// func FormatSQLExpr(sql string) (string, error) {
-// 	expr, err := parser.ParseExpr(sql)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	parsed := strings.TrimSpace(treeConfig.Pretty(expr))
-// 	return parsed, nil
-// }
