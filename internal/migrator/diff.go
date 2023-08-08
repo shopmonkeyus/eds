@@ -8,9 +8,9 @@ import (
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
 )
 
-func (c *ModelChange) Format(name string, format string, writer io.Writer) {
+func (c *ModelChange) Format(name string, format string, writer io.Writer, dialect Dialect) {
 	if format == "sql" {
-		sql := c.SQL()
+		sql := c.SQL(dialect)
 		writer.Write([]byte(sql))
 	} else {
 		switch c.Action {

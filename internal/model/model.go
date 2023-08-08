@@ -140,6 +140,46 @@ func (f *Field) SQLTypePostgres() string {
 	return builder.String()
 }
 
+func (f *Field) SQLTypeSqlServer() string {
+	var builder strings.Builder
+	switch f.Type {
+	case "String":
+		builder.WriteString("varchar")
+	case "DateTime":
+		if f.IsTimestampZ {
+			builder.WriteString("datetime2(6)")
+		} else {
+			builder.WriteString("datetime(3)")
+		}
+	case "BigInt":
+		builder.WriteString("bigint")
+	case "Int":
+		builder.WriteString("int")
+	case "Double":
+		builder.WriteString("decmial")
+	case "Float":
+		builder.WriteString("float")
+	case "Boolean":
+		builder.WriteString("bit")
+	case "Json":
+		builder.WriteString("VarBinary")
+	case "Bytes":
+		builder.WriteString("Varbinary")
+	case "Decimal":
+		builder.WriteString("DECIMAL")
+	}
+
+	if f.IsEnum {
+		builder.WriteString("text")
+	}
+
+	// TODO: Sqlserver does not support arrays
+	// if f.IsList {
+	// 	builder.WriteString(" ARRAY")
+	// }
+	return builder.String()
+}
+
 func (f *Field) PrismaType() string {
 	typename := f.Type
 	if f.IsOptional && !f.IsList {

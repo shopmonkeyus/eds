@@ -3,10 +3,11 @@ package provider
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/microsoft/go-mssqldb"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	"github.com/shopmonkeyus/eds-server/internal/migrator"
@@ -14,7 +15,7 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-type PostgresProvider struct {
+type SqlServerProvider struct {
 	logger            logger.Logger
 	url               string
 	db                *sql.DB
@@ -24,34 +25,40 @@ type PostgresProvider struct {
 	modelVersionCache map[string]bool
 }
 
-var _ internal.Provider = (*PostgresProvider)(nil)
+var _ internal.Provider = (*SqlServerProvider)(nil)
 
-// NewPostgresProvider returns a provider that will stream files to a folder provided in the url
-func NewPostgresProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
-	logger := plogger.WithPrefix("[postgresql]")
-	logger.Info("starting postgres plugin with connection: %s", connString)
+// NewSqlServerProvider returns a provider that will stream files to a folder provided in the url
+func NewSqlServerProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
+	logger := plogger.WithPrefix("[sqlserver]")
+	logger.Info("starting mssql plugin with connection: %s", connString)
 	ctx := context.Background()
-	return &PostgresProvider{
+	return &SqlServerProvider{
 		logger: logger,
 		url:    connString,
 		ctx:    ctx,
 		opts:   opts,
-		schema: "public",
+		schema: "dbo",
 	}, nil
 }
 
 // Start the provider and return an error or nil if ok
-func (p *PostgresProvider) Start() error {
+func (p *SqlServerProvider) Start() error {
 	p.logger.Info("start")
 
-	db, err := sql.Open("pgx", p.url)
+	db, err := sql.Open("mssql", p.url)
 	if err != nil {
-		p.logger.Error("unable to create connection: %w", err)
+		return fmt.Errorf("unable to create connection pool: %w", err)
 	}
 	p.db = db
 
 	// ensure _migration table
-	sql := `CREATE TABLE IF NOT EXISTS _migration (model_version_id text primary key);`
+	sql := `
+		IF OBJECT_ID(N'_migration', N'U') IS NULL
+		CREATE TABLE _migration (
+			model_version_id varchar(500) primary key
+		);
+	`
+
 	_, err = p.db.Exec(sql)
 	if err != nil {
 		return fmt.Errorf("unable to create _migration table: %w", err)
@@ -80,14 +87,14 @@ func (p *PostgresProvider) Start() error {
 }
 
 // Stop the provider and return an error or nil if ok
-func (p *PostgresProvider) Stop() error {
+func (p *SqlServerProvider) Stop() error {
 	p.logger.Info("stop")
 	p.db.Close()
 	return nil
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *PostgresProvider) Process(data datatypes.ChangeEventPayload, schema dm.Model) error {
+func (p *SqlServerProvider) Process(data datatypes.ChangeEventPayload, schema dm.Model) error {
 	if p.opts != nil && p.opts.DryRun {
 		p.logger.Info("[dry-run] would write: %v %v", data, schema)
 		return nil
@@ -106,7 +113,7 @@ func (p *PostgresProvider) Process(data datatypes.ChangeEventPayload, schema dm.
 }
 
 // upsertData will ensure the table schema is compatible with the incoming message
-func (p *PostgresProvider) upsertData(data datatypes.ChangeEventPayload, model dm.Model) error {
+func (p *SqlServerProvider) upsertData(data datatypes.ChangeEventPayload, model dm.Model) error {
 
 	// lookup model for data type
 	sql, values, err := p.getSQL(data, model)
@@ -123,8 +130,8 @@ func (p *PostgresProvider) upsertData(data datatypes.ChangeEventPayload, model d
 	return nil
 }
 
-func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
-	var sql strings.Builder
+func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
+	var query strings.Builder
 	var values []interface{}
 
 	if c.GetOperation() == datatypes.ChangeEventInsert || c.GetOperation() == datatypes.ChangeEventUpdate {
@@ -144,7 +151,7 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 
 		var scanned interface{}
 		if err := p.db.QueryRow(existsSql, data["id"].(string)).Scan(&scanned); err != nil {
-			if err.Error() == "sql: no rows in result set" {
+			if errors.Is(err, sql.ErrNoRows) {
 				p.logger.Debug("no rows found for: %s, %s", m.Table, data["id"])
 				shouldCreate = true
 			} else {
@@ -170,7 +177,8 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 				}
 				columnCount += 1
 			}
-			sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
+
+			query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s)`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
 		} else {
 			var updateColumns strings.Builder
 			var updateValues []interface{}
@@ -202,23 +210,22 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 			idPlaceholder := fmt.Sprintf(`$%d`, columnCount)
 			versionPlaceholder := fmt.Sprintf(`$%d`, columnCount+1)
 
-			sql.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND ("meta"->>'version')::bigint>%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
+			query.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND ("meta"->>'version')::bigint>%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
 		}
 	} else if c.GetOperation() == datatypes.ChangeEventDelete {
 		data := c.GetBefore()
 		p.logger.Debug("before object: %v", data)
 		values = append(values, data["id"].(string))
 		// TODO: maybe add soft-delete here? meta->>deleted=true, meta->>deletedAt=NOW()?
-		sql.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE id=$1`, m.Table) + ";\n")
+		query.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE id=$1`, m.Table) + ";\n")
 	}
 
-	return sql.String(), values, nil
+	return query.String(), values, nil
 }
 
 // ensureTableSchema will ensure the table schema is compatible with the incoming message
-func (p *PostgresProvider) ensureTableSchema(schema dm.Model) error {
+func (p *SqlServerProvider) ensureTableSchema(schema dm.Model) error {
 	modelVersionId := fmt.Sprintf("%s-%s", schema.Table, schema.ModelVersion)
-	// var dbschema = "public"
 	modelVersionFound := p.modelVersionCache[modelVersionId]
 	p.logger.Debug("model versions: %v", p.modelVersionCache)
 	if modelVersionFound {
@@ -227,11 +234,11 @@ func (p *PostgresProvider) ensureTableSchema(schema dm.Model) error {
 	} else {
 		// do the diff
 		p.logger.Debug("start applying model version: %v", modelVersionId)
-		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, migrator.Postgresql); err != nil {
+		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, migrator.Sqlserver); err != nil {
 			return err
 		}
 		// update _migration table with the applied model_version_id
-		sql := `INSERT INTO _migration ( model_version_id ) VALUES ($1) ON CONFLICT DO NOTHING;`
+		sql := `INSERT INTO _migration ( model_version_id ) VALUES ($1);`
 		_, err := p.db.Exec(sql, modelVersionId)
 		if err != nil {
 			return fmt.Errorf("error inserting model_version_id into _migration table: %v", err)
