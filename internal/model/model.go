@@ -144,17 +144,28 @@ func (f *Field) SQLTypeSqlServer() string {
 	var builder strings.Builder
 	switch f.Type {
 	case "String":
-		builder.WriteString("varchar")
-	case "DateTime":
-		if f.IsTimestampZ {
-			builder.WriteString("datetime2(6)")
+		if f.Name == "id" {
+			builder.WriteString("varchar(100)")
 		} else {
-			builder.WriteString("datetime(3)")
+			builder.WriteString("varchar(max)")
 		}
+	case "DateTime":
+		builder.WriteString("nvarchar(100)")
+		//TODO: handle dates for sqlserver?
+		// if f.IsTimestampZ {
+		// 	builder.WriteString("datetime2(6)")
+		// } else {
+		// 	builder.WriteString("datetime(3)")
+		// }
 	case "BigInt":
 		builder.WriteString("bigint")
 	case "Int":
-		builder.WriteString("int")
+
+		if f.IsList {
+			builder.WriteString("NVARCHAR(max)")
+		} else {
+			builder.WriteString("int")
+		}
 	case "Double":
 		builder.WriteString("decmial")
 	case "Float":
@@ -162,15 +173,15 @@ func (f *Field) SQLTypeSqlServer() string {
 	case "Boolean":
 		builder.WriteString("bit")
 	case "Json":
-		builder.WriteString("VarBinary")
+		builder.WriteString("NVARCHAR(max)")
 	case "Bytes":
-		builder.WriteString("Varbinary")
+		builder.WriteString("binary")
 	case "Decimal":
 		builder.WriteString("DECIMAL")
 	}
 
 	if f.IsEnum {
-		builder.WriteString("text")
+		builder.WriteString("nvarchar(max)")
 	}
 
 	// TODO: Sqlserver does not support arrays

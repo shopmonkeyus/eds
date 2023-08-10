@@ -8,7 +8,7 @@ require (
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/schollz/progressbar/v3 v3.13.1
 	github.com/shirou/gopsutil/v3 v3.23.6
-	github.com/shopmonkeyus/go-common v0.0.44
+	github.com/shopmonkeyus/go-common v0.0.45
 	github.com/stretchr/testify v1.8.4
 )
 
