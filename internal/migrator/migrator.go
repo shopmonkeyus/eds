@@ -3,7 +3,6 @@ package migrator
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -12,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mitchellh/colorstring"
 	"github.com/schollz/progressbar/v3"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
@@ -31,7 +28,7 @@ type MigrateOpts struct {
 	SkipCreate bool
 }
 
-func loadTableSchema(logger logger.Logger, db *pgxpool.Pool, tableName string) ([]Column, error) {
+func loadTableSchema(logger logger.Logger, db *sql.DB, tableName, tableSchema string) ([]Column, error) {
 	started := time.Now()
 	query := `SELECT
 	c.table_name,
@@ -43,11 +40,11 @@ func loadTableSchema(logger logger.Logger, db *pgxpool.Pool, tableName string) (
 FROM
 	information_schema.columns c
 WHERE
-	c.table_schema = 'public' AND
-	c.table_name = '@tableName'
+	c.table_schema = $1 AND
+	c.table_name = $2
 ORDER BY
 	c.table_name, c.ordinal_position;`
-	rows, err := db.Query(context.TODO(), query, pgx.NamedArgs{"tableName": tableName})
+	rows, err := db.Query(query, tableSchema, tableName)
 	if err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			// this means there is not a table made and we need to build one...
@@ -113,12 +110,12 @@ func (w *sqlWriter) Write(p []byte) (int, error) {
 var traceSQL bool
 var multiSpaceRegexp = regexp.MustCompile(`\s{2,}`)
 
-func (w *sqlWriter) runSQL(pb *progressbar.ProgressBar, logger logger.Logger, db *pgxpool.Pool, sql string, offset int, total int) error {
+func (w *sqlWriter) runSQL(pb *progressbar.ProgressBar, logger logger.Logger, db *sql.DB, sql string, offset int, total int) error {
 	if sql == "" || sql == ";" || sql == "\n" {
 		return nil
 	}
 	started := time.Now()
-	if _, err := db.Exec(context.TODO(), sql); err != nil {
+	if _, err := db.Exec(sql); err != nil {
 		if pb != nil {
 			pb.Clear()
 			pb.Close()
@@ -143,7 +140,7 @@ func (w *sqlWriter) runSQL(pb *progressbar.ProgressBar, logger logger.Logger, db
 	return nil
 }
 
-func (w *sqlWriter) run(logger logger.Logger, db *pgxpool.Pool) error {
+func (w *sqlWriter) run(logger logger.Logger, db *sql.DB) error {
 	for _, buf := range strings.Split(w.buf.String(), ";") {
 		sql := strings.TrimSpace(strings.ReplaceAll(buf, "\n", " "))
 		if sql != "" {
@@ -170,9 +167,9 @@ func (w *sqlWriter) run(logger logger.Logger, db *pgxpool.Pool) error {
 }
 
 // Migrate will run migration using model against db
-func MigrateTable(logger logger.Logger, db *pgxpool.Pool, datamodel *dm.Model, tableName string) error {
+func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableName, tableSchema string, dialect Dialect) error {
 
-	schema, err := loadTableSchema(logger, db, tableName)
+	schema, err := loadTableSchema(logger, db, tableName, tableSchema)
 	if err != nil {
 		return err
 	}
@@ -195,7 +192,7 @@ func MigrateTable(logger logger.Logger, db *pgxpool.Pool, datamodel *dm.Model, t
 		newTables[tableName] = true
 	}
 
-	change.Format(tableName, "sql", &output)
+	change.Format(tableName, "sql", &output, dialect)
 
 	stdout.Flush()
 

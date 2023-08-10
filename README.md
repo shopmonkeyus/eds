@@ -39,7 +39,18 @@ The following are the supported providers:
 - [SQL Server DB](https://www.microsoft.com/en-us/sql-server)
 - File - use `file://<PATH>` to stream Json lines via STDIN to an executable provided by PATH
 
-## Advanced Usage
+## Development
+
+These are the instructions to run EDS for local development. This will spin up a postgres and azure-edge database using docker compose.
+
+```bash
+./hack localstack
+
+export SQL_PASS=Asdf1234! && go run . server --server nats://localhost:4222 --company-id 6287a4154d1a72cc5ce091bb "sqlserver://sa:$SQL_PASS@localhost:1433?database=shopmonkey"
+
+export PGPASS=postgres && go run . server --server nats://localhost:4222 --company-id 6287a4154d1a72cc5ce091bb "postgresql://postgres:$PGPASS@localhost:5432/shopmonkey?sslmode=disable"
+
+```
 
 ### Logging
 
