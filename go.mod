@@ -7,7 +7,7 @@ require (
 	github.com/shopmonkeyus/go-common v0.0.43
 	github.com/shopmonkeyus/go-datamodel v0.0.9
 	gorm.io/driver/sqlserver v1.4.2
-	gorm.io/gorm v1.24.5
+	gorm.io/gorm v1.25.4
 )
 
 require (
