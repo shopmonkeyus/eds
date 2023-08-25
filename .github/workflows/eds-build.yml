@@ -1,0 +1,88 @@
+name: Artifact Registry
+
+on:
+  push:
+    branches:
+      - eds-server-chart
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      REGION: us-central1
+      ARTIFACT_REPO: docker
+      IMAGE_NAME: eds-server
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Configure auth for GCP
+        uses: google-github-actions/auth@v0.4.0
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker to use gcloud
+        run: |
+          gcloud --quiet auth configure-docker $REGION-docker.pkg.dev
+
+      - uses: actions/checkout@v3
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+      
+      - name: Get branch name
+        id: branch-name
+        uses: tj-actions/branch-names@v6
+      
+      - name: Get the build SHA
+        id: sha
+        env:
+          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          if [ "$GIT_BRANCH" = "main" ];
+          then
+            echo sha=$MERGE_SHA >> $GITHUB_OUTPUT
+          elif [ -n "$PR_SHA" ]; then
+            echo sha=$PR_SHA >> $GITHUB_OUTPUT
+          else
+            echo sha=alpha >> $GITHUB_OUTPUT
+          fi
+
+      - name: Construct the tags
+        id: construct_tags
+        run: |
+          TAGS=${{ steps.sha.outputs.sha }}
+    
+          if [[ $GITHUB_REF == 'refs/heads/main' ]]; then
+            TAGS="$TAGS,beta"
+          fi
+    
+          if [[ $GITHUB_EVENT_NAME == 'release' ]]; then
+            VERSION_TAG=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
+            TAGS="$TAGS,$VERSION_TAG,latest"
+          fi
+
+          echo tags=$TAGS >> $GITHUB_OUTPUT
+          
+      - name: Build and push beta tag
+        uses: docker/build-push-action@v2
+        env:
+          BUILD_DATE: ${{ steps.date.outputs.date }}
+          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
+          GIT_SHA: ${{ steps.sha.outputs.sha }}
+        with:
+          push: true
+          context: .
+          file: ./Dockerfile
+          tags: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:${{ steps.construct_tags.outputs.tags }}
+          build-args: |
+            BUILD_DATE=$BUILD_DATE
+            GIT_BRANCH=$GIT_BRANCH 
+            GIT_SHA=$GIT_SHA
+
+
