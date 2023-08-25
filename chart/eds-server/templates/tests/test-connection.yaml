@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "eds-server.fullname" . }}-test-connection"
+  labels:
+    {{- include "eds-server.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "eds-server.fullname" . }}:{{ .Values.service.port }}']
+  restartPolicy: Never
