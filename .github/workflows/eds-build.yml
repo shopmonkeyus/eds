@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - eds-server-chart
+  release:
+    types: 
+      - published
 
 jobs:
   build-and-push:
@@ -61,7 +64,7 @@ jobs:
           TAGS=${{ steps.sha.outputs.sha }}
     
           # if we're on the main branch, add the beta tag
-          if [[ $GITHUB_REF == 'refs/heads/eds-server-chart' ]]; then
+          if [[ $GITHUB_REF == 'refs/heads/main' ]]; then
             TAGS="$TAGS beta"
           fi
     
