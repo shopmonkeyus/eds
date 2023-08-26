@@ -42,29 +42,12 @@ jobs:
       - name: Get branch name
         id: branch-name
         uses: tj-actions/branch-names@v7
-      
-      - name: Get the build SHA
-        id: sha
-        env:
-          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
-          PR_SHA: ${{ github.event.pull_request.head.sha }}
-          MERGE_SHA: ${{ github.sha }}
-          COMMIT_SHA: ${{ github.sha }}
-        run: |
-          if [ "$GIT_BRANCH" = "main" ];
-          then
-            echo sha=$MERGE_SHA >> $GITHUB_OUTPUT
-          elif [ -n "$PR_SHA" ]; then
-            echo sha=$PR_SHA >> $GITHUB_OUTPUT
-          else
-            echo sha=$COMMIT_SHA >> $GITHUB_OUTPUT
-          fi
 
       - name: Construct the tags
         id: construct_tags
         run: |
           # default to the SHA
-          TAGS=${{ steps.sha.outputs.sha }}
+          TAGS=${{ github.sha }}
     
           # if we're on the main branch, add the beta tag
           if [[ $GITHUB_REF == 'refs/heads/main' ]]; then
@@ -91,7 +74,7 @@ jobs:
         env:
           BUILD_DATE: ${{ steps.date.outputs.date }}
           GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
-          GIT_SHA: ${{ steps.sha.outputs.sha }}
+          GIT_SHA: ${{ github.sha }}
         with:
           push: true
           context: .
