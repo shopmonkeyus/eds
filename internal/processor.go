@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -9,24 +10,28 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/shopmonkeyus/eds-server/internal/datatypes"
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/go-common/logger"
 	snats "github.com/shopmonkeyus/go-common/nats"
-	"github.com/shopmonkeyus/go-datamodel/datatypes"
-	v3 "github.com/shopmonkeyus/go-datamodel/v3"
 )
 
+var emptyJSON = []byte("{}")
+
+const modelRequestTimeout = time.Duration(time.Second * 30)
+
 type MessageProcessor struct {
-	logger          logger.Logger
-	companyID       string
-	provider        Provider
-	conn            *nats.Conn
-	js              nats.JetStreamContext
-	subscriber      snats.Subscriber
-	dumpMessagesDir string
-	consumerPrefix  string
-	context         context.Context
-	cancel          context.CancelFunc
-	tableLookup     map[string]bool
+	logger            logger.Logger
+	companyID         string
+	provider          Provider
+	conn              *nats.Conn
+	js                nats.JetStreamContext
+	subscriber        snats.Subscriber
+	dumpMessagesDir   string
+	consumerPrefix    string
+	context           context.Context
+	cancel            context.CancelFunc
+	modelVersionCache map[string]dm.Model
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -64,22 +69,19 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 			}
 		}
 	}
-	tableLookup := make(map[string]bool)
-	for _, name := range v3.TableNames {
-		tableLookup[name] = true
-	}
+
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
-		logger:          opts.Logger,
-		companyID:       opts.CompanyID,
-		provider:        opts.Provider,
-		conn:            opts.NatsConnection,
-		dumpMessagesDir: opts.DumpMessagesDir,
-		consumerPrefix:  opts.ConsumerPrefix,
-		js:              js,
-		tableLookup:     tableLookup,
-		context:         context,
-		cancel:          cancel,
+		logger:            opts.Logger.WithPrefix("[nats]"),
+		companyID:         opts.CompanyID,
+		provider:          opts.Provider,
+		conn:              opts.NatsConnection,
+		dumpMessagesDir:   opts.DumpMessagesDir,
+		consumerPrefix:    opts.ConsumerPrefix,
+		js:                js,
+		context:           context,
+		cancel:            cancel,
+		modelVersionCache: make(map[string]dm.Model),
 	}
 	return processor, nil
 }
@@ -88,16 +90,14 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *nats.Msg) error {
 	tok := strings.Split(msg.Subject, ".")
 	model := tok[1]
-	if !p.tableLookup[model] {
-		// skip any non EDS models
-		msg.AckSync()
-		return nil
-	}
+
 	msgid := msg.Header.Get("Nats-Msg-Id")
 	encoding := msg.Header.Get("content-encoding")
 	gzipped := encoding == "gzip/json"
 	p.logger.Trace("received msgid: %s, subject: %s", msgid, msg.Subject)
-	object, err := v3.NewFromChangeEvent(model, msg.Data, gzipped)
+
+	// unpack as json based change  event
+	data, err := datatypes.FromChangeEvent(msg.Data, gzipped)
 	if err != nil {
 		if gzipped {
 			dec, _ := datatypes.Gunzip(msg.Data)
@@ -108,8 +108,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		msg.AckSync()
 		return nil
 	}
-	data := object.(datatypes.ChangeEventPayload)
-	p.logger.Trace("decoded object: %s for msgid: %s", object, msgid)
+	p.logger.Trace("decoded object: %s for msgid: %s", data, msgid)
 	dumpFiles := p.dumpMessagesDir != ""
 	if dumpFiles {
 		ext := ".json"
@@ -119,11 +118,48 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		fn := path.Join(p.dumpMessagesDir, fmt.Sprintf("%s_%v_%s%s", model, time.Now().UnixNano(), msgid, ext))
 		os.WriteFile(fn, msg.Data, 0644)
 	}
-	if err := p.provider.Process(data); err != nil {
-		p.logger.Error("error processing change event: %s. %s", object, err)
+
+	var schema dm.Model
+
+	modelVersion := data.GetModelVersion()
+	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
+	p.logger.Trace("got modelVersionId for: %s %s %s for msgid: %s", modelVersionId, model, modelVersion, msgid)
+
+	currentModelVersion, found := p.modelVersionCache[modelVersionId]
+
+	if found {
+		schema = currentModelVersion
+		p.logger.Trace("found cached modelVersion for: %s for msgid: %s", modelVersionId, msgid)
+
+	} else {
+		// lookup version in nats kv
+		p.logger.Trace("looking up modelVersion for: %s for msgid: %s", modelVersionId, msgid)
+
+		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJSON, modelRequestTimeout)
+
+		if err != nil {
+			return err
+		}
+		var foundSchema datatypes.SchemaResponse
+		err = json.Unmarshal(entry.Data, &foundSchema)
+		if err != nil {
+			return fmt.Errorf("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
+		}
+		schema = foundSchema.Data
+		if foundSchema.Success {
+			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+			p.modelVersionCache[modelVersionId] = schema
+		} else {
+			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+		}
+	}
+	if err := p.provider.Process(data, schema); err != nil {
+		p.logger.Error("error processing change event: %s. %s", data, err)
+		return err
 	}
 	if err := msg.AckSync(); err != nil {
-		p.logger.Error("error calling ack for message: %s. %s", object, err)
+		p.logger.Error("error calling ack for message: %s. %s", data, err)
+		return err
 	}
 	return nil
 }
@@ -136,8 +172,9 @@ func (p *MessageProcessor) Start() error {
 	if companyId == "" {
 		companyId = "*"
 	}
-	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".>", p.callback,
+	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".*.PUBLIC.>", p.callback,
 		snats.WithExactlyOnceContext(p.context),
+		snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
 	)
 	if err != nil {
 		return err
@@ -152,7 +189,9 @@ func (p *MessageProcessor) Stop() error {
 	p.logger.Trace("message processor stopping")
 	p.cancel()
 	if p.subscriber != nil {
-		p.subscriber.Close()
+		if err := p.subscriber.Close(); err != nil {
+			return err
+		}
 	}
 	p.logger.Trace("message processor stopped")
 	return nil

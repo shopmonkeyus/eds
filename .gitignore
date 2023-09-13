@@ -2,3 +2,5 @@
 /dist/
 /eds-server
 *.creds
+/postgres-data
+/sqlserver-data

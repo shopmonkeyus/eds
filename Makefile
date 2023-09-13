@@ -1,4 +1,4 @@
-.PHONY: all build e2e lint
+.PHONY: all build e2e lint localstack
 
 all: e2e
 
@@ -13,3 +13,6 @@ e2e:
 
 e2e_verbose:
 	@go run -tags e2e . e2e --verbose
+
+localstack:
+	@./hack/localstack

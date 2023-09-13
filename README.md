@@ -12,40 +12,45 @@ You can download release binary for different operation systems from the [Releas
 
 ## Requirements
 
-You will need [Golang](https://go.dev/dl/) version 1.19 or later to use this package.
+You will need [Golang](https://go.dev/dl/) version 1.20 or later to use this package.
 
 ## Basic Usage
 
-You first need to migrate your database to load the schema into a database. The database must exist before running this command:
-
+After downloading the `eds-server` binary and placing it in your path, you can start the server as follows:
 ```bash
-go run . migrate --url 'postgresql://root@localhost:26257/test?sslmode=disable'
+eds-server --creds <your_server>.creds 'postgresql://root@localhost:26257/test?sslmode=disable'
 ```
 
-Replace the `--url` flag with your provider connection setting
-
-Once you have a database, you can start the server:
-
 ```bash
-go run . start --url 'postgresql://root@localhost:26257/test?sslmode=disable'
+eds-server --creds <your_server>.creds 'file:///<path-to-eds>/eds-server/echo.sh' --verbose
 ```
+To run the examples, please clone this repo and follow the linked READMEs.
 
-You will also need to provide a server credentials file provided by Shopmonkey and your company id. These should be passed in as command line arguments as well:
+- [EDS Server with Bash target example](./examples/bash/README.md)
 
-```bash
---creds server.creds --company-id 1234
-```
+- [EDS Server with Python target example](./examples/python/README.md)
 
+ 
 ## Providers
 
 The following are the supported providers:
 
 - [PostgreSQL DB](https://www.postgresql.org/)
-- [Cockroach DB](https://www.cockroachlabs.com/) - use the postgres connection string
 - [SQL Server DB](https://www.microsoft.com/en-us/sql-server)
-- File - use `file://<PATH>` to stream files to a directory provided by PATH
+- File - use `file://<PATH>` to stream Json lines via STDIN to an executable provided by PATH
 
-## Advanced Usage
+## Development
+
+These are the instructions to run EDS for local development. This will spin up a postgres and azure-edge database using docker compose.
+
+```bash
+./hack localstack
+
+export SQL_PASS=Asdf1234! && go run . server --server nats://localhost:4222 --company-id 6287a4154d1a72cc5ce091bb "sqlserver://sa:$SQL_PASS@localhost:1433?database=shopmonkey"
+
+export PGPASS=postgres && go run . server --server nats://localhost:4222 --company-id 6287a4154d1a72cc5ce091bb "postgresql://postgres:$PGPASS@localhost:5432/shopmonkey?sslmode=disable"
+
+```
 
 ### Logging
 
