@@ -3,7 +3,7 @@ module github.com/shopmonkeyus/eds-server
 go 1.20
 
 require (
-	github.com/jackc/pgx/v5 v5.4.2
+	github.com/jackc/pgx/v5 v5.4.3
 	github.com/microsoft/go-mssqldb v1.5.0
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/schollz/progressbar/v3 v3.13.1
