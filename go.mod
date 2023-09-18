@@ -39,7 +39,7 @@ require (
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/nats-io/jwt/v2 v2.4.1
+	github.com/nats-io/jwt/v2 v2.5.2
 	github.com/nats-io/nats.go v1.28.0
 	github.com/nats-io/nkeys v0.4.4 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
