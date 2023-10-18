@@ -22,11 +22,11 @@ const modelRequestTimeout = time.Duration(time.Second * 30)
 
 type MessageProcessor struct {
 	logger            logger.Logger
-	companyID         string
+	companyID         []string
 	provider          Provider
 	conn              *nats.Conn
 	js                nats.JetStreamContext
-	subscriber        snats.Subscriber
+	subscriber        []snats.Subscriber
 	dumpMessagesDir   string
 	consumerPrefix    string
 	context           context.Context
@@ -37,7 +37,7 @@ type MessageProcessor struct {
 // MessageProcessorOpts is the options for the message processor
 type MessageProcessorOpts struct {
 	Logger          logger.Logger
-	CompanyID       string
+	CompanyID       []string
 	Provider        Provider
 	NatsConnection  *nats.Conn
 	DumpMessagesDir string
@@ -167,20 +167,24 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 // Start will start processing messages
 func (p *MessageProcessor) Start() error {
 	p.logger.Trace("message processor starting")
-	name := fmt.Sprintf("%seds-server-%s", p.consumerPrefix, p.companyID)
-	companyId := p.companyID
-	if companyId == "" {
-		companyId = "*"
+	p.logger.Trace("starting message processor for company ids: %s", p.companyID)
+	for _, companyID := range p.companyID {
+		name := fmt.Sprintf("%seds-server-%s", p.consumerPrefix, companyID)
+		p.logger.Trace("starting message processor for consumer: %s and company id: %s", name, companyID)
+
+		if companyID == "" {
+			companyID = "*"
+		}
+		c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
+			snats.WithExactlyOnceContext(p.context),
+			snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
+		)
+		if err != nil {
+			return err
+		}
+		p.subscriber = append(p.subscriber, c)
+		p.logger.Trace("message processor started for consumer: %s and company id: %s", name, companyID)
 	}
-	c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyId+".*.PUBLIC.>", p.callback,
-		snats.WithExactlyOnceContext(p.context),
-		snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
-	)
-	if err != nil {
-		return err
-	}
-	p.subscriber = c
-	p.logger.Trace("message processor started")
 	return nil
 }
 
@@ -188,9 +192,11 @@ func (p *MessageProcessor) Start() error {
 func (p *MessageProcessor) Stop() error {
 	p.logger.Trace("message processor stopping")
 	p.cancel()
-	if p.subscriber != nil {
-		if err := p.subscriber.Close(); err != nil {
-			return err
+	if p.subscriber != nil && len(p.subscriber) > 0 {
+		for _, subscriber := range p.subscriber {
+			if err := subscriber.Close(); err != nil {
+				return err
+			}
 		}
 	}
 	p.logger.Trace("message processor stopped")
