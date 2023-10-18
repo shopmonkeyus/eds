@@ -40,7 +40,9 @@ var serverCmd = &cobra.Command{
 		natsurl := strings.Join(hosts, ",")
 
 		var natsCredentials nats.Option
-		companyID, _ := cmd.Flags().GetString("company-id")
+		var companyIDs []string
+
+		companyName := "unknown"
 
 		if creds != "" {
 			if _, err := os.Stat(creds); os.IsNotExist(err) {
@@ -64,14 +66,16 @@ var serverCmd = &cobra.Command{
 				logger.Error("error: decoding JWT claims: %s", err)
 				os.Exit(1)
 			}
-			companyID = claim.Audience
-			if companyID == "" {
+			companyIDs = strings.Split(claim.Audience, ",")
+			if len(companyIDs) == 0  {
 				logger.Error("error: invalid JWT claim. missing audience")
 				os.Exit(1)
 			}
+			companyName = claim.Name
+
 		}
 
-		nc, err := snats.NewNats(logger, "eds-server-"+companyID, natsurl, natsCredentials)
+		nc, err := snats.NewNats(logger, "eds-server-"+companyName, natsurl, natsCredentials)
 		if err != nil {
 			logger.Error("nats: %s", err)
 			os.Exit(1)
@@ -82,7 +86,7 @@ var serverCmd = &cobra.Command{
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
 				Logger:          logger,
-				CompanyID:       companyID,
+				CompanyID:       companyIDs,
 				Provider:        provider,
 				NatsConnection:  nc,
 				TraceNats:       mustFlagBool(cmd, "trace-nats", false),
@@ -119,8 +123,6 @@ var serverCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
-	serverCmd.Flags().String("company-id", "", "the customer id")
-	serverCmd.Flags().MarkHidden("company-id") // only for testing, otherwise should come from the credentials file
 	serverCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
 	serverCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
 	serverCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
