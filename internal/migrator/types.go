@@ -123,8 +123,9 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		dataType = field.SQLTypePostgres()
 	case util.Sqlserver:
 		dataType = field.SQLTypeSqlServer()
-	case Snowflake:
+	case util.Snowflake:
 		dataType = field.SQLTypeSnowflake()
+
 	default:
 		dataType = field.PrismaType()
 	}
@@ -135,6 +136,7 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		DataType:   dataType,
 		Dialect:    dialect,
 	}
+
 }
 
 func (c Column) GetDataType() string {

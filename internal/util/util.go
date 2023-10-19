@@ -13,6 +13,7 @@ type Dialect string
 const (
 	Postgresql Dialect = "postgresql"
 	Sqlserver  Dialect = "sqlserver"
+	Snowflake  Dialect = "snowflake"
 )
 
 func QuoteJoin(vals []string, quote string, sep string) string {
