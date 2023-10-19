@@ -54,6 +54,14 @@ export PGPASS=postgres && go run . server --server nats://localhost:4222 --compa
 
 ```
 
+To run EDS with Snowflake, your connection string should be in the format of:
+
+`snowflake://<username>:<password>@<organization_name>-<account>/<database_name>/<schema>?warehouse=<warehouse_name>&client_session_keep_alive=true`
+
+The `client_session_keep_alive=true` portion is optional, but you may run into authentication issues after 4 hours if there is no activity from EDS to Snowflake. See [Snowflake Session Policies](https://docs.snowflake.com/en/user-guide/session-policies) for more details.
+
+A full connection string would look like: `snowflake://jsmith:mypassword@zflycky-cu81015/mydb/PUBLIC?warehouse=COMPUTE_WH&client_session_keep_alive=true`
+
 ### Logging
 
 You can turn on verbose logging with `--verbose` flag.
