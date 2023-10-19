@@ -3,9 +3,10 @@ package migrator
 import (
 	"bufio"
 	"fmt"
-	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"io"
 	"strings"
+
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
 )
 
 const spacer = "    "

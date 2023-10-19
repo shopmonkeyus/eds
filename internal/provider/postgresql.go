@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,6 @@ type PostgresProvider struct {
 
 var _ internal.Provider = (*PostgresProvider)(nil)
 
-// NewPostgresProvider returns a provider that will stream files to a folder provided in the url
 func NewPostgresProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[postgresql]")
 	logger.Info("starting postgres plugin with connection: %s", connString)
@@ -124,7 +124,7 @@ func (p *PostgresProvider) upsertData(data datatypes.ChangeEventPayload, model d
 }
 
 func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
-	var sql strings.Builder
+	var query strings.Builder
 	var values []interface{}
 
 	if c.GetOperation() == datatypes.ChangeEventInsert || c.GetOperation() == datatypes.ChangeEventUpdate {
@@ -144,7 +144,7 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 
 		var scanned interface{}
 		if err := p.db.QueryRow(existsSql, data["id"].(string)).Scan(&scanned); err != nil {
-			if err.Error() == "sql: no rows in result set" {
+			if errors.Is(err, sql.ErrNoRows) {
 				p.logger.Debug("no rows found for: %s, %s", m.Table, data["id"])
 				shouldCreate = true
 			} else {
@@ -170,7 +170,7 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 				}
 				columnCount += 1
 			}
-			sql.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
+			query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
 		} else {
 			var updateColumns strings.Builder
 			var updateValues []interface{}
@@ -202,17 +202,17 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 			idPlaceholder := fmt.Sprintf(`$%d`, columnCount)
 			versionPlaceholder := fmt.Sprintf(`$%d`, columnCount+1)
 
-			sql.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND ("meta"->>'version')::bigint>%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
+			query.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND ("meta"->>'version')::bigint>%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
 		}
 	} else if c.GetOperation() == datatypes.ChangeEventDelete {
 		data := c.GetBefore()
 		p.logger.Debug("before object: %v", data)
 		values = append(values, data["id"].(string))
 		// TODO: maybe add soft-delete here? meta->>deleted=true, meta->>deletedAt=NOW()?
-		sql.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE id=$1`, m.Table) + ";\n")
+		query.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE id=$1`, m.Table) + ";\n")
 	}
 
-	return sql.String(), values, nil
+	return query.String(), values, nil
 }
 
 // ensureTableSchema will ensure the table schema is compatible with the incoming message

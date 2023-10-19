@@ -7,16 +7,16 @@ import (
 	"fmt"
 	"strings"
 
-	_ "github.com/microsoft/go-mssqldb"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	"github.com/shopmonkeyus/eds-server/internal/migrator"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
+	_ "github.com/snowflakedb/gosnowflake"
 )
 
-type SqlServerProvider struct {
+type SnowflakeProvider struct {
 	logger            logger.Logger
 	url               string
 	db                *sql.DB
@@ -26,46 +26,43 @@ type SqlServerProvider struct {
 	modelVersionCache map[string]bool
 }
 
-var _ internal.Provider = (*SqlServerProvider)(nil)
+var _ internal.Provider = (*SnowflakeProvider)(nil)
 
-func NewSqlServerProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
-	logger := plogger.WithPrefix("[sqlserver]")
-	logger.Info("starting mssql plugin with connection: %s", connString)
+func NewSnowflakeProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
+	logger := plogger.WithPrefix("[snowflake]")
+	logger.Info("starting snowflake plugin with connection: %s", connString)
 	ctx := context.Background()
-	return &SqlServerProvider{
+	return &SnowflakeProvider{
 		logger: logger,
 		url:    connString,
 		ctx:    ctx,
 		opts:   opts,
-		schema: "dbo",
+		schema: "PUBLIC",
 	}, nil
 }
 
 // Start the provider and return an error or nil if ok
-func (p *SqlServerProvider) Start() error {
+func (p *SnowflakeProvider) Start() error {
 	p.logger.Info("start")
 
-	db, err := sql.Open("sqlserver", p.url)
+	db, err := sql.Open("snowflake", p.url)
 	if err != nil {
-		return fmt.Errorf("unable to create connection pool: %w", err)
+		p.logger.Error("unable to create connection: %w", err)
 	}
 	p.db = db
 
 	// ensure _migration table
-	sql := `
-		IF OBJECT_ID(N'_migration', N'U') IS NULL
-		CREATE TABLE _migration (
-			model_version_id varchar(500) primary key
-		);
-	`
-
+	sql := `create or replace TABLE "_migration" (
+		"model_version_id" STRING NOT NULL,
+		primary key ("model_version_id")
+	);`
 	_, err = p.db.Exec(sql)
 	if err != nil {
 		return fmt.Errorf("unable to create _migration table: %w", err)
 	}
 	// fetch all the applied model version ids
 	// and we'll use this to decide whether or not to run a diff
-	query := `SELECT model_version_id from _migration;`
+	query := `SELECT "model_version_id" from "_migration";`
 	rows, err := p.db.Query(query)
 	if err != nil {
 		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
@@ -87,14 +84,14 @@ func (p *SqlServerProvider) Start() error {
 }
 
 // Stop the provider and return an error or nil if ok
-func (p *SqlServerProvider) Stop() error {
+func (p *SnowflakeProvider) Stop() error {
 	p.logger.Info("stop")
 	p.db.Close()
 	return nil
 }
 
 // Process data received and return an error or nil if processed ok
-func (p *SqlServerProvider) Process(data datatypes.ChangeEventPayload, schema dm.Model) error {
+func (p *SnowflakeProvider) Process(data datatypes.ChangeEventPayload, schema dm.Model) error {
 	if p.opts != nil && p.opts.DryRun {
 		p.logger.Info("[dry-run] would write: %v %v", data, schema)
 		return nil
@@ -113,7 +110,7 @@ func (p *SqlServerProvider) Process(data datatypes.ChangeEventPayload, schema dm
 }
 
 // upsertData will ensure the table schema is compatible with the incoming message
-func (p *SqlServerProvider) upsertData(data datatypes.ChangeEventPayload, model dm.Model) error {
+func (p *SnowflakeProvider) upsertData(data datatypes.ChangeEventPayload, model dm.Model) error {
 
 	// lookup model for data type
 	sql, values, err := p.getSQL(data, model)
@@ -130,7 +127,7 @@ func (p *SqlServerProvider) upsertData(data datatypes.ChangeEventPayload, model 
 	return nil
 }
 
-func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
+func (p *SnowflakeProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (string, []interface{}, error) {
 	var query strings.Builder
 	var values []interface{}
 
@@ -145,7 +142,7 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 		// check if record exists.
 		// using explicit check for existance results in much simpler queries
 		// vs ON CONFLICT checks. This is also much more portable across db engines
-		existsSql := fmt.Sprintf(`SELECT 1 from "%s" where "id"=@p1;`, m.Table)
+		existsSql := fmt.Sprintf(`SELECT 1 from "%s" where "id"=?;`, m.Table)
 
 		var shouldCreate bool
 
@@ -166,9 +163,17 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				if _, ok := data[field.Name]; !ok {
 					continue
 				}
+
 				// if yes, then add column
 				sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
-				sqlValuePlaceHolder.WriteString(fmt.Sprintf(`@p%d`, columnCount))
+				if field.Type == "Json" || field.IsList {
+					//Snowflake doesn't currently support inserting map[string]interface values, but supports converting
+					//a map to a json string, and then inserting it using the parse_json function
+					sqlValuePlaceHolder.WriteString(fmt.Sprintf(`parse_json(:%d)`, columnCount))
+				} else {
+					sqlValuePlaceHolder.WriteString(fmt.Sprintf(`:%d`, columnCount))
+				}
+
 				val, err := util.TryConvertJson(field.Type, data[field.Name])
 				if err != nil {
 					return "", nil, err
@@ -182,8 +187,8 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				}
 				columnCount += 1
 			}
-
-			query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s)`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
+			//TODO: Handle conflicts?
+			query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) SELECT %s`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
 		} else {
 			var updateColumns strings.Builder
 			var updateValues []interface{}
@@ -201,7 +206,7 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 					continue
 				}
 
-				updateColumns.WriteString(fmt.Sprintf(`"%s" = @p%d`, field.Name, columnCount))
+				updateColumns.WriteString(fmt.Sprintf(`"%s" = :%d`, field.Name, columnCount))
 
 				val, err := util.TryConvertJson(field.Type, data[field.Name])
 				if err != nil {
@@ -218,24 +223,34 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 
 			// add the id and version to the values array for safe substitution
 			values = append(values, data["id"].(string), c.GetVersion())
-			idPlaceholder := fmt.Sprintf(`@p%d`, columnCount)
-			versionPlaceholder := fmt.Sprintf(`@p%d`, columnCount+1)
+			idPlaceholder := fmt.Sprintf(`:%d`, columnCount)
+			//versionPlaceholder := fmt.Sprintf(`:%d`, columnCount+1)
 
-			query.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND JSON_VALUE(meta, '$.version') >%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
+			query.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s `, m.Table, updateColumns.String(), idPlaceholder) + ";\n")
 		}
 	} else if c.GetOperation() == datatypes.ChangeEventDelete {
 		data := c.GetBefore()
 		p.logger.Debug("before object: %v", data)
 		values = append(values, data["id"].(string))
-		// TODO: maybe add soft-delete here? meta->>deleted=true, meta->>deletedAt=NOW()?
-		query.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE id=@p1`, m.Table) + ";\n")
+		query.WriteString(fmt.Sprintf(`DELETE FROM "%s" WHERE "id"=?`, m.Table) + ";\n")
 	}
 
 	return query.String(), values, nil
 }
 
+func (p *SnowflakeProvider) isJSON(f *dm.Field, val interface{}) (bool, error) {
+	if _, ok := val.(map[string]interface{}); ok {
+		return true, nil
+	}
+	if _, ok := val.([]interface{}); ok {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 // ensureTableSchema will ensure the table schema is compatible with the incoming message
-func (p *SqlServerProvider) ensureTableSchema(schema dm.Model) error {
+func (p *SnowflakeProvider) ensureTableSchema(schema dm.Model) error {
 	modelVersionId := fmt.Sprintf("%s-%s", schema.Table, schema.ModelVersion)
 	modelVersionFound := p.modelVersionCache[modelVersionId]
 	p.logger.Debug("model versions: %v", p.modelVersionCache)
@@ -245,11 +260,11 @@ func (p *SqlServerProvider) ensureTableSchema(schema dm.Model) error {
 	} else {
 		// do the diff
 		p.logger.Debug("start applying model version: %v", modelVersionId)
-		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, migrator.Sqlserver); err != nil {
+		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, migrator.Snowflake); err != nil {
 			return err
 		}
 		// update _migration table with the applied model_version_id
-		sql := `INSERT INTO _migration ( model_version_id ) VALUES (@p1);`
+		sql := `INSERT INTO "_migration" ( "model_version_id" ) VALUES (?);`
 		_, err := p.db.Exec(sql, modelVersionId)
 		if err != nil {
 			return fmt.Errorf("error inserting model_version_id into _migration table: %v", err)

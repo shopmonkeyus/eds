@@ -14,6 +14,7 @@ type Dialect string
 const (
 	Postgresql Dialect = "postgresql"
 	Sqlserver  Dialect = "sqlserver"
+	Snowflake  Dialect = "snowflake"
 )
 
 type SQL interface {
@@ -122,8 +123,9 @@ func NewColumnFromField(table string, field *dm.Field, dialect Dialect) Column {
 		dataType = field.SQLTypePostgres()
 	case Sqlserver:
 		dataType = field.SQLTypeSqlServer()
+	case Snowflake:
+		dataType = field.SQLTypeSnowflake()
 	}
-
 	return Column{
 		Table:      table,
 		Name:       field.Name,
@@ -260,7 +262,7 @@ func (m ModelChange) SQL(dialect Dialect) string {
 		if dialect == Sqlserver {
 			sql.WriteString(fmt.Sprintf(`IF OBJECT_ID(N'%s', N'U') IS NULL`+"\n", m.Table))
 			sql.WriteString(fmt.Sprintf(`CREATE TABLE "%s" (`, m.Table) + "\n")
-		} else if dialect == Postgresql {
+		} else if dialect == Postgresql || dialect == Snowflake {
 			sql.WriteString(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (`, m.Table) + "\n")
 		}
 

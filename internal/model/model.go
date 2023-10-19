@@ -191,6 +191,46 @@ func (f *Field) SQLTypeSqlServer() string {
 	return builder.String()
 }
 
+func (f *Field) SQLTypeSnowflake() string {
+	var builder strings.Builder
+	if f.IsList {
+		builder.WriteString("ARRAY")
+		return builder.String()
+	}
+	switch f.Type {
+	case "String":
+		builder.WriteString("STRING")
+	case "DateTime":
+		if f.IsTimestampZ {
+			builder.WriteString("TIMESTAMPTZ")
+		} else {
+			builder.WriteString("TIMESTAMP")
+		}
+	case "BigInt":
+		builder.WriteString("BIGINT")
+	case "Int":
+		builder.WriteString("INTEGER")
+	case "Double":
+		builder.WriteString("DOUBLE")
+	case "Float":
+		builder.WriteString("FLOAT")
+	case "Boolean":
+		builder.WriteString("BOOLEAN")
+	case "Json":
+		builder.WriteString("VARIANT")
+	case "Bytes":
+		builder.WriteString("BINARY")
+	case "Decimal":
+		builder.WriteString("NUMBER")
+	}
+
+	if f.IsEnum {
+		builder.WriteString("STRING")
+	}
+
+	return builder.String()
+}
+
 func (f *Field) PrismaType() string {
 	typename := f.Type
 	if f.IsOptional && !f.IsList {
