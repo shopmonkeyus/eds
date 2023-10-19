@@ -127,8 +127,8 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		dataType = field.SQLTypeSnowflake()
 	default:
 		dataType = field.PrismaType()
-	}
 
+	}
 	return Column{
 		Table:      table,
 		Name:       field.Name,
