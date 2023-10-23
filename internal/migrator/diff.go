@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
-func (c *ModelChange) Format(name string, format string, writer io.Writer, dialect Dialect) {
+func (c *ModelChange) Format(name string, format string, writer io.Writer, dialect util.Dialect) {
 	if format == "sql" {
 		sql := c.SQL(dialect)
 		writer.Write([]byte(sql))
@@ -47,7 +48,7 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 
 		field = findField(model, column.Name)
 		if field != nil {
-			if field.PrismaType() != column.GetDataType() {
+			if field.GetDataType(column.Dialect) != column.GetDataType() {
 				action = UpdateAction
 				typeChanged = true
 				hasTypeChanges = true

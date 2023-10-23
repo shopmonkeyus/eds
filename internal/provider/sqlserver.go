@@ -13,6 +13,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	"github.com/shopmonkeyus/eds-server/internal/migrator"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -272,7 +273,7 @@ func (p *SqlServerProvider) ensureTableSchema(schema dm.Model) error {
 	} else {
 		// do the diff
 		p.logger.Debug("start applying model version: %v", modelVersionId)
-		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, migrator.Sqlserver); err != nil {
+		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, util.Sqlserver); err != nil {
 			return err
 		}
 		// update _migration table with the applied model_version_id

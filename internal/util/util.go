@@ -8,6 +8,13 @@ import (
 	"strings"
 )
 
+type Dialect string
+
+const (
+	Postgresql Dialect = "postgresql"
+	Sqlserver  Dialect = "sqlserver"
+)
+
 func QuoteJoin(vals []string, quote string, sep string) string {
 	res := make([]string, 0)
 	for _, val := range vals {

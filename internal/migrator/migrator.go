@@ -14,6 +14,7 @@ import (
 	"github.com/mitchellh/colorstring"
 	"github.com/schollz/progressbar/v3"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -165,7 +166,7 @@ func (w *sqlWriter) run(logger logger.Logger, db *sql.DB) error {
 }
 
 // Migrate will run migration using model against db
-func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableName, tableSchema string, dialect Dialect) error {
+func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableName, tableSchema string, dialect util.Dialect) error {
 
 	schema, err := loadTableSchema(logger, db, tableName, tableSchema)
 	if err != nil {

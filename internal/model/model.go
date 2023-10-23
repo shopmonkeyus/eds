@@ -191,6 +191,19 @@ func (f *Field) SQLTypeSqlServer() string {
 	return builder.String()
 }
 
+func (f *Field) GetDataType(dialect util.Dialect) string {
+	var dataType string
+	switch dialect {
+	case util.Postgresql:
+		dataType = f.SQLTypePostgres()
+	case util.Sqlserver:
+		dataType = f.SQLTypeSqlServer()
+	default:
+		dataType = f.PrismaType()
+	}
+	return dataType
+}
+
 func (f *Field) PrismaType() string {
 	typename := f.Type
 	if f.IsOptional && !f.IsList {
