@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
-func (c *ModelChange) Format(name string, format string, writer io.Writer, dialect Dialect) {
+func (c *ModelChange) Format(name string, format string, writer io.Writer, dialect util.Dialect) {
 	if format == "sql" {
 		sql := c.SQL(dialect)
 		writer.Write([]byte(sql))
@@ -32,11 +33,11 @@ func (c *ModelChange) Format(name string, format string, writer io.Writer, diale
 	}
 }
 
-func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
+func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, *ModelChange, error) {
 	needToAdd := make(map[string]*dm.Model)
 	var change *ModelChange
 	var hasTypeChanges bool
-
+	// fmt.Printf("INCOMING  COLUMNS %v", columns)
 	foundcolumns := make(map[string]bool)
 	for _, column := range columns {
 		foundcolumns[column.Name] = true
@@ -47,11 +48,11 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 
 		field = findField(model, column.Name)
 		if field != nil {
-			if field.PrismaType() != column.GetDataType() {
+			if field.GetDataType(dialect) != column.GetDataType() {
 				action = UpdateAction
 				typeChanged = true
 				hasTypeChanges = true
-				details = append(details, fmt.Sprintf("type changed from `%s` to `%s`", column.GetDataType(), field.PrismaType()))
+				details = append(details, fmt.Sprintf("type changed from `%s` to `%s`", column.GetDataType(), field.GetDataType(dialect)))
 			}
 		} else {
 			// field is missing, need to create one
@@ -80,28 +81,33 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 			Detail:      strings.Join(details, ", "),
 			TypeChanged: typeChanged,
 		})
+	}
 
-		if model != nil {
-			for _, field := range model.Fields {
-				if !foundcolumns[field.Table] {
-					if change == nil {
-						change = &ModelChange{
-							Table:        model.Table,
-							Model:        model,
-							Action:       UpdateAction,
-							FieldChanges: make([]FieldChange, 0),
-						}
+	if model != nil {
+		// now we're trying to find columns that are  new in the model
+		// and need to be created
+		for _, field := range model.Fields {
+			if !foundcolumns[field.Name] {
+				if change == nil {
+					change = &ModelChange{
+						Table:        model.Table,
+						Model:        model,
+						Action:       UpdateAction,
+						FieldChanges: make([]FieldChange, 0),
 					}
-					change.FieldChanges = append(change.FieldChanges, FieldChange{
-						Action: AddAction,
-						Name:   field.Table,
-						Field:  field,
-						Detail: fmt.Sprintf("with type `%s`", field.PrismaType()),
-					})
 				}
+				change.FieldChanges = append(change.FieldChanges, FieldChange{
+					Action: AddAction,
+					Name:   field.Table,
+					Field:  field,
+					Detail: fmt.Sprintf("with type `%s`", field.GetDataType(dialect)),
+				})
+
 			}
 		}
 	}
+
+	// This is the case where we don't have the model yet in the db an dneed to create it
 	if len(columns) == 0 {
 		needToAdd[model.Table] = model
 		change = &ModelChange{
@@ -115,7 +121,7 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 				Action: AddAction,
 				Field:  field,
 				Name:   field.Table,
-				Detail: fmt.Sprintf("with type `%s`", field.PrismaType()),
+				Detail: fmt.Sprintf("with type `%s`", field.GetDataType(dialect)),
 			})
 		}
 
