@@ -108,9 +108,9 @@ func (f *Field) SQLTypePostgres() string {
 		builder.WriteString("text")
 	case "DateTime":
 		if f.IsTimestampZ {
-			builder.WriteString("TIMESTAMPTZ(6)")
+			builder.WriteString("timestamp with time zone")
 		} else {
-			builder.WriteString("TIMESTAMP(3)")
+			builder.WriteString("timestamp")
 		}
 	case "BigInt":
 		builder.WriteString("INT8")
@@ -121,7 +121,7 @@ func (f *Field) SQLTypePostgres() string {
 	case "Float":
 		builder.WriteString("FLOAT8")
 	case "Boolean":
-		builder.WriteString("BOOL")
+		builder.WriteString("BOOLEAN")
 	case "Json":
 		builder.WriteString("JSONB")
 	case "Bytes":
@@ -137,7 +137,7 @@ func (f *Field) SQLTypePostgres() string {
 	if f.IsList {
 		builder.WriteString(" ARRAY")
 	}
-	return builder.String()
+	return strings.ToLower(builder.String())
 }
 
 func (f *Field) SQLTypeSqlServer() string {
@@ -188,7 +188,7 @@ func (f *Field) SQLTypeSqlServer() string {
 	// if f.IsList {
 	// 	builder.WriteString(" ARRAY")
 	// }
-	return builder.String()
+	return strings.ToLower(builder.String())
 }
 
 func (f *Field) GetDataType(dialect util.Dialect) string {

@@ -115,6 +115,8 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		dataType = field.SQLTypePostgres()
 	case util.Sqlserver:
 		dataType = field.SQLTypeSqlServer()
+	default:
+		dataType = field.PrismaType()
 	}
 
 	return Column{

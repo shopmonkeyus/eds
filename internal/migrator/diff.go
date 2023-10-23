@@ -33,7 +33,7 @@ func (c *ModelChange) Format(name string, format string, writer io.Writer, diale
 	}
 }
 
-func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
+func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, *ModelChange, error) {
 	needToAdd := make(map[string]*dm.Model)
 	var change *ModelChange
 	var hasTypeChanges bool
@@ -48,11 +48,11 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 
 		field = findField(model, column.Name)
 		if field != nil {
-			if field.GetDataType(column.Dialect) != column.GetDataType() {
+			if field.GetDataType(dialect) != column.GetDataType() {
 				action = UpdateAction
 				typeChanged = true
 				hasTypeChanges = true
-				details = append(details, fmt.Sprintf("type changed from `%s` to `%s`", column.GetDataType(), field.PrismaType()))
+				details = append(details, fmt.Sprintf("type changed from `%s` to `%s`", column.GetDataType(), field.GetDataType(dialect)))
 			}
 		} else {
 			// field is missing, need to create one
@@ -97,7 +97,7 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 						Action: AddAction,
 						Name:   field.Table,
 						Field:  field,
-						Detail: fmt.Sprintf("with type `%s`", field.PrismaType()),
+						Detail: fmt.Sprintf("with type `%s`", field.GetDataType(dialect)),
 					})
 				}
 			}
@@ -116,7 +116,7 @@ func diffModels(columns []Column, model *dm.Model) (bool, *ModelChange, error) {
 				Action: AddAction,
 				Field:  field,
 				Name:   field.Table,
-				Detail: fmt.Sprintf("with type `%s`", field.PrismaType()),
+				Detail: fmt.Sprintf("with type `%s`", field.GetDataType(dialect)),
 			})
 		}
 
