@@ -9,13 +9,6 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
-type Dialect string
-
-const (
-	Postgresql Dialect = "postgresql"
-	Sqlserver  Dialect = "sqlserver"
-)
-
 type SQL interface {
 	SQL() string
 }
@@ -108,20 +101,22 @@ type Column struct {
 	Name                string
 	Default             *string
 	IsNullable          bool
-	IsHidden            bool
 	DataType            string
 	MaxLength           *string
 	UserDefinedTypeName *string
+	Dialect             util.Dialect
 }
 
-func NewColumnFromField(table string, field *dm.Field, dialect Dialect) Column {
+func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Column {
 
 	var dataType string
 	switch dialect {
-	case Postgresql:
+	case util.Postgresql:
 		dataType = field.SQLTypePostgres()
-	case Sqlserver:
+	case util.Sqlserver:
 		dataType = field.SQLTypeSqlServer()
+	default:
+		dataType = field.PrismaType()
 	}
 
 	return Column{
@@ -129,28 +124,29 @@ func NewColumnFromField(table string, field *dm.Field, dialect Dialect) Column {
 		Name:       field.Name,
 		IsNullable: true,
 		DataType:   dataType,
+		Dialect:    dialect,
 	}
 }
 
 func (c Column) GetDataType() string {
-	return toPrismaType(c.DataType, c.UserDefinedTypeName, c.IsNullable)
+	return c.DataType
 }
 
-func (c Column) AlterDefaultSQL(force bool, dialect Dialect) string {
+func (c Column) AlterDefaultSQL(force bool, dialect util.Dialect) string {
 	if c.Default == nil || force {
 		return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" DROP DEFAULT`, c.Table, c.Name)
 	}
 	return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" SET DEFAULT %s`, c.Table, c.Name, *c.Default)
 }
 
-func (c Column) AlterNotNullSQL(dialect Dialect) string {
+func (c Column) AlterNotNullSQL(dialect util.Dialect) string {
 	if c.IsNullable {
 		return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" DROP NOT NULL`, c.Table, c.Name)
 	}
 	return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" SET NOT NULL`, c.Table, c.Name)
 }
 
-func (c Column) AlterTypeSQL(dialect Dialect) string {
+func (c Column) AlterTypeSQL(dialect util.Dialect) string {
 	dt := c.DataType
 	i := strings.Index(dt, " ") // only take the type on alter
 	if i > 0 {
@@ -162,11 +158,11 @@ func (c Column) AlterTypeSQL(dialect Dialect) string {
 	return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" TYPE %s`, c.Table, c.Name, dt)
 }
 
-func (c Column) DropSQL(dialect Dialect) string {
+func (c Column) DropSQL(dialect util.Dialect) string {
 	return fmt.Sprintf(`ALTER TABLE "%s" DROP COLUMN "%s" CASCADE`, c.Table, c.Name)
 }
 
-func (c Column) SQL(quote bool, dialect Dialect) string {
+func (c Column) SQL(quote bool, dialect util.Dialect) string {
 	name := c.Name
 	if quote {
 		name = `"` + name + `"`
@@ -217,7 +213,7 @@ type IndexChange struct {
 	Constraint *dm.Constraint
 }
 
-func (c IndexChange) CreateSQL(dialect Dialect) string {
+func (c IndexChange) CreateSQL(dialect util.Dialect) string {
 	typeIndex := "INDEX"
 	if c.Index.IsUnique() {
 		typeIndex = "UNIQUE " + typeIndex
@@ -240,7 +236,7 @@ func (c IndexChange) CreateSQL(dialect Dialect) string {
 	return fmt.Sprintf(`CREATE %s "%s" ON "%s"(%s)%s%s`, typeIndex, c.Index.Name, c.Table, util.QuoteJoin(c.Index.Columns, `"`, ", "), storing, gin)
 }
 
-func (c IndexChange) DropSQL(dialect Dialect) string {
+func (c IndexChange) DropSQL(dialect util.Dialect) string {
 	return fmt.Sprintf(`DROP INDEX "%s"`, c.Index.Name)
 }
 
@@ -252,15 +248,15 @@ type ModelChange struct {
 	Destructive  bool
 }
 
-func (m ModelChange) SQL(dialect Dialect) string {
+func (m ModelChange) SQL(dialect util.Dialect) string {
 	var sql strings.Builder
 
 	switch m.Action {
 	case AddAction:
-		if dialect == Sqlserver {
+		if dialect == util.Sqlserver {
 			sql.WriteString(fmt.Sprintf(`IF OBJECT_ID(N'%s', N'U') IS NULL`+"\n", m.Table))
 			sql.WriteString(fmt.Sprintf(`CREATE TABLE "%s" (`, m.Table) + "\n")
-		} else if dialect == Postgresql {
+		} else if dialect == util.Postgresql {
 			sql.WriteString(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (`, m.Table) + "\n")
 		}
 
