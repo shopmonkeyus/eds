@@ -196,7 +196,7 @@ func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableNa
 	stdout.Flush()
 
 	started := time.Now()
-	logger.Trace("running migrations ... %v", modelDiff)
+	logger.Trace("running migrations ...")
 	if err := output.run(logger, db); err != nil {
 		return err
 	}

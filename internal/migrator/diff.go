@@ -37,7 +37,7 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 	needToAdd := make(map[string]*dm.Model)
 	var change *ModelChange
 	var hasTypeChanges bool
-
+	// fmt.Printf("INCOMING  COLUMNS %v", columns)
 	foundcolumns := make(map[string]bool)
 	for _, column := range columns {
 		foundcolumns[column.Name] = true
@@ -81,28 +81,33 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 			Detail:      strings.Join(details, ", "),
 			TypeChanged: typeChanged,
 		})
+	}
 
-		if model != nil {
-			for _, field := range model.Fields {
-				if !foundcolumns[field.Table] {
-					if change == nil {
-						change = &ModelChange{
-							Table:        model.Table,
-							Model:        model,
-							Action:       UpdateAction,
-							FieldChanges: make([]FieldChange, 0),
-						}
+	if model != nil {
+		// now we're trying to find columns that are  new in the model
+		// and need to be created
+		for _, field := range model.Fields {
+			if !foundcolumns[field.Name] {
+				if change == nil {
+					change = &ModelChange{
+						Table:        model.Table,
+						Model:        model,
+						Action:       UpdateAction,
+						FieldChanges: make([]FieldChange, 0),
 					}
-					change.FieldChanges = append(change.FieldChanges, FieldChange{
-						Action: AddAction,
-						Name:   field.Table,
-						Field:  field,
-						Detail: fmt.Sprintf("with type `%s`", field.GetDataType(dialect)),
-					})
 				}
+				change.FieldChanges = append(change.FieldChanges, FieldChange{
+					Action: AddAction,
+					Name:   field.Table,
+					Field:  field,
+					Detail: fmt.Sprintf("with type `%s`", field.GetDataType(dialect)),
+				})
+
 			}
 		}
 	}
+
+	// This is the case where we don't have the model yet in the db an dneed to create it
 	if len(columns) == 0 {
 		needToAdd[model.Table] = model
 		change = &ModelChange{
