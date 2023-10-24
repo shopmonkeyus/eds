@@ -129,9 +129,6 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		dataType = field.PrismaType()
 	}
 
-	default:
-		dataType = field.PrismaType()
-	}
 	return Column{
 		Table:      table,
 		Name:       field.Name,
