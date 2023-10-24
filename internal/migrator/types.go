@@ -125,6 +125,9 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		dataType = field.SQLTypeSqlServer()
 	case util.Snowflake:
 		dataType = field.SQLTypeSnowflake()
+	default:
+		dataType = field.PrismaType()
+	}
 
 	default:
 		dataType = field.PrismaType()

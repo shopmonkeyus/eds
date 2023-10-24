@@ -204,6 +204,7 @@ func (f *Field) GetDataType(dialect util.Dialect) string {
 		dataType = f.PrismaType()
 	}
 	return dataType
+
 }
 
 func (f *Field) SQLTypeSnowflake() string {
