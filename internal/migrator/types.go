@@ -157,13 +157,6 @@ func (c Column) AlterNotNullSQL(dialect util.Dialect) string {
 
 func (c Column) AlterTypeSQL(dialect util.Dialect) string {
 	dt := c.DataType
-	i := strings.Index(dt, " ") // only take the type on alter
-	if i > 0 {
-		dt = dt[0 : i-1]
-	}
-	if c.MaxLength != nil {
-		dt += fmt.Sprintf("(%s)", *c.MaxLength)
-	}
 	return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" TYPE %s`, c.Table, c.Name, dt)
 }
 
