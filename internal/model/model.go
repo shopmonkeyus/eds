@@ -108,9 +108,9 @@ func (f *Field) SQLTypePostgres() string {
 		builder.WriteString("text")
 	case "DateTime":
 		if f.IsTimestampZ {
-			builder.WriteString("timestamp with time zone")
+			builder.WriteString("TIMESTAMPTZ(6)")
 		} else {
-			builder.WriteString("timestamp")
+			builder.WriteString("TIMESTAMP(3)")
 		}
 	case "BigInt":
 		builder.WriteString("INT8")
