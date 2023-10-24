@@ -191,22 +191,6 @@ func (f *Field) SQLTypeSqlServer() string {
 	return strings.ToLower(builder.String())
 }
 
-func (f *Field) GetDataType(dialect util.Dialect) string {
-	var dataType string
-	switch dialect {
-	case util.Postgresql:
-		dataType = f.SQLTypePostgres()
-	case util.Sqlserver:
-		dataType = f.SQLTypeSqlServer()
-	case util.Snowflake:
-		dataType = f.SQLTypeSnowflake()
-	default:
-		dataType = f.PrismaType()
-	}
-	return dataType
-
-}
-
 func (f *Field) SQLTypeSnowflake() string {
 	var builder strings.Builder
 	if f.IsList {
@@ -245,6 +229,22 @@ func (f *Field) SQLTypeSnowflake() string {
 	}
 
 	return builder.String()
+}
+
+func (f *Field) GetDataType(dialect util.Dialect) string {
+	var dataType string
+	switch dialect {
+	case util.Postgresql:
+		dataType = f.SQLTypePostgres()
+	case util.Sqlserver:
+		dataType = f.SQLTypeSqlServer()
+	case util.Snowflake:
+		dataType = f.SQLTypeSnowflake()
+	default:
+		dataType = f.PrismaType()
+	}
+	return dataType
+
 }
 
 func (f *Field) PrismaType() string {

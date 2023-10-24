@@ -68,7 +68,6 @@ ORDER BY
 		if err := rows.Scan(&tn, &cn, &cd, &isn, &dt, &cml); err != nil {
 			return nil, fmt.Errorf("error reading db row: %w", err)
 		}
-		fmt.Println("Column name from searching info_schema: ", cn)
 		if table != tn {
 			columns = make([]Column, 0)
 			table = tn
@@ -125,7 +124,6 @@ func (w *sqlWriter) runSQL(pb *progressbar.ProgressBar, logger logger.Logger, db
 	}
 	msg := strings.TrimSpace(strings.ReplaceAll(sql, "\n", " "))
 	smsg := multiSpaceRegexp.ReplaceAllString(msg, " ")
-	fmt.Println("SMSG: ", smsg)
 	if len(smsg) > 70 {
 		smsg = strings.TrimSpace(smsg[0:70])
 	}
@@ -175,7 +173,8 @@ func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableNa
 	if err != nil {
 		return err
 	}
-	fmt.Println("Schema load:", schema)
+	//Convert schema column dataTypes to sql dialect-specific dataTypes
+	//TODO: Find where schemas are loaded into DB and convert them before loading
 	stdout := bufio.NewWriter(os.Stdout)
 
 	var output sqlWriter
@@ -186,11 +185,13 @@ func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableNa
 	if err != nil {
 		return err
 	}
-	fmt.Println("Model diff:", modelDiff)
-
+	if modelDiff == nil {
+		logger.Error("ran into an error with figuring out change when finding model diffs")
+	}
 	newTables := make(map[string]bool)
 
 	change := modelDiff
+
 	if change.Action == AddAction {
 		newTables[tableName] = true
 	}

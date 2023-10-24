@@ -140,7 +140,58 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 }
 
 func (c Column) GetDataType() string {
+
 	return c.DataType
+}
+
+func (c Column) GetConvertedDataType(dialect util.Dialect) string {
+	switch dialect {
+	case util.Sqlserver:
+		return c.ConvertPostgresDataTypeToSqlserver()
+	case util.Snowflake:
+		return c.ConvertPostgresDataTypeToSnowflake()
+	}
+	return c.DataType
+}
+
+func (c Column) ConvertPostgresDataTypeToSqlserver() string {
+	var convertedDataType strings.Builder
+	//TODO: Add correct conversions
+	switch c.DataType {
+	case "TEXT":
+		if c.Name == "id" {
+			convertedDataType.WriteString("varchar(100)")
+		} else {
+			convertedDataType.WriteString("varchar(max)")
+		}
+	case "NUMBER":
+		convertedDataType.WriteString("int")
+	case "BOOLEAN":
+		convertedDataType.WriteString("bit")
+	case "TIMESTAMP_TZ":
+		convertedDataType.WriteString("nvarchar(100)")
+	default:
+		convertedDataType.WriteString(c.DataType)
+	}
+	return convertedDataType.String()
+}
+
+func (c Column) ConvertPostgresDataTypeToSnowflake() string {
+	var convertedDataType strings.Builder
+	switch c.DataType {
+
+	case "TEXT":
+		convertedDataType.WriteString("STRING")
+	case "NUMBER":
+		convertedDataType.WriteString("INTEGER")
+	case "BOOLEAN":
+		convertedDataType.WriteString("BOOLEAN")
+	case "TIMESTAMP_TZ":
+		convertedDataType.WriteString("TIMESTAMPTZ")
+	default:
+		convertedDataType.WriteString(c.DataType)
+	}
+	return convertedDataType.String()
 }
 
 func (c Column) AlterDefaultSQL(force bool, dialect util.Dialect) string {
