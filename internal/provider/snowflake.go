@@ -260,7 +260,7 @@ func (p *SnowflakeProvider) ensureTableSchema(schema dm.Model) error {
 	} else {
 		// do the diff
 		p.logger.Debug("start applying model version: %v", modelVersionId)
-		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, migrator.Snowflake); err != nil {
+		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, util.Snowflake); err != nil {
 			return err
 		}
 		// update _migration table with the applied model_version_id

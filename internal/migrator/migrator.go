@@ -41,8 +41,8 @@ func loadTableSchema(logger logger.Logger, db *sql.DB, tableName, tableSchema st
 FROM
 	information_schema.columns c
 WHERE
-	c.table_schema = $1 AND
-	c.table_name = $2
+	c.table_schema = ? AND
+	c.table_name = ?
 ORDER BY
 	c.table_name, c.ordinal_position;`
 	rows, err := db.Query(query, tableSchema, tableName)
@@ -68,6 +68,7 @@ ORDER BY
 		if err := rows.Scan(&tn, &cn, &cd, &isn, &dt, &cml); err != nil {
 			return nil, fmt.Errorf("error reading db row: %w", err)
 		}
+		fmt.Println("Column name from searching info_schema: ", cn)
 		if table != tn {
 			columns = make([]Column, 0)
 			table = tn
@@ -124,9 +125,11 @@ func (w *sqlWriter) runSQL(pb *progressbar.ProgressBar, logger logger.Logger, db
 	}
 	msg := strings.TrimSpace(strings.ReplaceAll(sql, "\n", " "))
 	smsg := multiSpaceRegexp.ReplaceAllString(msg, " ")
+	fmt.Println("SMSG: ", smsg)
 	if len(smsg) > 70 {
 		smsg = strings.TrimSpace(smsg[0:70])
 	}
+
 	if pb != nil {
 		pb.Describe(fmt.Sprintf("[magenta][%d/%d][reset] %s", offset, total, smsg))
 	}
@@ -172,7 +175,7 @@ func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableNa
 	if err != nil {
 		return err
 	}
-
+	fmt.Println("Schema load:", schema)
 	stdout := bufio.NewWriter(os.Stdout)
 
 	var output sqlWriter
@@ -183,6 +186,7 @@ func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableNa
 	if err != nil {
 		return err
 	}
+	fmt.Println("Model diff:", modelDiff)
 
 	newTables := make(map[string]bool)
 

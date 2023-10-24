@@ -198,6 +198,8 @@ func (f *Field) GetDataType(dialect util.Dialect) string {
 		dataType = f.SQLTypePostgres()
 	case util.Sqlserver:
 		dataType = f.SQLTypeSqlServer()
+	case util.Snowflake:
+		dataType = f.SQLTypeSnowflake()
 	default:
 		dataType = f.PrismaType()
 	}
