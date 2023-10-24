@@ -59,13 +59,12 @@ ORDER BY
 	for rows.Next() {
 		var tn string
 		var cn string
-		var ihd string
 		var cd sql.NullString
 		var isn string
 		var dt string
 		var cml sql.NullString
 
-		if err := rows.Scan(&tn, &cn, &cd, &ihd, &isn, &dt, &cml); err != nil {
+		if err := rows.Scan(&tn, &cn, &cd, &isn, &dt, &cml); err != nil {
 			return nil, fmt.Errorf("error reading db row: %w", err)
 		}
 		if table != tn {
@@ -84,7 +83,6 @@ ORDER BY
 			Table:               table,
 			Name:                cn,
 			Default:             colDef,
-			IsHidden:            ihd == "YES",
 			IsNullable:          isn == "YES",
 			DataType:            dt,
 			MaxLength:           maxlength,
