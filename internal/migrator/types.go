@@ -140,17 +140,6 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 }
 
 func (c Column) GetDataType() string {
-
-	return c.DataType
-}
-
-func (c Column) GetConvertedDataType(dialect util.Dialect) string {
-	switch dialect {
-	case util.Sqlserver:
-		return c.ConvertPostgresDataTypeToSqlserver()
-	case util.Snowflake:
-		return c.ConvertPostgresDataTypeToSnowflake()
-	}
 	return c.DataType
 }
 

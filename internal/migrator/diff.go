@@ -48,7 +48,13 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 		field = findField(model, column.Name)
 		//The column data types in information_schema.columns (schema) get stored as the postgres data type currently
 		//so we need to convert for the non-postgres dialects
-		convertedDataType := column.GetConvertedDataType(dialect)
+		convertedDataType := column.DataType
+		switch dialect {
+		case util.Sqlserver:
+			convertedDataType = column.ConvertPostgresDataTypeToSqlserver()
+		case util.Snowflake:
+			convertedDataType = column.ConvertPostgresDataTypeToSnowflake()
+		}
 		if field != nil {
 			if field.GetDataType(dialect) != convertedDataType {
 				action = UpdateAction
