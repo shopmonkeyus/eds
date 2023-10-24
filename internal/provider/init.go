@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -14,6 +15,13 @@ func parseURLForProvider(urlstring string) (string, *url.URL, error) {
 		return "", nil, err
 	}
 	return u.Scheme, u, nil
+}
+
+func convertSnowflakeConnectionString(urlString string) (string, error) {
+	if strings.HasPrefix(urlString, "snowflake://") {
+		return strings.Replace(urlString, "snowflake://", "", 1), nil
+	}
+	return "", fmt.Errorf("invalid snowflake connection string: %s", urlString)
 }
 
 type ProviderOpts struct {
@@ -42,6 +50,14 @@ func NewProviderForURL(logger logger.Logger, urlstr string, opts *ProviderOpts) 
 		return NewPostgresProvider(logger, urlstr, opts)
 	case "sqlserver":
 		return NewSqlServerProvider(logger, urlstr, opts)
+	case "snowflake":
+
+		urlstr, err := convertSnowflakeConnectionString(urlstr)
+		if err != nil {
+			return nil, err
+		}
+
+		return NewSnowflakeProvider(logger, urlstr, opts)
 	default:
 		return nil, fmt.Errorf("no suitable provider found for url: %s", urlstr)
 	}

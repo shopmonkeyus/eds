@@ -3,9 +3,10 @@ package migrator
 import (
 	"bufio"
 	"fmt"
-	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"io"
 	"strings"
+
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
 )
 
 const spacer = "    "
@@ -76,7 +77,7 @@ func toPrismaType(datatype string, userDefinedtype *string, isnullable bool) str
 		dt = "String"
 	case "jsonb":
 		dt = "Json"
-	case "timestamp with time zone", "timestamp without time zone":
+	case "TIMESTAMPTZ(6)", "TIMESTAMP(3)":
 		dt = "DateTime"
 	case "bytes":
 		dt = "Bytes"

@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,7 +28,6 @@ type SqlServerProvider struct {
 
 var _ internal.Provider = (*SqlServerProvider)(nil)
 
-// NewSqlServerProvider returns a provider that will stream files to a folder provided in the url
 func NewSqlServerProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[sqlserver]")
 	logger.Info("starting mssql plugin with connection: %s", connString)
@@ -171,7 +169,7 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				// if yes, then add column
 				sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 				sqlValuePlaceHolder.WriteString(fmt.Sprintf(`@p%d`, columnCount))
-				val, err := tryConvertJson(field, data[field.Name])
+				val, err := util.TryConvertJson(field.Type, data[field.Name])
 				if err != nil {
 					return "", nil, err
 				}
@@ -205,7 +203,7 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 
 				updateColumns.WriteString(fmt.Sprintf(`"%s" = @p%d`, field.Name, columnCount))
 
-				val, err := tryConvertJson(field, data[field.Name])
+				val, err := util.TryConvertJson(field.Type, data[field.Name])
 				if err != nil {
 					return "", nil, err
 				}
@@ -234,32 +232,6 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 	}
 
 	return query.String(), values, nil
-}
-
-func tryConvertJson(f *dm.Field, val interface{}) (interface{}, error) {
-	if v, ok := val.(map[string]interface{}); ok {
-		jsonData, err := json.Marshal(v)
-		if err != nil {
-			return "", err
-		}
-		return string(jsonData), nil
-	}
-	if v, ok := val.([]interface{}); ok {
-		jsonData, err := json.Marshal(v)
-		if err != nil {
-			return "", err
-		}
-		return string(jsonData), nil
-	}
-	if f.Type == "datetime" {
-		jsonData, err := json.Marshal(val)
-		if err != nil {
-			return "", err
-		}
-		return string(jsonData), nil
-
-	}
-	return val, nil
 }
 
 // ensureTableSchema will ensure the table schema is compatible with the incoming message

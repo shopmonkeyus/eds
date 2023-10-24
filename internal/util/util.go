@@ -13,6 +13,7 @@ type Dialect string
 const (
 	Postgresql Dialect = "postgresql"
 	Sqlserver  Dialect = "sqlserver"
+	Snowflake  Dialect = "snowflake"
 )
 
 func QuoteJoin(vals []string, quote string, sep string) string {
@@ -125,4 +126,30 @@ func Dedupe(vals []string) []string {
 		}
 	}
 	return results
+}
+
+func TryConvertJson(fieldType string, val interface{}) (interface{}, error) {
+	if v, ok := val.(map[string]interface{}); ok {
+		jsonData, err := json.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(jsonData), nil
+	}
+	if v, ok := val.([]interface{}); ok {
+		jsonData, err := json.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(jsonData), nil
+	}
+	if fieldType == "datetime" {
+		jsonData, err := json.Marshal(val)
+		if err != nil {
+			return "", err
+		}
+		return string(jsonData), nil
+
+	}
+	return val, nil
 }

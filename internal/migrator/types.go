@@ -9,6 +9,14 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
+type Dialect string
+
+const (
+	Postgresql Dialect = "postgresql"
+	Sqlserver  Dialect = "sqlserver"
+	Snowflake  Dialect = "snowflake"
+)
+
 type SQL interface {
 	SQL() string
 }
@@ -115,6 +123,8 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		dataType = field.SQLTypePostgres()
 	case util.Sqlserver:
 		dataType = field.SQLTypeSqlServer()
+	case util.Snowflake:
+		dataType = field.SQLTypeSnowflake()
 	default:
 		dataType = field.PrismaType()
 	}
@@ -126,10 +136,51 @@ func NewColumnFromField(table string, field *dm.Field, dialect util.Dialect) Col
 		DataType:   dataType,
 		Dialect:    dialect,
 	}
+
 }
 
 func (c Column) GetDataType() string {
 	return c.DataType
+}
+
+func (c Column) ConvertPostgresDataTypeToSqlserver() string {
+	var convertedDataType strings.Builder
+	//TODO: Add correct conversions
+	switch c.DataType {
+	case "TEXT":
+		if c.Name == "id" {
+			convertedDataType.WriteString("varchar(100)")
+		} else {
+			convertedDataType.WriteString("varchar(max)")
+		}
+	case "NUMBER":
+		convertedDataType.WriteString("int")
+	case "BOOLEAN":
+		convertedDataType.WriteString("bit")
+	case "TIMESTAMP_TZ":
+		convertedDataType.WriteString("nvarchar(100)")
+	default:
+		convertedDataType.WriteString(c.DataType)
+	}
+	return convertedDataType.String()
+}
+
+func (c Column) ConvertPostgresDataTypeToSnowflake() string {
+	var convertedDataType strings.Builder
+	switch c.DataType {
+
+	case "TEXT":
+		convertedDataType.WriteString("STRING")
+	case "NUMBER":
+		convertedDataType.WriteString("INTEGER")
+	case "BOOLEAN":
+		convertedDataType.WriteString("BOOLEAN")
+	case "TIMESTAMP_TZ":
+		convertedDataType.WriteString("TIMESTAMPTZ")
+	default:
+		convertedDataType.WriteString(c.DataType)
+	}
+	return convertedDataType.String()
 }
 
 func (c Column) AlterDefaultSQL(force bool, dialect util.Dialect) string {
@@ -249,7 +300,7 @@ func (m ModelChange) SQL(dialect util.Dialect) string {
 		if dialect == util.Sqlserver {
 			sql.WriteString(fmt.Sprintf(`IF OBJECT_ID(N'%s', N'U') IS NULL`+"\n", m.Table))
 			sql.WriteString(fmt.Sprintf(`CREATE TABLE "%s" (`, m.Table) + "\n")
-		} else if dialect == util.Postgresql {
+		} else if dialect == util.Postgresql || dialect == util.Snowflake {
 			sql.WriteString(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (`, m.Table) + "\n")
 		}
 
