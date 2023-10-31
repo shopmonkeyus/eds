@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -31,13 +32,17 @@ var _ internal.Provider = (*SnowflakeProvider)(nil)
 func NewSnowflakeProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[snowflake]")
 	logger.Info("starting snowflake plugin with connection: %s", connString)
+	schema, err := getSnowflakeSchema(connString)
+	if err != nil {
+		return nil, err
+	}
 	ctx := context.Background()
 	return &SnowflakeProvider{
 		logger: logger,
 		url:    connString,
 		ctx:    ctx,
 		opts:   opts,
-		schema: "PUBLIC",
+		schema: schema,
 	}, nil
 }
 
@@ -273,4 +278,16 @@ func (p *SnowflakeProvider) ensureTableSchema(schema dm.Model) error {
 		p.logger.Debug("end applying model version: %v", modelVersionId)
 	}
 	return nil
+}
+
+func getSnowflakeSchema(connectionString string) (string, error) {
+	regex := regexp.MustCompile(`\/([^/]+)\?`)
+
+	match := regex.FindStringSubmatch(connectionString)
+
+	if len(match) >= 2 {
+		return match[1], nil
+	}
+
+	return "", fmt.Errorf("Schema not found in the connection string")
 }
