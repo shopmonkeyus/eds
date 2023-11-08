@@ -35,7 +35,12 @@ func (c *ModelChange) Format(name string, format string, writer io.Writer, diale
 
 func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, *ModelChange, error) {
 	needToAdd := make(map[string]*dm.Model)
-	var change *ModelChange
+	var change = &ModelChange{
+		Table:        model.Table,
+		Model:        model,
+		Action:       NoAction,
+		FieldChanges: make([]FieldChange, 0),
+	}
 	var hasTypeChanges bool
 	// fmt.Printf("INCOMING  COLUMNS %v", columns)
 	foundcolumns := make(map[string]bool)
@@ -72,21 +77,10 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 		}
 
 		if action == NoAction {
-			change = &ModelChange{
-				Table:        model.Table,
-				Model:        model,
-				Action:       action,
-				FieldChanges: make([]FieldChange, 0),
-			}
 			continue
 		}
-		if change == nil {
-			change = &ModelChange{
-				Table:        model.Table,
-				Model:        model,
-				Action:       UpdateAction,
-				FieldChanges: make([]FieldChange, 0),
-			}
+		if change.Action != UpdateAction {
+			change.Action = UpdateAction
 		}
 
 		change.FieldChanges = append(change.FieldChanges, FieldChange{
@@ -128,12 +122,7 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 	// This is the case where we don't have the model yet in the db an dneed to create it
 	if len(columns) == 0 {
 		needToAdd[model.Table] = model
-		change = &ModelChange{
-			Table:        model.Table,
-			Action:       AddAction,
-			Model:        model,
-			FieldChanges: make([]FieldChange, 0),
-		}
+		change.Action = AddAction
 		for _, field := range model.Fields {
 			change.FieldChanges = append(change.FieldChanges, FieldChange{
 				Action: AddAction,
