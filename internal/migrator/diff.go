@@ -111,6 +111,9 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 						FieldChanges: make([]FieldChange, 0),
 					}
 				}
+				if change.Action == NoAction {
+					change.Action = UpdateAction
+				}
 				change.FieldChanges = append(change.FieldChanges, FieldChange{
 					Action: AddAction,
 					Name:   field.Table,
