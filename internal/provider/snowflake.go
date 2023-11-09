@@ -164,6 +164,10 @@ func (p *SnowflakeProvider) Import(data []byte, nc *nats.Conn) error {
 	}
 
 	sql, values, err := p.importSQL(dataMap, schema)
+	if sql == "" {
+		p.logger.Debug("no sql to run")
+		return nil
+	}
 	if err != nil {
 
 		return err
@@ -388,7 +392,6 @@ func (p *SnowflakeProvider) isJSON(f *dm.Field, val interface{}) (bool, error) {
 func (p *SnowflakeProvider) ensureTableSchema(schema dm.Model) error {
 	modelVersionId := fmt.Sprintf("%s-%s", schema.Table, schema.ModelVersion)
 	modelVersionFound := p.modelVersionCache[modelVersionId]
-	p.logger.Debug("model versions: %v", p.modelVersionCache)
 	if modelVersionFound {
 		p.logger.Debug("model version already applied: %v", modelVersionId)
 		return nil // we've already applied this schema
