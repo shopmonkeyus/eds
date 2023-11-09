@@ -1,9 +1,14 @@
 package cmd
 
 import (
+	"bufio"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
+	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/provider"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -32,12 +37,47 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	return val
 }
 
+func getJsonFromGzipUrl(urlString string) (*gzip.Reader, error) {
+	resp, err := http.Get(urlString)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("invalid importer url: %s", urlString)
+	}
+	gzReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	scanner := bufio.NewScanner(gzReader)
+	const maxCapacity = 1024 * 1024
+	scanner.Buffer(make([]byte, maxCapacity), maxCapacity)
+	for scanner.Scan() {
+		data := scanner.Bytes()
+		fmt.Println(string(data))
+		//Currently unmarshals correctly
+		var dataMap map[string]interface{}
+		err := json.Unmarshal(data, &dataMap)
+		if err != nil {
+
+			fmt.Println(string(data))
+			fmt.Println("ERROR!")
+			os.Exit(1)
+		}
+
+	}
+	return gzReader, nil
+
+}
+
 type ProviderFunc func(p internal.Provider) error
 
-func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, fn ProviderFunc) {
+func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, importer string, fn ProviderFunc, nc *nats.Conn) {
 	opts := &provider.ProviderOpts{
-		DryRun:  dryRun,
-		Verbose: verbose,
+		DryRun:   dryRun,
+		Verbose:  verbose,
+		Importer: importer,
 	}
 	provider, err := provider.NewProviderForURL(logger, url, opts)
 	if err != nil {
@@ -46,6 +86,35 @@ func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, fn
 	}
 	if err := provider.Start(); err != nil {
 		logger.Error("error starting provider: %s", err)
+		os.Exit(1)
+	}
+	if importer != "" {
+		resp, err := http.Get(opts.Importer)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		gzReader, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		scanner := bufio.NewScanner(gzReader)
+		const maxCapacity = 1024 * 1024
+		scanner.Buffer(make([]byte, maxCapacity), maxCapacity)
+
+		for scanner.Scan() {
+			data := scanner.Bytes()
+
+			err = provider.Import(data, nc)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
+
+		fmt.Println("Importing data instead of streaming")
 		os.Exit(1)
 	}
 	ferr := fn(provider)

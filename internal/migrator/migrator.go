@@ -46,6 +46,7 @@ WHERE
 ORDER BY
 	c.table_name, c.ordinal_position;`
 	rows, err := db.Query(query, tableSchema, tableName)
+
 	if err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			// this means there is not a table made and we need to build one...
@@ -191,7 +192,6 @@ func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableNa
 	newTables := make(map[string]bool)
 
 	change := modelDiff
-
 	if change.Action == AddAction {
 		newTables[tableName] = true
 	}

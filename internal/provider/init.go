@@ -24,13 +24,22 @@ func convertSnowflakeConnectionString(urlString string) (string, error) {
 	return "", fmt.Errorf("invalid snowflake connection string: %s", urlString)
 }
 
+func convertImporterConnectionString(urlString string) (string, error) {
+	if strings.HasPrefix(urlString, "importer://") {
+		return strings.Replace(urlString, "importer://", "", 1), nil
+	}
+	return "", fmt.Errorf("invalid importer connection string: %s", urlString)
+}
+
 type ProviderOpts struct {
-	DryRun  bool
-	Verbose bool
+	DryRun   bool
+	Verbose  bool
+	Importer string
 }
 
 // NewProviderForURL will return a new internal.Provider for the driver based on the url
 func NewProviderForURL(logger logger.Logger, urlstr string, opts *ProviderOpts) (internal.Provider, error) {
+
 	driver, u, err := parseURLForProvider(urlstr)
 	if err != nil {
 		return nil, err
@@ -51,13 +60,13 @@ func NewProviderForURL(logger logger.Logger, urlstr string, opts *ProviderOpts) 
 	case "sqlserver":
 		return NewSqlServerProvider(logger, urlstr, opts)
 	case "snowflake":
-
 		urlstr, err := convertSnowflakeConnectionString(urlstr)
 		if err != nil {
 			return nil, err
 		}
-
+		//Close via os
 		return NewSnowflakeProvider(logger, urlstr, opts)
+
 	default:
 		return nil, fmt.Errorf("no suitable provider found for url: %s", urlstr)
 	}
