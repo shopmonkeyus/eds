@@ -123,6 +123,10 @@ func (p *SnowflakeProvider) upsertData(data datatypes.ChangeEventPayload, model 
 
 		return err
 	}
+	if sql == "" {
+		p.logger.Debug("no sql to execute- we found this record in the db already")
+		return nil
+	}
 	p.logger.Debug("with sql: %s and values: %v", sql, values)
 	_, err = p.db.Exec(sql, values...)
 	if err != nil {
