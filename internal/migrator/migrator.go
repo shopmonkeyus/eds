@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,8 +30,24 @@ type MigrateOpts struct {
 	SkipCreate bool
 }
 
-func loadTableSchema(logger logger.Logger, db *sql.DB, tableName, tableSchema string) ([]Column, error) {
+func loadTableSchema(logger logger.Logger, db *sql.DB, tableName string, tableSchema string, dialect util.Dialect) ([]Column, error) {
+	if tableName == "" {
+
+		return nil, errors.New("table name string is empty, name is required")
+	}
+	if tableSchema == "" {
+
+		return nil, errors.New("table schema string is empty, schema is required")
+	}
+
 	started := time.Now()
+	table_schema_placeholder := "?"
+	table_name_placeholder := "?"
+	if dialect == util.Sqlserver {
+		table_schema_placeholder = "@p1"
+		table_name_placeholder = "@p2"
+	}
+
 	query := `SELECT
 	c.table_name,
 	c.column_name,
@@ -38,12 +55,11 @@ func loadTableSchema(logger logger.Logger, db *sql.DB, tableName, tableSchema st
 	c.is_nullable,
 	c.data_type,
 	c.character_maximum_length
-FROM
+	FROM
 	information_schema.columns c
-WHERE
-	c.table_schema = ? AND
-	c.table_name = ?
-ORDER BY
+	WHERE
+	c.table_schema = ` + table_schema_placeholder + ` AND
+	c.table_name = ` + table_name_placeholder + ` ORDER BY
 	c.table_name, c.ordinal_position;`
 	rows, err := db.Query(query, tableSchema, tableName)
 	if err != nil {
@@ -167,9 +183,9 @@ func (w *sqlWriter) run(logger logger.Logger, db *sql.DB) error {
 }
 
 // Migrate will run migration using model against db
-func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableName, tableSchema string, dialect util.Dialect) error {
+func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableName string, tableSchema string, dialect util.Dialect) error {
 
-	schema, err := loadTableSchema(logger, db, tableName, tableSchema)
+	schema, err := loadTableSchema(logger, db, tableName, tableSchema, dialect)
 	if err != nil {
 		return err
 	}
