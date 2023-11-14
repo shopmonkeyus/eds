@@ -50,6 +50,8 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 		var field *dm.Field
 		details := make([]string, 0)
 		var typeChanged bool
+		var originalType string
+		var newType string
 		field = findField(model, column.Name)
 		//The column data types in information_schema.columns (schema) get stored as the postgres data type currently
 		//so we need to convert for the non-postgres dialects
@@ -66,6 +68,8 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 				typeChanged = true
 				hasTypeChanges = true
 				details = append(details, fmt.Sprintf("type changed from `%s` to `%s`", column.GetDataType(), field.GetDataType(dialect)))
+				originalType = column.GetDataType()
+				newType = field.GetDataType(dialect)
 			}
 		} else {
 			// field is missing, need to create one
@@ -84,11 +88,13 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 		}
 
 		change.FieldChanges = append(change.FieldChanges, FieldChange{
-			Action:      action,
-			Field:       field,
-			Name:        column.Name,
-			Detail:      strings.Join(details, ", "),
-			TypeChanged: typeChanged,
+			Action:       action,
+			Field:        field,
+			Name:         column.Name,
+			Detail:       strings.Join(details, ", "),
+			TypeChanged:  typeChanged,
+			OriginalType: originalType,
+			NewType:      newType,
 		})
 	}
 
@@ -119,7 +125,7 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 		}
 	}
 
-	// This is the case where we don't have the model yet in the db an dneed to create it
+	// This is the case where we don't have the model yet in the db and need to create it
 	if len(columns) == 0 {
 		needToAdd[model.Table] = model
 		change.Action = AddAction
