@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"regexp"
 	"sort"
@@ -152,4 +153,39 @@ func TryConvertJson(fieldType string, val interface{}) (interface{}, error) {
 
 	}
 	return val, nil
+}
+
+func DetermineSnowflakeConversion(newType string) (string, error) {
+	switch strings.ToLower(newType) {
+	case "date":
+		return "TO_DATE", nil
+	case "time":
+		return "TO_TIME", nil
+	case "timestamp":
+		return "TO_TIMESTAMP", nil
+	case "timestamp_ltz":
+		return "TO_TIMESTAMP_LTZ", nil
+	case "timestamp_tz":
+		return "TO_TIMESTAMP_TZ", nil
+	case "variant", "string":
+		return "TO_VARIANT", nil
+	case "object":
+		return "TO_OBJECT", nil
+	case "array":
+		return "TO_ARRAY", nil
+	case "binary":
+		return "TO_BINARY", nil
+	case "boolean":
+		return "TO_BOOLEAN", nil
+	case "number", "integer":
+		return "TO_NUMBER", nil
+	case "float":
+		return "TO_FLOAT", nil
+	case "decimal":
+		return "TO_DECIMAL", nil
+	case "double":
+		return "TO_DOUBLE", nil
+	default:
+		return "", fmt.Errorf("unsupported snowflake conversion for %s", newType)
+	}
 }
