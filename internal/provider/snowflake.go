@@ -9,7 +9,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -122,8 +121,6 @@ func (p *SnowflakeProvider) Process(data datatypes.ChangeEventPayload, schema dm
 func (p *SnowflakeProvider) Import(data []byte, nc *nats.Conn) error {
 
 	var schema dm.Model
-	var emptyJSON = []byte("{}")
-	const modelRequestTimeout = time.Duration(time.Second * 30)
 
 	var dataMap map[string]interface{}
 	if err := json.Unmarshal(data, &dataMap); err != nil {
@@ -133,29 +130,21 @@ func (p *SnowflakeProvider) Import(data []byte, nc *nats.Conn) error {
 		os.Exit(1)
 	}
 	if dataMap["table"] == nil {
-		p.logger.Error("No table name found in data")
+		badImportDataMessage := "No table name found in data"
+		badImportDataError := errors.New(badImportDataMessage)
+		p.logger.Error(fmt.Sprintf(badImportDataMessage+" %s", string(data)))
+		return badImportDataError
+
 	}
 	tableName := dataMap["table"].(string)
 
 	schema, schemaFound := p.schemaModelCache[tableName]
 	if !schemaFound {
-		entry, err := nc.Request(fmt.Sprintf("schema.%s.latest", tableName), emptyJSON, modelRequestTimeout)
+		schema, err := GetLatestSchema(p.logger, nc, tableName)
 		if err != nil {
 			return err
 		}
-		var foundSchema datatypes.SchemaResponse
-
-		err = json.Unmarshal(entry.Data, &foundSchema)
-		if err != nil {
-			return fmt.Errorf("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
-		}
-		schema = foundSchema.Data
-		if foundSchema.Success {
-			p.logger.Trace("got latest schema model for: %v for table: %s", foundSchema.Data, tableName)
-			p.schemaModelCache[tableName] = schema
-		} else {
-			return fmt.Errorf("no schema model found when searching for latest schema: %v for table: %s", foundSchema.Data, tableName)
-		}
+		p.schemaModelCache[tableName] = schema
 	}
 
 	err := p.ensureTableSchema(schema)
@@ -330,7 +319,6 @@ func (p *SnowflakeProvider) importSQL(data map[string]interface{}, m dm.Model) (
 		if errors.Is(err, sql.ErrNoRows) {
 			p.logger.Debug("no rows found for: %s, %s", m.Table, data["id"])
 			shouldCreate = true
-			//This should be default behavior right? Do we ever update for migration?
 		} else {
 			return "", nil, fmt.Errorf("error checking existance: %s, %s, %v", m.Table, data["id"], err)
 

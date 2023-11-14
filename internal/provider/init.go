@@ -64,7 +64,6 @@ func NewProviderForURL(logger logger.Logger, urlstr string, opts *ProviderOpts) 
 		if err != nil {
 			return nil, err
 		}
-		//Close via os
 		return NewSnowflakeProvider(logger, urlstr, opts)
 
 	default:
