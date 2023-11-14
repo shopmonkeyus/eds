@@ -201,7 +201,7 @@ func (p *PostgresProvider) importSQL(data map[string]interface{}, m dm.Model) (s
 		//TODO: Handle conflicts?
 		query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
 	} else {
-		fmt.Println("Record is already in the database, skipping import")
+		p.logger.Info("Record is already in the database, skipping import")
 		return "", nil, nil
 	}
 
