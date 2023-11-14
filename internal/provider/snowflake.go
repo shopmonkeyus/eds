@@ -121,7 +121,7 @@ func (p *SnowflakeProvider) Process(data datatypes.ChangeEventPayload, schema dm
 func (p *SnowflakeProvider) Import(data []byte, nc *nats.Conn) error {
 
 	var schema dm.Model
-
+	var err error
 	var dataMap map[string]interface{}
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 
@@ -140,14 +140,14 @@ func (p *SnowflakeProvider) Import(data []byte, nc *nats.Conn) error {
 
 	schema, schemaFound := p.schemaModelCache[tableName]
 	if !schemaFound {
-		schema, err := GetLatestSchema(p.logger, nc, tableName)
+		schema, err = GetLatestSchema(p.logger, nc, tableName)
 		if err != nil {
 			return err
 		}
 		p.schemaModelCache[tableName] = schema
 	}
 
-	err := p.ensureTableSchema(schema)
+	err = p.ensureTableSchema(schema)
 	if err != nil {
 		return err
 	}
@@ -390,6 +390,7 @@ func (p *SnowflakeProvider) ensureTableSchema(schema dm.Model) error {
 	} else {
 		// do the diff
 		p.logger.Debug("start applying model version: %v", modelVersionId)
+
 		if err := migrator.MigrateTable(p.logger, p.db, &schema, schema.Table, p.schema, util.Snowflake); err != nil {
 			return err
 		}

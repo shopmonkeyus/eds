@@ -120,7 +120,7 @@ func (p *SqlServerProvider) Process(data datatypes.ChangeEventPayload, schema dm
 func (p *SqlServerProvider) Import(data []byte, nc *nats.Conn) error {
 	//NOT TESTED YET
 	var schema dm.Model
-
+	var err error
 	var dataMap map[string]interface{}
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 
@@ -139,14 +139,14 @@ func (p *SqlServerProvider) Import(data []byte, nc *nats.Conn) error {
 
 	schema, schemaFound := p.schemaModelCache[tableName]
 	if !schemaFound {
-		schema, err := GetLatestSchema(p.logger, nc, tableName)
+		schema, err = GetLatestSchema(p.logger, nc, tableName)
 		if err != nil {
 			return err
 		}
 		p.schemaModelCache[tableName] = schema
 	}
 
-	err := p.ensureTableSchema(schema)
+	err = p.ensureTableSchema(schema)
 	if err != nil {
 		return err
 	}
