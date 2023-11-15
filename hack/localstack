@@ -17,7 +17,8 @@ while [ $success = false ]; do
 EOF
     )
     echo $QUERY
-  sqlcmd -U sa -P Asdf1234! -d tempdb -Q "$QUERY" 
+  #Some people may have localhost set up correctly, so may not need the "-S 127.0.0.1" part
+  sqlcmd -S 127.0.0.1 -C -U sa -P Asdf1234! -d tempdb -Q "$QUERY" 
   # Check the exit code of the command
   if [ $? -eq 0 ]; then
     # The command was successful
@@ -26,5 +27,3 @@ EOF
     sleep 10
   fi
 done
-
-
