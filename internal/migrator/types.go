@@ -143,9 +143,13 @@ func (c Column) GetDataType() string {
 	return c.DataType
 }
 
-func (c Column) ConvertPostgresDataTypeToSqlserver() string {
+func (c Column) ConvertPostgresDataTypeToSqlserver(columnName string) string {
 	var convertedDataType strings.Builder
 	//TODO: Add correct conversions
+	if columnName == "id" {
+		convertedDataType.WriteString("varchar(100)")
+		return convertedDataType.String()
+	}
 	switch c.DataType {
 	case "TEXT":
 		if c.Name == "id" {
@@ -159,6 +163,11 @@ func (c Column) ConvertPostgresDataTypeToSqlserver() string {
 		convertedDataType.WriteString("bit")
 	case "TIMESTAMP_TZ":
 		convertedDataType.WriteString("nvarchar(100)")
+	case "varchar":
+		convertedDataType.WriteString("varchar(max)")
+	case "nvarchar":
+
+		convertedDataType.WriteString("nvarchar(max)")
 	default:
 		convertedDataType.WriteString(c.DataType)
 	}
@@ -197,8 +206,23 @@ func (c Column) AlterNotNullSQL(dialect util.Dialect) string {
 	return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" SET NOT NULL`, c.Table, c.Name)
 }
 
-func (c Column) AlterTypeSQL(dialect util.Dialect) string {
+func (c Column) AlterTypeSQL(dialect util.Dialect, newType string) string {
 	dt := c.DataType
+
+	if dialect == util.Snowflake {
+		output := fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN "%s_column_change" %s;`, c.Table, c.Name, dt) + "\n"
+		snowflakeDatatypeConversion, err := util.DetermineSnowflakeConversion(newType)
+		if err != nil {
+			panic(err)
+		}
+		output += fmt.Sprintf(`UPDATE "%s" SET "%s_column_change" = %s("%s");`, c.Table, c.Name, snowflakeDatatypeConversion, c.Name) + "\n"
+		output += fmt.Sprintf(`ALTER TABLE "%s" DROP COLUMN "%s";`, c.Table, c.Name) + "\n"
+		output += fmt.Sprintf(`ALTER TABLE "%s" RENAME COLUMN "%s_column_change" TO "%s";`, c.Table, c.Name, c.Name) + "\n"
+		return output
+	}
+	if dialect == util.Sqlserver {
+		return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" %s`, c.Table, c.Name, dt)
+	}
 	return fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN "%s" TYPE %s`, c.Table, c.Name, dt)
 }
 
@@ -327,11 +351,15 @@ func (m ModelChange) SQL(dialect util.Dialect) string {
 				sql.WriteString(column.DropSQL(dialect))
 				sql.WriteString(";\n")
 			case AddAction:
-				sql.WriteString(fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN %s`, m.Model.Table, column.SQL(true, dialect)))
+				if dialect == util.Sqlserver {
+					sql.WriteString(fmt.Sprintf(`ALTER TABLE "%s" ADD %s`, m.Model.Table, column.SQL(true, dialect)))
+				} else {
+					sql.WriteString(fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN %s`, m.Model.Table, column.SQL(true, dialect)))
+				}
 				sql.WriteString(";\n")
 			case UpdateAction:
 				if change.TypeChanged {
-					sql.WriteString(column.AlterTypeSQL(dialect))
+					sql.WriteString(column.AlterTypeSQL(dialect, change.NewType))
 					sql.WriteString(";\n")
 
 				}
@@ -350,4 +378,6 @@ type FieldChange struct {
 	DefaultChanged  bool
 	TypeChanged     bool
 	OptionalChanged bool
+	OriginalType    string
+	NewType         string
 }

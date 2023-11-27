@@ -48,9 +48,9 @@ These are the instructions to run EDS for local development. This will spin up a
 ```bash
 ./hack/localstack
 
-export SQL_PASS=Asdf1234! && go run . server --server nats://localhost:4222 --company-id 6287a4154d1a72cc5ce091bb "sqlserver://sa:$SQL_PASS@localhost:1433?database=shopmonkey"
+export SQL_PASS=Asdf1234! && go run . server --creds ../location/to/credential-file "sqlserver://sa:$SQL_PASS@localhost:1433?database=shopmonkey"
 
-export PGPASS=postgres && go run . server --server nats://localhost:4222 --company-id 6287a4154d1a72cc5ce091bb "postgresql://postgres:$PGPASS@localhost:5432/shopmonkey?sslmode=disable"
+export PGPASS=postgres && go run . server --creds ../location/to/credential-file "postgresql://postgres:$PGPASS@localhost:5432/shopmonkey?sslmode=disable"
 
 ```
 

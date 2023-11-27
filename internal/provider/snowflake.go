@@ -17,6 +17,7 @@ import (
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
+	"github.com/snowflakedb/gosnowflake"
 	_ "github.com/snowflakedb/gosnowflake"
 )
 
@@ -54,7 +55,18 @@ func NewSnowflakeProvider(plogger logger.Logger, connString string, opts *Provid
 func (p *SnowflakeProvider) Start() error {
 	p.logger.Info("start")
 
-	db, err := sql.Open("snowflake", p.url)
+	//Testing whether there's an issue with the jdbc string we ask users to provide
+	snowflake_cfg, err := gosnowflake.ParseDSN(p.url)
+	if err != nil {
+		p.logger.Debug("failed to parse dsn. err: %v", err)
+		return err
+	}
+	dsn, err := gosnowflake.DSN(snowflake_cfg)
+	if err != nil {
+		p.logger.Debug("failed to convert config to dsn. err: %v", err)
+		return err
+	}
+	db, err := sql.Open("snowflake", dsn)
 	if err != nil {
 		p.logger.Error("unable to create connection: %w", err)
 	}
