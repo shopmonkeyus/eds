@@ -118,7 +118,6 @@ func (p *SqlServerProvider) Process(data datatypes.ChangeEventPayload, schema dm
 }
 
 func (p *SqlServerProvider) Import(data []byte, nc *nats.Conn) error {
-	//NOT TESTED YET
 	var schema dm.Model
 	var err error
 	var dataMap map[string]interface{}
