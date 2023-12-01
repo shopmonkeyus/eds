@@ -24,13 +24,6 @@ func convertSnowflakeConnectionString(urlString string) (string, error) {
 	return "", fmt.Errorf("invalid snowflake connection string: %s", urlString)
 }
 
-func convertImporterConnectionString(urlString string) (string, error) {
-	if strings.HasPrefix(urlString, "importer://") {
-		return strings.Replace(urlString, "importer://", "", 1), nil
-	}
-	return "", fmt.Errorf("invalid importer connection string: %s", urlString)
-}
-
 type ProviderOpts struct {
 	DryRun   bool
 	Verbose  bool
