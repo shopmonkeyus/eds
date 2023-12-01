@@ -3,11 +3,14 @@ package provider
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	"github.com/shopmonkeyus/eds-server/internal/migrator"
@@ -24,6 +27,7 @@ type PostgresProvider struct {
 	opts              *ProviderOpts
 	schema            string
 	modelVersionCache map[string]bool
+	schemaModelCache  map[string]dm.Model
 }
 
 var _ internal.Provider = (*PostgresProvider)(nil)
@@ -65,6 +69,7 @@ func (p *PostgresProvider) Start() error {
 		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
+	p.schemaModelCache = make(map[string]dm.Model, 0)
 
 	defer rows.Close()
 
@@ -104,6 +109,102 @@ func (p *PostgresProvider) Process(data datatypes.ChangeEventPayload, schema dm.
 		return err
 	}
 	return nil
+}
+
+func (p *PostgresProvider) Import(data []byte, nc *nats.Conn) error {
+	var schema dm.Model
+	var err error
+	var dataMap map[string]interface{}
+	if err := json.Unmarshal(data, &dataMap); err != nil {
+
+		p.logger.Error("error unmarshalling data: %s", err)
+		return err
+	}
+	if dataMap["table"] == nil {
+		badImportDataMessage := "No table name found in data"
+		badImportDataError := errors.New(badImportDataMessage)
+		p.logger.Error(fmt.Sprintf(badImportDataMessage+" %s", string(data)))
+		return badImportDataError
+
+	}
+	tableName := dataMap["table"].(string)
+
+	schema, schemaFound := p.schemaModelCache[tableName]
+	if !schemaFound {
+		schema, err = GetLatestSchema(p.logger, nc, tableName)
+		if err != nil {
+			return err
+		}
+		p.schemaModelCache[tableName] = schema
+	}
+
+	err = p.ensureTableSchema(schema)
+	if err != nil {
+		return err
+	}
+	sql, values, err := p.importSQL(dataMap, schema)
+	if err != nil {
+
+		return err
+	}
+	p.logger.Debug("with sql: %s and values: %v", sql, values)
+	_, err = p.db.Exec(sql, values...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *PostgresProvider) importSQL(data map[string]interface{}, m dm.Model) (string, []interface{}, error) {
+	var query strings.Builder
+	var values []interface{}
+
+	var sqlColumns, sqlValuePlaceHolder strings.Builder
+
+	columnCount := 1
+
+	existsSql := fmt.Sprintf(`SELECT 1 from "%s" where "id"=$1;`, m.Table)
+
+	var shouldCreate bool
+
+	var scanned interface{}
+	if err := p.db.QueryRow(existsSql, data["id"].(string)).Scan(&scanned); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			p.logger.Debug("no rows found for: %s, %s", m.Table, data["id"])
+			shouldCreate = true
+		} else {
+			return "", nil, fmt.Errorf("error checking existance: %s, %s, %v", m.Table, data["id"], err)
+
+		}
+	}
+
+	if shouldCreate {
+		for i, field := range m.Fields {
+			// check if field is in payload
+			if _, ok := data[field.Name]; !ok {
+				continue
+			}
+
+			// if yes, then add column
+			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
+			sqlValuePlaceHolder.WriteString(fmt.Sprintf(`$%d`, columnCount))
+			values = append(values, data[field.Name])
+
+			if i+1 < len(m.Fields) {
+				sqlColumns.WriteString(",")
+				sqlValuePlaceHolder.WriteString(",")
+			}
+			columnCount += 1
+		}
+		//TODO: Handle conflicts?
+		query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
+	} else {
+		p.logger.Info("Record is already in the database, skipping import")
+		return "", nil, nil
+	}
+
+	return query.String(), values, nil
 }
 
 // upsertData will ensure the table schema is compatible with the incoming message
@@ -223,7 +324,6 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 // ensureTableSchema will ensure the table schema is compatible with the incoming message
 func (p *PostgresProvider) ensureTableSchema(schema dm.Model) error {
 	modelVersionId := fmt.Sprintf("%s-%s", schema.Table, schema.ModelVersion)
-	// var dbschema = "public"
 	modelVersionFound := p.modelVersionCache[modelVersionId]
 	p.logger.Debug("model versions: %v", p.modelVersionCache)
 	if modelVersionFound {
@@ -237,6 +337,7 @@ func (p *PostgresProvider) ensureTableSchema(schema dm.Model) error {
 		}
 		// update _migration table with the applied model_version_id
 		sql := `INSERT INTO _migration ( model_version_id ) VALUES ($1) ON CONFLICT DO NOTHING;`
+
 		_, err := p.db.Exec(sql, modelVersionId)
 		if err != nil {
 			return fmt.Errorf("error inserting model_version_id into _migration table: %v", err)
@@ -245,4 +346,27 @@ func (p *PostgresProvider) ensureTableSchema(schema dm.Model) error {
 		p.logger.Debug("end applying model version: %v", modelVersionId)
 	}
 	return nil
+}
+
+func getLatestSchema(logger logger.Logger, nc *nats.Conn, table string) (dm.Model, error) {
+	var schema dm.Model
+	var emptyJSON = []byte("{}")
+	const modelRequestTimeout = time.Duration(time.Second * 30)
+	entry, err := nc.Request(fmt.Sprintf("schema.%s.latest", table), emptyJSON, modelRequestTimeout)
+	if err != nil {
+		return schema, err
+	}
+	var foundSchema datatypes.SchemaResponse
+
+	err = json.Unmarshal(entry.Data, &foundSchema)
+	if err != nil {
+		return schema, fmt.Errorf("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
+	}
+	schema = foundSchema.Data
+	if foundSchema.Success {
+		logger.Trace("got latest schema model for: %v for table: %s", foundSchema.Data, table)
+		return schema, nil
+	} else {
+		return schema, fmt.Errorf("no schema model found when searching for latest schema: %v for table: %s", foundSchema.Data, table)
+	}
 }

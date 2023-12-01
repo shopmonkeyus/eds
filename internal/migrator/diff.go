@@ -42,7 +42,6 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 		FieldChanges: make([]FieldChange, 0),
 	}
 	var hasTypeChanges bool
-	// fmt.Printf("INCOMING  COLUMNS %v", columns)
 	foundcolumns := make(map[string]bool)
 	for _, column := range columns {
 		foundcolumns[column.Name] = true

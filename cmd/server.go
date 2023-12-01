@@ -22,6 +22,7 @@ var serverCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		hosts, _ := cmd.Flags().GetStringSlice("server")
 		creds, _ := cmd.Flags().GetString("creds")
+		importer, _ := cmd.Flags().GetString("importer")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		timestamp, _ := cmd.Flags().GetBool("timestamp")
@@ -67,7 +68,7 @@ var serverCmd = &cobra.Command{
 				os.Exit(1)
 			}
 			companyIDs = strings.Split(claim.Audience, ",")
-			if len(companyIDs) == 0  {
+			if len(companyIDs) == 0 {
 				logger.Error("error: invalid JWT claim. missing audience")
 				os.Exit(1)
 			}
@@ -114,7 +115,7 @@ var serverCmd = &cobra.Command{
 			wg.Add(1)
 			go func(url string) {
 				defer wg.Done()
-				runProvider(logger, url, dryRun, verbose, runProviderCallback)
+				runProvider(logger, url, dryRun, verbose, importer, runProviderCallback, nc)
 			}(url)
 		}
 		wg.Wait()
@@ -130,4 +131,5 @@ func init() {
 	serverCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	serverCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
 	serverCmd.Flags().Bool("timestamp", false, "Add timestamps to logging")
+	serverCmd.Flags().String("importer", "", "migrate data from your shopmonkey instance to your external database")
 }

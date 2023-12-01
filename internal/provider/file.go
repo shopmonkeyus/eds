@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/nats-io/nats.go"
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/datatypes"
@@ -127,6 +128,11 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (p *FileProvider) Import(toDO []byte, nc *nats.Conn) error {
 
 	return nil
 }

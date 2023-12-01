@@ -41,26 +41,7 @@ func loadTableSchema(logger logger.Logger, db *sql.DB, tableName string, tableSc
 	}
 
 	started := time.Now()
-	table_schema_placeholder := "?"
-	table_name_placeholder := "?"
-	if dialect == util.Sqlserver {
-		table_schema_placeholder = "@p1"
-		table_name_placeholder = "@p2"
-	}
-
-	query := `SELECT
-	c.table_name,
-	c.column_name,
-	c.column_default,
-	c.is_nullable,
-	c.data_type,
-	c.character_maximum_length
-	FROM
-	information_schema.columns c
-	WHERE
-	c.table_schema = ` + table_schema_placeholder + ` AND
-	c.table_name = ` + table_name_placeholder + ` ORDER BY
-	c.table_name, c.ordinal_position;`
+	query := buildTableQuerySchemaString(dialect)
 	rows, err := db.Query(query, tableSchema, tableName)
 	if err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
@@ -108,6 +89,36 @@ func loadTableSchema(logger logger.Logger, db *sql.DB, tableName string, tableSc
 	}
 	logger.Trace("loaded up schema in %v", time.Since(started))
 	return columns, nil
+}
+
+func buildTableQuerySchemaString(dialect util.Dialect) string {
+	table_schema_placeholder := "?"
+	table_name_placeholder := "?"
+	switch dialect {
+	case util.Sqlserver:
+		table_schema_placeholder = "@p1"
+		table_name_placeholder = "@p2"
+	case util.Postgresql:
+		table_schema_placeholder = "$1"
+		table_name_placeholder = "$2"
+	case util.Snowflake:
+		table_schema_placeholder = "?"
+		table_name_placeholder = "?"
+	}
+	query := `SELECT
+	c.table_name,
+	c.column_name,
+	c.column_default,
+	c.is_nullable,
+	c.data_type,
+	c.character_maximum_length
+	FROM
+	information_schema.columns c
+	WHERE
+	c.table_schema = ` + table_schema_placeholder + ` AND
+	c.table_name = ` + table_name_placeholder + ` ORDER BY
+	c.table_name, c.ordinal_position;`
+	return query
 }
 
 type sqlWriter struct {
@@ -207,7 +218,6 @@ func MigrateTable(logger logger.Logger, db *sql.DB, datamodel *dm.Model, tableNa
 	newTables := make(map[string]bool)
 
 	change := modelDiff
-
 	if change.Action == AddAction {
 		newTables[tableName] = true
 	}

@@ -3,11 +3,14 @@ package provider
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	_ "github.com/microsoft/go-mssqldb"
+	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/datatypes"
 	"github.com/shopmonkeyus/eds-server/internal/migrator"
@@ -24,6 +27,7 @@ type SqlServerProvider struct {
 	opts              *ProviderOpts
 	schema            string
 	modelVersionCache map[string]bool
+	schemaModelCache  map[string]dm.Model
 }
 
 var _ internal.Provider = (*SqlServerProvider)(nil)
@@ -71,6 +75,7 @@ func (p *SqlServerProvider) Start() error {
 		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
+	p.schemaModelCache = make(map[string]dm.Model, 0)
 
 	defer rows.Close()
 
@@ -110,6 +115,110 @@ func (p *SqlServerProvider) Process(data datatypes.ChangeEventPayload, schema dm
 		return err
 	}
 	return nil
+}
+
+func (p *SqlServerProvider) Import(data []byte, nc *nats.Conn) error {
+	var schema dm.Model
+	var err error
+	var dataMap map[string]interface{}
+	if err := json.Unmarshal(data, &dataMap); err != nil {
+
+		p.logger.Error("error unmarshalling data: %s", err)
+
+		os.Exit(1)
+	}
+	if dataMap["table"] == nil {
+		badImportDataMessage := "No table name found in data"
+		badImportDataError := errors.New(badImportDataMessage)
+		p.logger.Error(fmt.Sprintf(badImportDataMessage+" %s", string(data)))
+		return badImportDataError
+
+	}
+	tableName := dataMap["table"].(string)
+
+	schema, schemaFound := p.schemaModelCache[tableName]
+	if !schemaFound {
+		schema, err = GetLatestSchema(p.logger, nc, tableName)
+		if err != nil {
+			return err
+		}
+		p.schemaModelCache[tableName] = schema
+	}
+
+	err = p.ensureTableSchema(schema)
+	if err != nil {
+		return err
+	}
+	sql, values, err := p.importSQL(dataMap, schema)
+	if err != nil {
+
+		return err
+	}
+	p.logger.Debug("with sql: %s and values: %v", sql, values)
+	_, err = p.db.Exec(sql, values...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *SqlServerProvider) importSQL(data map[string]interface{}, m dm.Model) (string, []interface{}, error) {
+	var query strings.Builder
+	var values []interface{}
+
+	var sqlColumns, sqlValuePlaceHolder strings.Builder
+
+	columnCount := 1
+
+	// check if record exists.
+	// using explicit check for existance results in much simpler queries
+	// vs ON CONFLICT checks. This is also much more portable across db engines
+	existsSql := fmt.Sprintf(`SELECT 1 from "%s" where "id"=@p1;`, m.Table)
+
+	var shouldCreate bool
+
+	var scanned interface{}
+	if err := p.db.QueryRow(existsSql, data["id"].(string)).Scan(&scanned); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			p.logger.Debug("no rows found for: %s, %s", m.Table, data["id"])
+			shouldCreate = true
+		} else {
+			return "", nil, fmt.Errorf("error checking existance: %s, %s, %v", m.Table, data["id"], err)
+
+		}
+	}
+
+	if shouldCreate {
+		for i, field := range m.Fields {
+			// check if field is in payload
+			if _, ok := data[field.Name]; !ok {
+				continue
+			}
+
+			// if yes, then add column
+			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
+			sqlValuePlaceHolder.WriteString(fmt.Sprintf(`@p%d`, columnCount))
+			val, err := util.TryConvertJson(field.Type, data[field.Name])
+			if err != nil {
+				return "", nil, err
+			}
+			values = append(values, val)
+
+			if i+1 < len(m.Fields) {
+				sqlColumns.WriteString(",")
+				sqlValuePlaceHolder.WriteString(",")
+			}
+			columnCount += 1
+		}
+		//TODO: Handle conflicts?
+		query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s)`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
+	} else {
+		p.logger.Info("Record is already in the database, skipping import")
+		return "", nil, nil
+	}
+
+	return query.String(), values, nil
 }
 
 // upsertData will ensure the table schema is compatible with the incoming message

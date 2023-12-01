@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"bufio"
+	"compress/gzip"
 	"fmt"
+	"net/http"
 	"os"
 
+	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/provider"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -34,10 +38,11 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 
 type ProviderFunc func(p internal.Provider) error
 
-func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, fn ProviderFunc) {
+func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, importer string, fn ProviderFunc, nc *nats.Conn) {
 	opts := &provider.ProviderOpts{
-		DryRun:  dryRun,
-		Verbose: verbose,
+		DryRun:   dryRun,
+		Verbose:  verbose,
+		Importer: importer,
 	}
 	provider, err := provider.NewProviderForURL(logger, url, opts)
 	if err != nil {
@@ -46,6 +51,40 @@ func runProvider(logger logger.Logger, url string, dryRun bool, verbose bool, fn
 	}
 	if err := provider.Start(); err != nil {
 		logger.Error("error starting provider: %s", err)
+		os.Exit(1)
+	}
+	if importer != "" {
+		resp, err := http.Get(opts.Importer)
+		if err != nil {
+			logger.Error("error from importer url request: %s", err)
+			os.Exit(1)
+		}
+		if resp.StatusCode != http.StatusOK {
+			logger.Error("invalid status code from importer url: %s", opts.Importer)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+
+		gzReader, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			logger.Error("error creating gzip reader: %s", err)
+			os.Exit(1)
+		}
+		scanner := bufio.NewScanner(gzReader)
+		const maxCapacity = 1024 * 1024
+		scanner.Buffer(make([]byte, maxCapacity), maxCapacity)
+
+		for scanner.Scan() {
+			data := scanner.Bytes()
+
+			err = provider.Import(data, nc)
+			if err != nil {
+				logger.Error("error importing data: %s", err)
+				os.Exit(1)
+			}
+		}
+
+		logger.Info("Importing data instead of streaming")
 		os.Exit(1)
 	}
 	ferr := fn(provider)
