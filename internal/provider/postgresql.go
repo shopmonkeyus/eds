@@ -308,7 +308,8 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 			idPlaceholder := fmt.Sprintf(`$%d`, columnCount)
 			versionPlaceholder := fmt.Sprintf(`$%d`, columnCount+1)
 
-			query.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id"=%s AND ("meta"->>'version')::bigint>%s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
+			query.WriteString(fmt.Sprintf(`UPDATE "%s" SET %s WHERE "id" = %s AND ("meta"->>'version')::bigint < %s`, m.Table, updateColumns.String(), idPlaceholder, versionPlaceholder) + ";\n")
+
 		}
 	} else if c.GetOperation() == datatypes.ChangeEventDelete {
 		data := c.GetBefore()
