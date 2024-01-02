@@ -155,6 +155,13 @@ func TryConvertJson(fieldType string, val interface{}) (interface{}, error) {
 	return val, nil
 }
 
+func MaskConnectionString(connectionString string) string {
+	re := regexp.MustCompile(`(.*://)(.*?:)(.*?)(@.*)`)
+	maskedConnectionString := re.ReplaceAllString(connectionString, "$1*****:*****$4")
+
+	return maskedConnectionString
+}
+
 func DetermineSnowflakeConversion(newType string) (string, error) {
 	switch strings.ToLower(newType) {
 	case "date":
