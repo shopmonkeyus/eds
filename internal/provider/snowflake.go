@@ -36,7 +36,7 @@ var _ internal.Provider = (*SnowflakeProvider)(nil)
 
 func NewSnowflakeProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[snowflake]")
-	logger.Info("starting snowflake connection")
+	logger.Info("starting snowflake connection with connection string: ", util.MaskConnectionString(connString))
 	schema, err := getSnowflakeSchema(connString)
 	if err != nil {
 		return nil, err
