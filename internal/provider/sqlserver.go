@@ -34,7 +34,7 @@ var _ internal.Provider = (*SqlServerProvider)(nil)
 
 func NewSqlServerProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[sqlserver]")
-	logger.Info("starting mssql plugin with connection: %s", connString)
+	logger.Info("starting mssql plugin connection")
 	ctx := context.Background()
 	return &SqlServerProvider{
 		logger: logger,
