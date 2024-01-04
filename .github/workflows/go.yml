@@ -23,7 +23,8 @@ jobs:
       - name: End-to-end
         run: make e2e
   sign:
-    runs-on: austin
+    runs-on:
+      group: austin
     needs: build
     steps:
       - name: Import Code-Signing Certificates
