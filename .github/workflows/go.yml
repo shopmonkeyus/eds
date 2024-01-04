@@ -23,7 +23,7 @@ jobs:
       - name: End-to-end
         run: make e2e
   sign:
-    runs-on: macos-latest
+    runs-on: austin
     needs: build
     steps:
       - name: Import Code-Signing Certificates
@@ -37,3 +37,16 @@ jobs:
         run: |
           brew tap mitchellh/gon
           brew install mitchellh/gon/gon
+      - name: Build and code-sign the app
+        env:
+          CI: "true"
+          GIT_SHA: "${{ steps.sha.outputs.sha }}"
+          AC_PASSWORD: "${{ secrets.AC_PASSWORD }}"
+        run: |
+          gon --version
+          go run -tags sign . sign --dir ./output
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: output/*
