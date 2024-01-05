@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -23,7 +24,7 @@ const modelRequestTimeout = time.Duration(time.Second * 30)
 type MessageProcessor struct {
 	logger            logger.Logger
 	companyID         []string
-	provider          Provider
+	providers         []Provider
 	conn              *nats.Conn
 	js                nats.JetStreamContext
 	subscriber        []snats.Subscriber
@@ -38,7 +39,7 @@ type MessageProcessor struct {
 type MessageProcessorOpts struct {
 	Logger          logger.Logger
 	CompanyID       []string
-	Provider        Provider
+	Providers       []Provider
 	NatsConnection  *nats.Conn
 	DumpMessagesDir string
 	TraceNats       bool
@@ -74,7 +75,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 	processor := &MessageProcessor{
 		logger:            opts.Logger.WithPrefix("[nats]"),
 		companyID:         opts.CompanyID,
-		provider:          opts.Provider,
+		providers:         opts.Providers,
 		conn:              opts.NatsConnection,
 		dumpMessagesDir:   opts.DumpMessagesDir,
 		consumerPrefix:    opts.ConsumerPrefix,
@@ -153,10 +154,20 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		}
 	}
-	if err := p.provider.Process(data, schema); err != nil {
-		p.logger.Error("error processing change event: %s. %s", data, err)
-		return err
+	var wg sync.WaitGroup
+
+	for _, provider := range p.providers {
+		wg.Add(1)
+		go func(provider Provider) {
+			defer wg.Done()
+			if err := provider.Process(data, schema); err != nil {
+				p.logger.Error("error processing change event: %s. %s", data, err)
+
+			}
+		}(provider)
 	}
+	wg.Wait()
+
 	if err := msg.AckSync(); err != nil {
 		p.logger.Error("error calling ack for message: %s. %s", data, err)
 		return err

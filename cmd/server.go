@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 
 	glog "log"
 
@@ -83,12 +82,12 @@ var serverCmd = &cobra.Command{
 		}
 		defer nc.Close()
 
-		var runProviderCallback func(internal.Provider) error = func(provider internal.Provider) error {
+		var runProvidersCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
 				Logger:          logger,
 				CompanyID:       companyIDs,
-				Provider:        provider,
+				Providers:       providers,
 				NatsConnection:  nc,
 				TraceNats:       mustFlagBool(cmd, "trace-nats", false),
 				DumpMessagesDir: mustFlagString(cmd, "dump-dir", false),
@@ -110,15 +109,16 @@ var serverCmd = &cobra.Command{
 			return nil
 		}
 
-		var wg sync.WaitGroup
+		urls := []string{}
 		for _, url := range args {
-			wg.Add(1)
-			go func(url string) {
-				defer wg.Done()
-				runProvider(logger, url, dryRun, verbose, importer, runProviderCallback, nc)
-			}(url)
+			urls = append(urls, url)
 		}
-		wg.Wait()
+		if len(urls) == 0 {
+			logger.Error("error: missing required url argument")
+			os.Exit(1)
+		}
+		runProviders(logger, urls, dryRun, verbose, importer, runProvidersCallback, nc)
+
 	},
 }
 
