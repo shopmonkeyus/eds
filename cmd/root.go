@@ -73,6 +73,7 @@ func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool
 				os.Exit(1)
 			}
 			scanner := bufio.NewScanner(gzReader)
+			defer gzReader.Close()
 			const maxCapacity = 1024 * 1024
 			scanner.Buffer(make([]byte, maxCapacity), maxCapacity)
 
@@ -85,12 +86,13 @@ func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool
 					os.Exit(1)
 				}
 			}
-
-			logger.Info("Importing data instead of streaming")
-			os.Exit(1)
 		}
 
 		providers = append(providers, provider)
+	}
+	if importer != "" {
+		logger.Info("Imported pre-signed URL data instead of streaming")
+		os.Exit(1)
 	}
 
 	ferr := fn(providers)
