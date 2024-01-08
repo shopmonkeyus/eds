@@ -34,7 +34,7 @@ var _ internal.Provider = (*PostgresProvider)(nil)
 
 func NewPostgresProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[postgresql]")
-	logger.Info("starting postgres connection with connection string: ", util.MaskConnectionString(connString))
+	logger.Info("starting postgres connection with connection string: %s", util.MaskConnectionString(connString))
 	ctx := context.Background()
 	return &PostgresProvider{
 		logger: logger,
