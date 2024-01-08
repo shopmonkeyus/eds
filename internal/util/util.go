@@ -156,7 +156,7 @@ func TryConvertJson(fieldType string, val interface{}) (interface{}, error) {
 }
 
 func MaskConnectionString(connectionString string) string {
-	re := regexp.MustCompile(`(.*://)(.*?:)(.*?)(@.*)`)
+	re := regexp.MustCompile(`(.*://)(.*?:)(.*)(@.*)`)
 	maskedConnectionString := re.ReplaceAllString(connectionString, "$1*****:*****$4")
 
 	return maskedConnectionString

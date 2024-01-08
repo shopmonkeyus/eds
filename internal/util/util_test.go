@@ -37,7 +37,7 @@ func TestMaskConnectionString(t *testing.T) {
 		},
 		{
 			name:                     "Another Valid Sql Server Connection String",
-			originalConnectionString: "sqlserver://sqlUserName:passw..rd.a.!!!##@localhost:5432/shopmonkey?sslmode=disable",
+			originalConnectionString: "sqlserver://sqlUserName:p@ssw..rd.a.!!!##@localhost:5432/shopmonkey?sslmode=disable",
 			expectedMaskedString:     "sqlserver://*****:*****@localhost:5432/shopmonkey?sslmode=disable",
 		},
 		{
