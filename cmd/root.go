@@ -61,7 +61,7 @@ func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool
 				logger.Error("error from importer url request: %s", err)
 				os.Exit(1)
 			}
-			if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
 				logger.Error("invalid status code from importer url: %s", opts.Importer)
 				os.Exit(1)
 			}
