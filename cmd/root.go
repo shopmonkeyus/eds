@@ -107,7 +107,7 @@ func processFile(logger logger.Logger, fileName string, providers []internal.Pro
 	if err != nil {
 		return err
 	}
-	logger.Info("table name: %s", tableName)
+	logger.Info("importing table: %s", tableName)
 	scanner := bufio.NewScanner(gzipReader)
 	for scanner.Scan() {
 		data := scanner.Bytes()
