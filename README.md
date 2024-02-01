@@ -64,10 +64,10 @@ A full connection string would look like: `snowflake://jsmith:mypassword@zflycky
 
 ## Importer
 
-To run the importer side of EDS, utilize the `--importer` flag and specify a pre-signed URL for a Gzipped JSON Lines file. Each line in the file represents a record to be imported into your database. For assistance in generating the Gzipped JSON Lines file and obtaining the pre-signed URL, please reach out to your representative at Shopmonkey.
+To run the importer side of EDS, utilize the `--importer` flag and specify a folder containing Gzipped JSON Lines files to be imported. Each file represents a different table to be imported, and each line in the files represents a record to be imported into your database. For assistance in obtaining a pre-signed URL to download the Gzipped JSON Lines files, please reach out to your representative at Shopmonkey.
 
 A full command utilizing the importer would look like:
-`go run . server --creds ../creds/eds-creds/shopmonkey_shop.creds --consumer-prefix Shopmonkey_20231018 --importer "https://storage.googleapis.com/bucket-name/import-file.jsonl.gz"  --dump-dir . --verbose "snowflake://j5m1th:p455w0rd@tzflycky-cu81015/mydb/PUBLIC?warehouse=COMPUTE_WH&client_session_keep_alive=true" `
+`go run . server --creds ../creds/eds-creds/shopmonkey_shop.creds --consumer-prefix Shopmonkey_20231018 --importer "./test"  --dump-dir . --verbose "snowflake://j5m1th:p455w0rd@tzflycky-cu81015/mydb/PUBLIC?warehouse=COMPUTE_WH&client_session_keep_alive=true" `
 
 ### Logging
 
