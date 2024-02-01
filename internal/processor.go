@@ -155,6 +155,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		}
 	}
 	var wg sync.WaitGroup
+	var wgErrorChan = make(chan error, len(p.providers))
 
 	for _, provider := range p.providers {
 		wg.Add(1)
@@ -162,11 +163,18 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			defer wg.Done()
 			if err := provider.Process(data, schema); err != nil {
 				p.logger.Error("error processing change event: %s. %s", data, err)
-
+				wgErrorChan <- err
 			}
 		}(provider)
 	}
 	wg.Wait()
+	close(wgErrorChan)
+	// Only trigger in the case of multiple providers being used and less than all of them experience an error from the same change event
+	if len(wgErrorChan) > 0 && len(wgErrorChan) < len(p.providers) {
+		p.logger.Error("Change event processing failed for some providers, ending EDS to prevent providers from going out of sync")
+		os.Exit(1)
+
+	}
 
 	if err := msg.AckSync(); err != nil {
 		p.logger.Error("error calling ack for message: %s. %s", data, err)
