@@ -13,7 +13,6 @@ type Provider interface {
 	Stop() error
 	// Process data received and return an error or nil if processed ok
 	Process(data datatypes.ChangeEventPayload, schema dm.Model) error
-	// Import data received and return an error or nil if processed ok
-	//TODO: Change this to be a MigrateEventPayload
-	Import(data []byte, nc *nats.Conn) error
+	// Process unmarshalled json data and return an error or nil if processed ok
+	Import(dataMap map[string]interface{}, tableName string, nc *nats.Conn) error
 }
