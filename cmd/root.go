@@ -72,7 +72,7 @@ func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool
 			os.Exit(1)
 		}
 		logger.Info("Imported file data instead of streaming")
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	ferr := fn(providers)
