@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -26,21 +25,22 @@ type PostgresProvider struct {
 	opts              *ProviderOpts
 	schema            string
 	modelVersionCache map[string]bool
-	schemaModelCache  map[string]dm.Model
+	schemaModelCache  *map[string]dm.Model
 }
 
 var _ internal.Provider = (*PostgresProvider)(nil)
 
-func NewPostgresProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
+func NewPostgresProvider(plogger logger.Logger, connString string, schemaModelCache *map[string]dm.Model, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[postgresql]")
 	logger.Info("starting postgres connection with connection string: %s", util.MaskConnectionString(connString))
 	ctx := context.Background()
 	return &PostgresProvider{
-		logger: logger,
-		url:    connString,
-		ctx:    ctx,
-		opts:   opts,
-		schema: "public",
+		logger:           logger,
+		url:              connString,
+		ctx:              ctx,
+		opts:             opts,
+		schema:           "public",
+		schemaModelCache: schemaModelCache,
 	}, nil
 }
 
@@ -68,7 +68,6 @@ func (p *PostgresProvider) Start() error {
 		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
-	p.schemaModelCache = make(map[string]dm.Model, 0)
 
 	defer rows.Close()
 
@@ -121,7 +120,7 @@ func (p *PostgresProvider) Import(dataMap map[string]interface{}, tableName stri
 		return badImportDataError
 	}
 
-	schema, schemaFound := p.schemaModelCache[tableName]
+	schema, schemaFound := (*p.schemaModelCache)[tableName]
 	if !schemaFound {
 		//Right now, the messaging provider connecting to our local server will not forward messages to the main server
 		//So we'll error out. Ideally we should always find the schema in the cache, so we shouldn't run into this code path
@@ -179,18 +178,16 @@ func (p *PostgresProvider) importSQL(data map[string]interface{}, m dm.Model) (s
 			if _, ok := data[field.Name]; !ok {
 				continue
 			}
-
+			if !isFirstColumn {
+				sqlColumns.WriteString(", ")
+				sqlValuePlaceHolder.WriteString(", ")
+			} else {
+				isFirstColumn = false
+			}
 			// if yes, then add column
 			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 			sqlValuePlaceHolder.WriteString(fmt.Sprintf(`$%d`, columnCount))
 			values = append(values, data[field.Name])
-
-			if !isFirstColumn {
-				sqlColumns.WriteString(",")
-				sqlValuePlaceHolder.WriteString(",")
-			} else {
-				isFirstColumn = false
-			}
 			columnCount += 1
 		}
 		//TODO: Handle conflicts?
@@ -261,17 +258,16 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 				if _, ok := data[field.Name]; !ok {
 					continue
 				}
+				if !isFirstColumn {
+					sqlColumns.WriteString(", ")
+					sqlValuePlaceHolder.WriteString(", ")
+				} else {
+					isFirstColumn = false
+				}
 				// if yes, then add column
 				sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 				sqlValuePlaceHolder.WriteString(fmt.Sprintf(`$%d`, columnCount))
 				values = append(values, data[field.Name])
-
-				if !isFirstColumn {
-					sqlColumns.WriteString(",")
-					sqlValuePlaceHolder.WriteString(",")
-				} else {
-					isFirstColumn = false
-				}
 				columnCount += 1
 			}
 			query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
@@ -291,14 +287,13 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 					// can't update the id!
 					continue
 				}
-
-				updateColumns.WriteString(fmt.Sprintf(`"%s" = $%d`, field.Name, columnCount))
-				updateValues = append(updateValues, data[field.Name])
 				if !isFirstColumn {
-					updateColumns.WriteString(",")
+					updateColumns.WriteString(", ")
 				} else {
 					isFirstColumn = false
 				}
+				updateColumns.WriteString(fmt.Sprintf(`"%s" = $%d`, field.Name, columnCount))
+				updateValues = append(updateValues, data[field.Name])
 
 				columnCount += 1
 			}

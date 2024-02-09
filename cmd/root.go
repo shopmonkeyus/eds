@@ -9,6 +9,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/eds-server/internal/provider"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -49,6 +50,7 @@ func runLocalProvider(logger logger.Logger, natsProvider internal.Provider, fn P
 			os.Exit(1)
 		}
 	}
+
 	for _, provider := range providers {
 		if err := provider.Stop(); err != nil {
 			logger.Error("error stopping provider: %s", err)
@@ -58,7 +60,7 @@ func runLocalProvider(logger logger.Logger, natsProvider internal.Provider, fn P
 
 }
 
-func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool, importer string, fn ProviderFunc, nc *nats.Conn) {
+func runProviders(logger logger.Logger, urls []string, schemaModelCache *map[string]dm.Model, dryRun bool, verbose bool, importer string, fn ProviderFunc, nc *nats.Conn) {
 	opts := &provider.ProviderOpts{
 		DryRun:   dryRun,
 		Verbose:  verbose,
@@ -66,7 +68,7 @@ func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool
 	}
 	providers := []internal.Provider{}
 	for _, url := range urls {
-		provider, err := provider.NewProviderForURL(logger, url, opts)
+		provider, err := provider.NewProviderForURL(logger, url, schemaModelCache, opts)
 		if err != nil {
 			logger.Error("error creating provider: %s", err)
 			os.Exit(1)

@@ -15,6 +15,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/eds-server/internal/provider"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	snats "github.com/shopmonkeyus/go-common/nats"
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
@@ -125,18 +126,40 @@ var serverCmd = &cobra.Command{
 
 		//Create a local NATs server (leaf-node) for the providers to read from
 		localNatsServerConnection := natsProvider.GetNatsConn()
-		modelVersionCache := make(map[string]dm.Model)
+		schemaModelVersionCache := make(map[string]dm.Model)
+
+		//If we're importing data, we'll go ahead and pre-populate the schemas for all the files in the importer directory
+		if importer != "" {
+			files, err := util.ListDir(importer)
+			if err != nil {
+				logger.Error("error reading directory: %s", err)
+				os.Exit(1)
+			}
+			for _, file := range files {
+				tableName, err := util.GetTableNameFromPath(file)
+				if err != nil {
+					logger.Error("error getting table name from path: %s", err)
+					os.Exit(1)
+				}
+				latestSchema, err := provider.GetLatestSchema(logger, nc, tableName)
+				if err != nil {
+					logger.Error("error getting latest schema: %s", err)
+					os.Exit(1)
+				}
+				schemaModelVersionCache[tableName] = latestSchema
+			}
+		}
 		var runLocalNatsCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
-				Logger:            logger,
-				CompanyID:         companyIDs,
-				Providers:         providers,
-				NatsConnection:    nc,
-				TraceNats:         mustFlagBool(cmd, "trace-nats", false),
-				DumpMessagesDir:   mustFlagString(cmd, "dump-dir", false),
-				ConsumerPrefix:    mustFlagString(cmd, "consumer-prefix", false),
-				ModelVersionCache: &modelVersionCache,
+				Logger:                  logger,
+				CompanyID:               companyIDs,
+				Providers:               providers,
+				NatsConnection:          nc,
+				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
+				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
+				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
+				SchemaModelVersionCache: &schemaModelVersionCache,
 			})
 			if err != nil {
 				return err
@@ -158,14 +181,14 @@ var serverCmd = &cobra.Command{
 		var runProvidersCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
-				Logger:            logger,
-				CompanyID:         companyIDs,
-				Providers:         providers,
-				NatsConnection:    localNatsServerConnection,
-				TraceNats:         mustFlagBool(cmd, "trace-nats", false),
-				DumpMessagesDir:   mustFlagString(cmd, "dump-dir", false),
-				ConsumerPrefix:    mustFlagString(cmd, "consumer-prefix", false),
-				ModelVersionCache: &modelVersionCache,
+				Logger:                  logger,
+				CompanyID:               companyIDs,
+				Providers:               providers,
+				NatsConnection:          localNatsServerConnection,
+				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
+				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
+				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
+				SchemaModelVersionCache: &schemaModelVersionCache,
 			})
 			if err != nil {
 				return err
@@ -197,7 +220,7 @@ var serverCmd = &cobra.Command{
 		}
 		logger.Info("started nats provider")
 
-		runProviders(logger, urls, dryRun, verbose, importer, runProvidersCallback, nc)
+		runProviders(logger, urls, &schemaModelVersionCache, dryRun, verbose, importer, runProvidersCallback, nc)
 		<-csys.CreateShutdownChannel()
 		logger.Info("stopped nats provider")
 	},

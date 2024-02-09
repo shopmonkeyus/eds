@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -31,7 +32,7 @@ type ProviderOpts struct {
 }
 
 // NewProviderForURL will return a new internal.Provider for the driver based on the url
-func NewProviderForURL(logger logger.Logger, urlstr string, opts *ProviderOpts) (internal.Provider, error) {
+func NewProviderForURL(logger logger.Logger, urlstr string, schemaModelVersionCache *map[string]dm.Model, opts *ProviderOpts) (internal.Provider, error) {
 
 	driver, u, err := parseURLForProvider(urlstr)
 	if err != nil {
@@ -47,17 +48,17 @@ func NewProviderForURL(logger logger.Logger, urlstr string, opts *ProviderOpts) 
 				args = append(args, v...)
 			}
 		}
-		return NewFileProvider(logger, args, opts)
+		return NewFileProvider(logger, args, schemaModelVersionCache, opts)
 	case "postgresql":
-		return NewPostgresProvider(logger, urlstr, opts)
+		return NewPostgresProvider(logger, urlstr, schemaModelVersionCache, opts)
 	case "sqlserver":
-		return NewSqlServerProvider(logger, urlstr, opts)
+		return NewSqlServerProvider(logger, urlstr, schemaModelVersionCache, opts)
 	case "snowflake":
 		urlstr, err := convertSnowflakeConnectionString(urlstr)
 		if err != nil {
 			return nil, err
 		}
-		return NewSnowflakeProvider(logger, urlstr, opts)
+		return NewSnowflakeProvider(logger, urlstr, schemaModelVersionCache, opts)
 
 	default:
 		return nil, fmt.Errorf("no suitable provider found for url: %s", urlstr)

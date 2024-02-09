@@ -27,12 +27,12 @@ type SnowflakeProvider struct {
 	opts              *ProviderOpts
 	schema            string
 	modelVersionCache map[string]bool
-	schemaModelCache  map[string]dm.Model
+	schemaModelCache  *map[string]dm.Model
 }
 
 var _ internal.Provider = (*SnowflakeProvider)(nil)
 
-func NewSnowflakeProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
+func NewSnowflakeProvider(plogger logger.Logger, connString string, schemaModelCache *map[string]dm.Model, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[snowflake]")
 	logger.Info("starting snowflake connection with connection string: %s", util.MaskConnectionString(connString))
 	schema, err := getSnowflakeSchema(connString)
@@ -41,11 +41,12 @@ func NewSnowflakeProvider(plogger logger.Logger, connString string, opts *Provid
 	}
 	ctx := context.Background()
 	return &SnowflakeProvider{
-		logger: logger,
-		url:    connString,
-		ctx:    ctx,
-		opts:   opts,
-		schema: schema,
+		logger:           logger,
+		url:              connString,
+		ctx:              ctx,
+		opts:             opts,
+		schema:           schema,
+		schemaModelCache: schemaModelCache,
 	}, nil
 }
 
@@ -87,7 +88,6 @@ func (p *SnowflakeProvider) Start() error {
 		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
-	p.schemaModelCache = make(map[string]dm.Model, 0)
 	defer rows.Close()
 
 	for rows.Next() {
@@ -139,7 +139,7 @@ func (p *SnowflakeProvider) Import(dataMap map[string]interface{}, tableName str
 		return badImportDataError
 	}
 
-	schema, schemaFound := p.schemaModelCache[tableName]
+	schema, schemaFound := (*p.schemaModelCache)[tableName]
 	if !schemaFound {
 		//Right now, the messaging provider connecting to our local server will not forward messages to the main server
 		//So we'll error out. Ideally we should always find the schema in the cache, so we shouldn't run into this code path
@@ -227,7 +227,12 @@ func (p *SnowflakeProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				if _, ok := data[field.Name]; !ok {
 					continue
 				}
-
+				if !isFirstColumn {
+					sqlColumns.WriteString(", ")
+					sqlValuePlaceHolder.WriteString(", ")
+				} else {
+					isFirstColumn = false
+				}
 				// if yes, then add column
 				sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 				if field.Type == "Json" || field.IsList {
@@ -245,12 +250,6 @@ func (p *SnowflakeProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 
 				values = append(values, val)
 
-				if !isFirstColumn {
-					sqlColumns.WriteString(",")
-					sqlValuePlaceHolder.WriteString(",")
-				} else {
-					isFirstColumn = false
-				}
 				columnCount += 1
 			}
 			//TODO: Handle conflicts?
@@ -271,7 +270,11 @@ func (p *SnowflakeProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 					// can't update the id!
 					continue
 				}
-
+				if !isFirstColumn {
+					updateColumns.WriteString(", ")
+				} else {
+					isFirstColumn = false
+				}
 				updateColumns.WriteString(fmt.Sprintf(`"%s" = :%d`, field.Name, columnCount))
 
 				val, err := util.TryConvertJson(field.Type, data[field.Name])
@@ -280,11 +283,7 @@ func (p *SnowflakeProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				}
 
 				updateValues = append(updateValues, val)
-				if !isFirstColumn {
-					updateColumns.WriteString(",")
-				} else {
-					isFirstColumn = false
-				}
+
 				columnCount += 1
 			}
 			values = append(values, updateValues...)
@@ -339,7 +338,12 @@ func (p *SnowflakeProvider) importSQL(data map[string]interface{}, m dm.Model) (
 			if _, ok := data[field.Name]; !ok {
 				continue
 			}
-
+			if !isFirstColumn {
+				sqlColumns.WriteString(", ")
+				sqlValuePlaceHolder.WriteString(", ")
+			} else {
+				isFirstColumn = false
+			}
 			// if yes, then add column
 			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 			if field.Type == "Json" || field.IsList {
@@ -357,12 +361,6 @@ func (p *SnowflakeProvider) importSQL(data map[string]interface{}, m dm.Model) (
 
 			values = append(values, val)
 
-			if !isFirstColumn {
-				sqlColumns.WriteString(",")
-				sqlValuePlaceHolder.WriteString(",")
-			} else {
-				isFirstColumn = false
-			}
 			columnCount += 1
 		}
 		//TODO: Handle conflicts?

@@ -92,18 +92,11 @@ func (p *NatsProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	return nil
 }
 
-func (p *NatsProvider) Import(toDO []byte, nc *nats.Conn) error {
-
-	p.js.Publish("FIX_SUBJECT", toDO)
+func (p *NatsProvider) Import(dataMap map[string]interface{}, tableName string, nc *nats.Conn) error {
 
 	return nil
 }
 
 func (p *NatsProvider) GetNatsConn() *nats.Conn {
 	return p.nc
-}
-
-// Migrate will tell the provider to do any migration work and return an error or nil if ok
-func (p *NatsProvider) Migrate() error {
-	return nil
 }

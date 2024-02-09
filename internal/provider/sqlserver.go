@@ -25,21 +25,22 @@ type SqlServerProvider struct {
 	opts              *ProviderOpts
 	schema            string
 	modelVersionCache map[string]bool
-	schemaModelCache  map[string]dm.Model
+	schemaModelCache  *map[string]dm.Model
 }
 
 var _ internal.Provider = (*SqlServerProvider)(nil)
 
-func NewSqlServerProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
+func NewSqlServerProvider(plogger logger.Logger, connString string, schemaModelCache *map[string]dm.Model, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[sqlserver]")
 	logger.Info("starting mssql plugin connection with connection string: %s", util.MaskConnectionString(connString))
 	ctx := context.Background()
 	return &SqlServerProvider{
-		logger: logger,
-		url:    connString,
-		ctx:    ctx,
-		opts:   opts,
-		schema: "dbo",
+		logger:           logger,
+		url:              connString,
+		ctx:              ctx,
+		opts:             opts,
+		schema:           "dbo",
+		schemaModelCache: schemaModelCache,
 	}, nil
 }
 
@@ -73,7 +74,6 @@ func (p *SqlServerProvider) Start() error {
 		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
-	p.schemaModelCache = make(map[string]dm.Model, 0)
 
 	defer rows.Close()
 
@@ -126,7 +126,7 @@ func (p *SqlServerProvider) Import(dataMap map[string]interface{}, tableName str
 		return badImportDataError
 	}
 
-	schema, schemaFound := p.schemaModelCache[tableName]
+	schema, schemaFound := (*p.schemaModelCache)[tableName]
 	if !schemaFound {
 		//Right now, the messaging provider connecting to our local server will not forward messages to the main server
 		//So we'll error out. Ideally we should always find the schema in the cache, so we shouldn't run into this code path
@@ -188,7 +188,12 @@ func (p *SqlServerProvider) importSQL(data map[string]interface{}, m dm.Model) (
 			if _, ok := data[field.Name]; !ok {
 				continue
 			}
-
+			if !isFirstColumn {
+				sqlColumns.WriteString(", ")
+				sqlValuePlaceHolder.WriteString(", ")
+			} else {
+				isFirstColumn = false
+			}
 			// if yes, then add column
 			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 			sqlValuePlaceHolder.WriteString(fmt.Sprintf(`@p%d`, columnCount))
@@ -198,12 +203,6 @@ func (p *SqlServerProvider) importSQL(data map[string]interface{}, m dm.Model) (
 			}
 			values = append(values, val)
 
-			if !isFirstColumn {
-				sqlColumns.WriteString(",")
-				sqlValuePlaceHolder.WriteString(",")
-			} else {
-				isFirstColumn = false
-			}
 			columnCount += 1
 		}
 		//TODO: Handle conflicts?
@@ -274,6 +273,12 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				if _, ok := data[field.Name]; !ok {
 					continue
 				}
+				if !isFirstColumn {
+					sqlColumns.WriteString(", ")
+					sqlValuePlaceHolder.WriteString(", ")
+				} else {
+					isFirstColumn = false
+				}
 				// if yes, then add column
 				sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 				sqlValuePlaceHolder.WriteString(fmt.Sprintf(`@p%d`, columnCount))
@@ -283,13 +288,6 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				}
 
 				values = append(values, val)
-
-				if !isFirstColumn {
-					sqlColumns.WriteString(",")
-					sqlValuePlaceHolder.WriteString(",")
-				} else {
-					isFirstColumn = false
-				}
 				columnCount += 1
 			}
 
@@ -309,7 +307,11 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 					// can't update the id!
 					continue
 				}
-
+				if !isFirstColumn {
+					updateColumns.WriteString(", ")
+				} else {
+					isFirstColumn = false
+				}
 				updateColumns.WriteString(fmt.Sprintf(`"%s" = @p%d`, field.Name, columnCount))
 
 				val, err := util.TryConvertJson(field.Type, data[field.Name])
@@ -318,11 +320,7 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				}
 
 				updateValues = append(updateValues, val)
-				if !isFirstColumn {
-					updateColumns.WriteString(",")
-				} else {
-					isFirstColumn = false
-				}
+
 				columnCount += 1
 			}
 			values = append(values, updateValues...)
