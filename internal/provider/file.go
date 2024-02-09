@@ -132,7 +132,7 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	return nil
 }
 
-func (p *FileProvider) Import(toDO []byte, nc *nats.Conn) error {
-
+// TODO: Implement this method
+func (p *FileProvider) Import(dataMap map[string]interface{}, tableName string, nc *nats.Conn) error {
 	return nil
 }

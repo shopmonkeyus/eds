@@ -3,13 +3,14 @@ package cmd
 import (
 	"bufio"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/provider"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 )
@@ -74,44 +75,23 @@ func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool
 			logger.Error("error starting provider: %s", err)
 			os.Exit(1)
 		}
-		if importer != "" {
-			resp, err := http.Get(opts.Importer)
-			if err != nil {
-				logger.Error("error from importer url request: %s", err)
-				os.Exit(1)
-			}
-			if resp.StatusCode != http.StatusOK {
-				logger.Error("invalid status code from importer url: %s", opts.Importer)
-				os.Exit(1)
-			}
-			defer resp.Body.Close()
-
-			gzReader, err := gzip.NewReader(resp.Body)
-			if err != nil {
-				logger.Error("error creating gzip reader: %s", err)
-				os.Exit(1)
-			}
-			scanner := bufio.NewScanner(gzReader)
-			defer gzReader.Close()
-			const maxCapacity = 1024 * 1024
-			scanner.Buffer(make([]byte, maxCapacity), maxCapacity)
-
-			for scanner.Scan() {
-				data := scanner.Bytes()
-
-				err = provider.Import(data, nc)
-				if err != nil {
-					logger.Error("error importing data: %s", err)
-					os.Exit(1)
-				}
-			}
-		}
 
 		providers = append(providers, provider)
 	}
 	if importer != "" {
-		logger.Info("Imported pre-signed URL data instead of streaming")
-		os.Exit(1)
+		//opts.Importer should be the location of a file directory, get all the files from this directory
+		files, err := util.ListDir(opts.Importer)
+		//Can potentially run on goroutines to process multiple files at once, but performance seems ok right now
+		for _, file := range files {
+			processFile(logger, file, providers, nc)
+		}
+
+		if err != nil {
+			logger.Error("error reading directory: %s", err)
+			os.Exit(1)
+		}
+		logger.Info("Imported file data instead of streaming")
+		os.Exit(0)
 	}
 
 	ferr := fn(providers)
@@ -128,6 +108,46 @@ func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool
 			os.Exit(1)
 		}
 	}
+}
+
+func processFile(logger logger.Logger, fileName string, providers []internal.Provider, nc *nats.Conn) error {
+	logger.Info("processing file: %s", fileName)
+	file, err := os.Open(fileName)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer gzipReader.Close()
+	tableName, err := util.GetTableNameFromPath(fileName)
+	if err != nil {
+		return err
+	}
+	logger.Info("importing table: %s", tableName)
+	scanner := bufio.NewScanner(gzipReader)
+	for scanner.Scan() {
+		data := scanner.Bytes()
+		var dataMap map[string]interface{}
+		if err := json.Unmarshal(data, &dataMap); err != nil {
+			err = fmt.Errorf("error unmarshalling data: %s", err)
+			return err
+
+		}
+
+		for _, provider := range providers {
+
+			provider.Import(dataMap, tableName, nc)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func newLogger(cmd *cobra.Command) logger.Logger {

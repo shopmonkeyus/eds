@@ -110,23 +110,16 @@ func (p *PostgresProvider) Process(data datatypes.ChangeEventPayload, schema dm.
 	return nil
 }
 
-func (p *PostgresProvider) Import(data []byte, nc *nats.Conn) error {
+func (p *PostgresProvider) Import(dataMap map[string]interface{}, tableName string, nc *nats.Conn) error {
+
 	var schema dm.Model
 	var err error
-	var dataMap map[string]interface{}
-	if err := json.Unmarshal(data, &dataMap); err != nil {
-
-		p.logger.Error("error unmarshalling data: %s", err)
-		return err
-	}
-	if dataMap["table"] == nil {
-		badImportDataMessage := "No table name found in data"
+	if tableName == "" {
+		badImportDataMessage := "Empty table name provided. Check the file name being imported."
 		badImportDataError := errors.New(badImportDataMessage)
-		p.logger.Error(fmt.Sprintf(badImportDataMessage+" %s", string(data)))
+		p.logger.Error(fmt.Sprintf(badImportDataMessage+" %s", dataMap))
 		return badImportDataError
-
 	}
-	tableName := dataMap["table"].(string)
 
 	schema, schemaFound := p.schemaModelCache[tableName]
 	if !schemaFound {
@@ -138,7 +131,12 @@ func (p *PostgresProvider) Import(data []byte, nc *nats.Conn) error {
 	if err != nil {
 		return err
 	}
+
 	sql, values, err := p.importSQL(dataMap, schema)
+	if sql == "" {
+		p.logger.Debug("no sql to run")
+		return nil
+	}
 	if err != nil {
 
 		return err

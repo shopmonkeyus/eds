@@ -3,10 +3,8 @@ package provider
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -130,25 +128,16 @@ func (p *SnowflakeProvider) Process(data datatypes.ChangeEventPayload, schema dm
 	return nil
 }
 
-func (p *SnowflakeProvider) Import(data []byte, nc *nats.Conn) error {
+func (p *SnowflakeProvider) Import(dataMap map[string]interface{}, tableName string, nc *nats.Conn) error {
 
 	var schema dm.Model
 	var err error
-	var dataMap map[string]interface{}
-	if err := json.Unmarshal(data, &dataMap); err != nil {
-
-		p.logger.Error("error unmarshalling data: %s", err)
-
-		os.Exit(1)
-	}
-	if dataMap["table"] == nil {
-		badImportDataMessage := "No table name found in data"
+	if tableName == "" {
+		badImportDataMessage := "Empty table name provided. Check the file name being imported."
 		badImportDataError := errors.New(badImportDataMessage)
-		p.logger.Error(fmt.Sprintf(badImportDataMessage+" %s", string(data)))
+		p.logger.Error(fmt.Sprintf(badImportDataMessage+" %s", dataMap))
 		return badImportDataError
-
 	}
-	tableName := dataMap["table"].(string)
 
 	schema, schemaFound := p.schemaModelCache[tableName]
 	if !schemaFound {
