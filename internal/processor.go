@@ -32,18 +32,19 @@ type MessageProcessor struct {
 	consumerPrefix    string
 	context           context.Context
 	cancel            context.CancelFunc
-	modelVersionCache map[string]dm.Model
+	modelVersionCache *map[string]dm.Model
 }
 
 // MessageProcessorOpts is the options for the message processor
 type MessageProcessorOpts struct {
-	Logger          logger.Logger
-	CompanyID       []string
-	Providers       []Provider
-	NatsConnection  *nats.Conn
-	DumpMessagesDir string
-	TraceNats       bool
-	ConsumerPrefix  string
+	Logger            logger.Logger
+	CompanyID         []string
+	Providers         []Provider
+	NatsConnection    *nats.Conn
+	DumpMessagesDir   string
+	TraceNats         bool
+	ConsumerPrefix    string
+	ModelVersionCache *map[string]dm.Model
 }
 
 // NewMessageProcessor will create a new processor for a given customer id
@@ -82,7 +83,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		js:                js,
 		context:           context,
 		cancel:            cancel,
-		modelVersionCache: make(map[string]dm.Model),
+		modelVersionCache: opts.ModelVersionCache,
 	}
 	return processor, nil
 }
@@ -126,7 +127,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
 	p.logger.Trace("got modelVersionId for: %s %s %s for msgid: %s", modelVersionId, model, modelVersion, msgid)
 
-	currentModelVersion, found := p.modelVersionCache[modelVersionId]
+	currentModelVersion, found := (*p.modelVersionCache)[modelVersionId]
 
 	if found {
 		schema = currentModelVersion
@@ -149,7 +150,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		schema = foundSchema.Data
 		if foundSchema.Success {
 			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
-			p.modelVersionCache[modelVersionId] = schema
+			(*p.modelVersionCache)[modelVersionId] = schema
 		} else {
 			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		}

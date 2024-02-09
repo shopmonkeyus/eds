@@ -38,6 +38,25 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 
 type ProviderFunc func(p []internal.Provider) error
 
+func runLocalProvider(logger logger.Logger, natsProvider internal.Provider, fn ProviderFunc, nc *nats.Conn) {
+	providers := []internal.Provider{natsProvider}
+	ferr := fn(providers)
+	if ferr != nil {
+		for _, provider := range providers {
+			provider.Stop()
+			logger.Error("error: %s", ferr)
+			os.Exit(1)
+		}
+	}
+	for _, provider := range providers {
+		if err := provider.Stop(); err != nil {
+			logger.Error("error stopping provider: %s", err)
+			os.Exit(1)
+		}
+	}
+
+}
+
 func runProviders(logger logger.Logger, urls []string, dryRun bool, verbose bool, importer string, fn ProviderFunc, nc *nats.Conn) {
 	opts := &provider.ProviderOpts{
 		DryRun:   dryRun,

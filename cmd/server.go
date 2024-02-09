@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	glog "log"
 
 	jwt "github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
+	dm "github.com/shopmonkeyus/eds-server/internal/model"
+	"github.com/shopmonkeyus/eds-server/internal/provider"
 	snats "github.com/shopmonkeyus/go-common/nats"
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
@@ -74,7 +79,7 @@ var serverCmd = &cobra.Command{
 			companyName = claim.Name
 
 		}
-
+		//Nats connection to main NATS server
 		nc, err := snats.NewNats(logger, "eds-server-"+companyName, natsurl, natsCredentials)
 		if err != nil {
 			logger.Error("nats: %s", err)
@@ -82,16 +87,56 @@ var serverCmd = &cobra.Command{
 		}
 		defer nc.Close()
 
-		var runProvidersCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
+		serverConfigJSON, err := os.ReadFile("server.conf")
+		if err != nil {
+			panic(err)
+		}
+		serverConfig := server.Options{}
+
+		err = json.Unmarshal([]byte(serverConfigJSON), &serverConfig)
+		if err != nil {
+			panic(err)
+		}
+
+		ns, err := server.NewServer(&serverConfig)
+
+		if err != nil {
+			panic(err)
+		}
+
+		go ns.Start()
+
+		for !ns.ReadyForConnections(4 * time.Second) {
+			logger.Info("Waiting for nats server to start...")
+		}
+
+		logger.Info("Nats server started at url: %s", ns.ClientURL())
+		//Create our own NATs server for the providers to read from
+		opts := &provider.ProviderOpts{
+			DryRun:   dryRun,
+			Verbose:  verbose,
+			Importer: importer,
+		}
+		natsProvider, err := provider.NewNatsProvider(logger, ns.ClientURL(), opts, nc)
+		if err != nil {
+			logger.Error("error creating nats provider: %s", err)
+			os.Exit(1)
+		}
+
+		//Create a local NATs server (leaf-node) for the providers to read from
+		localNatsServerConnection := natsProvider.GetNatsConn()
+		modelVersionCache := make(map[string]dm.Model)
+		var runLocalNatsCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
-				Logger:          logger,
-				CompanyID:       companyIDs,
-				Providers:       providers,
-				NatsConnection:  nc,
-				TraceNats:       mustFlagBool(cmd, "trace-nats", false),
-				DumpMessagesDir: mustFlagString(cmd, "dump-dir", false),
-				ConsumerPrefix:  mustFlagString(cmd, "consumer-prefix", false),
+				Logger:            logger,
+				CompanyID:         companyIDs,
+				Providers:         providers,
+				NatsConnection:    nc,
+				TraceNats:         mustFlagBool(cmd, "trace-nats", false),
+				DumpMessagesDir:   mustFlagString(cmd, "dump-dir", false),
+				ConsumerPrefix:    mustFlagString(cmd, "consumer-prefix", false),
+				ModelVersionCache: &modelVersionCache,
 			})
 			if err != nil {
 				return err
@@ -100,6 +145,34 @@ var serverCmd = &cobra.Command{
 
 			logger.Trace("starting message processor")
 
+			if err := processor.Start(); err != nil {
+				return fmt.Errorf("processor start: %s", err)
+			}
+			logger.Info("started message processor")
+			<-csys.CreateShutdownChannel()
+			logger.Info("stopped message processor")
+			return nil
+		}
+		go runLocalProvider(logger, natsProvider, runLocalNatsCallback, nc)
+
+		var runProvidersCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
+			logger.Trace("creating message processor")
+			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
+				Logger:            logger,
+				CompanyID:         companyIDs,
+				Providers:         providers,
+				NatsConnection:    localNatsServerConnection,
+				TraceNats:         mustFlagBool(cmd, "trace-nats", false),
+				DumpMessagesDir:   mustFlagString(cmd, "dump-dir", false),
+				ConsumerPrefix:    mustFlagString(cmd, "consumer-prefix", false),
+				ModelVersionCache: &modelVersionCache,
+			})
+			if err != nil {
+				return err
+			}
+			defer processor.Stop()
+
+			logger.Trace("starting message processor to read from local nats")
 			if err := processor.Start(); err != nil {
 				return fmt.Errorf("processor start: %s", err)
 			}
@@ -117,8 +190,16 @@ var serverCmd = &cobra.Command{
 			logger.Error("error: missing required url argument")
 			os.Exit(1)
 		}
-		runProviders(logger, urls, dryRun, verbose, importer, runProvidersCallback, nc)
+		defer natsProvider.Stop()
+		if err := natsProvider.Start(); err != nil {
+			logger.Error("error starting nats provider: %s", err)
+			os.Exit(1)
+		}
+		logger.Info("started nats provider")
 
+		runProviders(logger, urls, dryRun, verbose, importer, runProvidersCallback, nc)
+		<-csys.CreateShutdownChannel()
+		logger.Info("stopped nats provider")
 	},
 }
 

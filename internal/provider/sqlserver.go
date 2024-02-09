@@ -138,11 +138,9 @@ func (p *SqlServerProvider) Import(data []byte, nc *nats.Conn) error {
 
 	schema, schemaFound := p.schemaModelCache[tableName]
 	if !schemaFound {
-		schema, err = GetLatestSchema(p.logger, nc, tableName)
-		if err != nil {
-			return err
-		}
-		p.schemaModelCache[tableName] = schema
+		//Right now, the messaging provider connecting to our local server will not forward messages to the main server
+		//So we'll error out. Ideally we should always find the schema in the cache, so we shouldn't run into this code path
+		return errors.New("schema not found")
 	}
 
 	err = p.ensureTableSchema(schema)
@@ -188,9 +186,9 @@ func (p *SqlServerProvider) importSQL(data map[string]interface{}, m dm.Model) (
 
 		}
 	}
-
+	isFirstColumn := true
 	if shouldCreate {
-		for i, field := range m.Fields {
+		for _, field := range m.Fields {
 			// check if field is in payload
 			if _, ok := data[field.Name]; !ok {
 				continue
@@ -205,9 +203,11 @@ func (p *SqlServerProvider) importSQL(data map[string]interface{}, m dm.Model) (
 			}
 			values = append(values, val)
 
-			if i+1 < len(m.Fields) {
+			if !isFirstColumn {
 				sqlColumns.WriteString(",")
 				sqlValuePlaceHolder.WriteString(",")
+			} else {
+				isFirstColumn = false
 			}
 			columnCount += 1
 		}
@@ -272,9 +272,9 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 
 			}
 		}
-
+		isFirstColumn := true
 		if shouldCreate {
-			for i, field := range m.Fields {
+			for _, field := range m.Fields {
 				// check if field is in payload
 				if _, ok := data[field.Name]; !ok {
 					continue
@@ -289,9 +289,11 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 
 				values = append(values, val)
 
-				if i+1 < len(m.Fields) {
+				if !isFirstColumn {
 					sqlColumns.WriteString(",")
 					sqlValuePlaceHolder.WriteString(",")
+				} else {
+					isFirstColumn = false
 				}
 				columnCount += 1
 			}
@@ -303,8 +305,7 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 			data := c.GetAfter()
 			p.logger.Debug("after object: %v", data)
 			columnCount := 1
-
-			for i, field := range m.Fields {
+			for _, field := range m.Fields {
 				// check if field is in payload since we do not drop columns automatically
 				if _, ok := data[field.Name]; !ok {
 					continue
@@ -322,8 +323,10 @@ func (p *SqlServerProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				}
 
 				updateValues = append(updateValues, val)
-				if i+1 < len(m.Fields) {
+				if !isFirstColumn {
 					updateColumns.WriteString(",")
+				} else {
+					isFirstColumn = false
 				}
 				columnCount += 1
 			}
