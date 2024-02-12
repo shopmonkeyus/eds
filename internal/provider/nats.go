@@ -100,3 +100,15 @@ func (p *NatsProvider) Import(dataMap map[string]interface{}, tableName string, 
 func (p *NatsProvider) GetNatsConn() *nats.Conn {
 	return p.nc
 }
+
+func (p *NatsProvider) AddHealthCheck() error {
+	_, err := p.nc.Subscribe("health", func(msg *nats.Msg) {
+		p.nc.Publish(msg.Reply, []byte("I'm healthy"))
+	})
+	if err != nil {
+		err = fmt.Errorf("error subscribing to health subject: %v", err)
+		return err
+	}
+	p.logger.Info("NATS server is now listening for health check requests")
+	return nil
+}

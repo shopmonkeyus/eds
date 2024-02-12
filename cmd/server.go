@@ -107,8 +107,14 @@ var serverCmd = &cobra.Command{
 
 		go ns.Start()
 
+		readyForConnectionCounter := 0
 		for !ns.ReadyForConnections(4 * time.Second) {
 			logger.Info("Waiting for nats server to start...")
+			readyForConnectionCounter++
+			if readyForConnectionCounter > 10 {
+				logger.Error("Local Nats server failed to start. Check to see if another instance is already running. Exiting...")
+				os.Exit(1)
+			}
 		}
 
 		logger.Info("Nats server started at url: %s", ns.ClientURL())
@@ -126,6 +132,13 @@ var serverCmd = &cobra.Command{
 
 		//Create a local NATs server (leaf-node) for the providers to read from
 		localNatsServerConnection := natsProvider.GetNatsConn()
+
+		err = natsProvider.AddHealthCheck()
+		if err != nil {
+			logger.Error("error adding health check: %s", err)
+			os.Exit(1)
+		}
+
 		schemaModelVersionCache := make(map[string]dm.Model)
 
 		//If we're importing data, we'll go ahead and pre-populate the schemas for all the files in the importer directory
