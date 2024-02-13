@@ -22,28 +22,29 @@ var emptyJSON = []byte("{}")
 const modelRequestTimeout = time.Duration(time.Second * 30)
 
 type MessageProcessor struct {
-	logger            logger.Logger
-	companyID         []string
-	providers         []Provider
-	conn              *nats.Conn
-	js                nats.JetStreamContext
-	subscriber        []snats.Subscriber
-	dumpMessagesDir   string
-	consumerPrefix    string
-	context           context.Context
-	cancel            context.CancelFunc
-	modelVersionCache map[string]dm.Model
+	logger                  logger.Logger
+	companyID               []string
+	providers               []Provider
+	conn                    *nats.Conn
+	js                      nats.JetStreamContext
+	subscriber              []snats.Subscriber
+	dumpMessagesDir         string
+	consumerPrefix          string
+	context                 context.Context
+	cancel                  context.CancelFunc
+	schemaModelVersionCache *map[string]dm.Model
 }
 
 // MessageProcessorOpts is the options for the message processor
 type MessageProcessorOpts struct {
-	Logger          logger.Logger
-	CompanyID       []string
-	Providers       []Provider
-	NatsConnection  *nats.Conn
-	DumpMessagesDir string
-	TraceNats       bool
-	ConsumerPrefix  string
+	Logger                  logger.Logger
+	CompanyID               []string
+	Providers               []Provider
+	NatsConnection          *nats.Conn
+	DumpMessagesDir         string
+	TraceNats               bool
+	ConsumerPrefix          string
+	SchemaModelVersionCache *map[string]dm.Model
 }
 
 // NewMessageProcessor will create a new processor for a given customer id
@@ -73,16 +74,16 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
-		logger:            opts.Logger.WithPrefix("[nats]"),
-		companyID:         opts.CompanyID,
-		providers:         opts.Providers,
-		conn:              opts.NatsConnection,
-		dumpMessagesDir:   opts.DumpMessagesDir,
-		consumerPrefix:    opts.ConsumerPrefix,
-		js:                js,
-		context:           context,
-		cancel:            cancel,
-		modelVersionCache: make(map[string]dm.Model),
+		logger:                  opts.Logger.WithPrefix("[nats]"),
+		companyID:               opts.CompanyID,
+		providers:               opts.Providers,
+		conn:                    opts.NatsConnection,
+		dumpMessagesDir:         opts.DumpMessagesDir,
+		consumerPrefix:          opts.ConsumerPrefix,
+		js:                      js,
+		context:                 context,
+		cancel:                  cancel,
+		schemaModelVersionCache: opts.SchemaModelVersionCache,
 	}
 	return processor, nil
 }
@@ -126,7 +127,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	modelVersionId := fmt.Sprintf("%s-%s", model, modelVersion)
 	p.logger.Trace("got modelVersionId for: %s %s %s for msgid: %s", modelVersionId, model, modelVersion, msgid)
 
-	currentModelVersion, found := p.modelVersionCache[modelVersionId]
+	currentModelVersion, found := (*p.schemaModelVersionCache)[modelVersionId]
 
 	if found {
 		schema = currentModelVersion
@@ -149,7 +150,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		schema = foundSchema.Data
 		if foundSchema.Success {
 			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
-			p.modelVersionCache[modelVersionId] = schema
+			(*p.schemaModelVersionCache)[modelVersionId] = schema
 		} else {
 			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		}

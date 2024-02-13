@@ -3,11 +3,9 @@ package provider
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/nats-io/nats.go"
@@ -27,21 +25,22 @@ type PostgresProvider struct {
 	opts              *ProviderOpts
 	schema            string
 	modelVersionCache map[string]bool
-	schemaModelCache  map[string]dm.Model
+	schemaModelCache  *map[string]dm.Model
 }
 
 var _ internal.Provider = (*PostgresProvider)(nil)
 
-func NewPostgresProvider(plogger logger.Logger, connString string, opts *ProviderOpts) (internal.Provider, error) {
+func NewPostgresProvider(plogger logger.Logger, connString string, schemaModelCache *map[string]dm.Model, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix("[postgresql]")
 	logger.Info("starting postgres connection with connection string: %s", util.MaskConnectionString(connString))
 	ctx := context.Background()
 	return &PostgresProvider{
-		logger: logger,
-		url:    connString,
-		ctx:    ctx,
-		opts:   opts,
-		schema: "public",
+		logger:           logger,
+		url:              connString,
+		ctx:              ctx,
+		opts:             opts,
+		schema:           "public",
+		schemaModelCache: schemaModelCache,
 	}, nil
 }
 
@@ -69,7 +68,6 @@ func (p *PostgresProvider) Start() error {
 		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
-	p.schemaModelCache = make(map[string]dm.Model, 0)
 
 	defer rows.Close()
 
@@ -122,15 +120,12 @@ func (p *PostgresProvider) Import(dataMap map[string]interface{}, tableName stri
 		return badImportDataError
 	}
 
-	schema, schemaFound := p.schemaModelCache[tableName]
+	schema, schemaFound := (*p.schemaModelCache)[tableName]
 	if !schemaFound {
-		schema, err = GetLatestSchema(p.logger, nc, tableName)
-		if err != nil {
-			return err
-		}
-		p.schemaModelCache[tableName] = schema
+		//Right now, the messaging provider connecting to our local server will not forward messages to the main server
+		//So we'll error out. Ideally we should always find the schema in the cache, so we shouldn't run into this code path
+		return errors.New("schema not found")
 	}
-
 	err = p.ensureTableSchema(schema)
 	if err != nil {
 		return err
@@ -176,23 +171,23 @@ func (p *PostgresProvider) importSQL(data map[string]interface{}, m dm.Model) (s
 
 		}
 	}
-
+	isFirstColumn := true
 	if shouldCreate {
-		for i, field := range m.Fields {
+		for _, field := range m.Fields {
 			// check if field is in payload
 			if _, ok := data[field.Name]; !ok {
 				continue
 			}
-
+			if !isFirstColumn {
+				sqlColumns.WriteString(", ")
+				sqlValuePlaceHolder.WriteString(", ")
+			} else {
+				isFirstColumn = false
+			}
 			// if yes, then add column
 			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 			sqlValuePlaceHolder.WriteString(fmt.Sprintf(`$%d`, columnCount))
 			values = append(values, data[field.Name])
-
-			if i+1 < len(m.Fields) {
-				sqlColumns.WriteString(",")
-				sqlValuePlaceHolder.WriteString(",")
-			}
 			columnCount += 1
 		}
 		//TODO: Handle conflicts?
@@ -256,22 +251,23 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 
 			}
 		}
-
+		isFirstColumn := true
 		if shouldCreate {
-			for i, field := range m.Fields {
+			for _, field := range m.Fields {
 				// check if field is in payload
 				if _, ok := data[field.Name]; !ok {
 					continue
+				}
+				if !isFirstColumn {
+					sqlColumns.WriteString(", ")
+					sqlValuePlaceHolder.WriteString(", ")
+				} else {
+					isFirstColumn = false
 				}
 				// if yes, then add column
 				sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 				sqlValuePlaceHolder.WriteString(fmt.Sprintf(`$%d`, columnCount))
 				values = append(values, data[field.Name])
-
-				if i+1 < len(m.Fields) {
-					sqlColumns.WriteString(",")
-					sqlValuePlaceHolder.WriteString(",")
-				}
 				columnCount += 1
 			}
 			query.WriteString(fmt.Sprintf(`INSERT INTO "%s" (%s) VALUES (%s) ON CONFLICT DO NOTHING`, m.Table, sqlColumns.String(), sqlValuePlaceHolder.String()) + ";\n")
@@ -281,8 +277,8 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 			data := c.GetAfter()
 			p.logger.Debug("after object: %v", data)
 			columnCount := 1
-
-			for i, field := range m.Fields {
+			isFirstColumn := true
+			for _, field := range m.Fields {
 				// check if field is in payload since we do not drop columns automatically
 				if _, ok := data[field.Name]; !ok {
 					continue
@@ -291,12 +287,14 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 					// can't update the id!
 					continue
 				}
-
+				if !isFirstColumn {
+					updateColumns.WriteString(", ")
+				} else {
+					isFirstColumn = false
+				}
 				updateColumns.WriteString(fmt.Sprintf(`"%s" = $%d`, field.Name, columnCount))
 				updateValues = append(updateValues, data[field.Name])
-				if i+1 < len(m.Fields) {
-					updateColumns.WriteString(",")
-				}
+
 				columnCount += 1
 			}
 			values = append(values, updateValues...)
@@ -324,7 +322,6 @@ func (p *PostgresProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (s
 func (p *PostgresProvider) ensureTableSchema(schema dm.Model) error {
 	modelVersionId := fmt.Sprintf("%s-%s", schema.Table, schema.ModelVersion)
 	modelVersionFound := p.modelVersionCache[modelVersionId]
-	p.logger.Debug("model versions: %v", p.modelVersionCache)
 	if modelVersionFound {
 		p.logger.Debug("model version already applied: %v", modelVersionId)
 		return nil // we've already applied this schema
@@ -345,27 +342,4 @@ func (p *PostgresProvider) ensureTableSchema(schema dm.Model) error {
 		p.logger.Debug("end applying model version: %v", modelVersionId)
 	}
 	return nil
-}
-
-func getLatestSchema(logger logger.Logger, nc *nats.Conn, table string) (dm.Model, error) {
-	var schema dm.Model
-	var emptyJSON = []byte("{}")
-	const modelRequestTimeout = time.Duration(time.Second * 30)
-	entry, err := nc.Request(fmt.Sprintf("schema.%s.latest", table), emptyJSON, modelRequestTimeout)
-	if err != nil {
-		return schema, err
-	}
-	var foundSchema datatypes.SchemaResponse
-
-	err = json.Unmarshal(entry.Data, &foundSchema)
-	if err != nil {
-		return schema, fmt.Errorf("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
-	}
-	schema = foundSchema.Data
-	if foundSchema.Success {
-		logger.Trace("got latest schema model for: %v for table: %s", foundSchema.Data, table)
-		return schema, nil
-	} else {
-		return schema, fmt.Errorf("no schema model found when searching for latest schema: %v for table: %s", foundSchema.Data, table)
-	}
 }

@@ -23,19 +23,20 @@ var OK = "OK"
 var ERR = "ERR"
 
 type FileProvider struct {
-	logger  logger.Logger
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	scanner *bufio.Scanner
-	verbose bool
-	once    sync.Once
+	logger           logger.Logger
+	cmd              *exec.Cmd
+	stdin            io.WriteCloser
+	stdout           io.ReadCloser
+	scanner          *bufio.Scanner
+	verbose          bool
+	once             sync.Once
+	schemaModelCache *map[string]dm.Model
 }
 
 var _ internal.Provider = (*FileProvider)(nil)
 
 // NewFileProvider returns a provider that will stream files to a folder provided in the url
-func NewFileProvider(plogger logger.Logger, cmd []string, opts *ProviderOpts) (internal.Provider, error) {
+func NewFileProvider(plogger logger.Logger, cmd []string, schemaModelCache *map[string]dm.Model, opts *ProviderOpts) (internal.Provider, error) {
 	logger := plogger.WithPrefix(fmt.Sprintf("[file] [%s]", cmd[0]))
 	logger.Info("file provider will execute program: %s", cmd[0])
 	if _, err := os.Stat(cmd[0]); os.IsNotExist(err) {
@@ -53,12 +54,13 @@ func NewFileProvider(plogger logger.Logger, cmd []string, opts *ProviderOpts) (i
 	}
 	scanner := bufio.NewScanner(stdout)
 	return &FileProvider{
-		logger:  logger,
-		cmd:     theCmd,
-		stdin:   stdin,
-		stdout:  stdout,
-		scanner: scanner,
-		verbose: opts.Verbose,
+		logger:           logger,
+		cmd:              theCmd,
+		stdin:            stdin,
+		stdout:           stdout,
+		scanner:          scanner,
+		verbose:          opts.Verbose,
+		schemaModelCache: schemaModelCache,
 	}, nil
 }
 
