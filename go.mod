@@ -6,7 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.5.1
 	github.com/microsoft/go-mssqldb v1.6.0
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
-	github.com/nats-io/nats-server/v2 v2.9.21
+	github.com/nats-io/nats-server/v2 v2.9.23
 	github.com/schollz/progressbar/v3 v3.14.1
 	github.com/shirou/gopsutil/v3 v3.23.11
 	github.com/shopmonkeyus/go-common v0.0.46
