@@ -104,6 +104,7 @@ func (p *NatsProvider) GetNatsConn() *nats.Conn {
 func (p *NatsProvider) AddHealthCheck() error {
 	_, err := p.nc.Subscribe("health", func(msg *nats.Msg) {
 		p.nc.Publish(msg.Reply, []byte("I'm healthy"))
+		p.logger.Debug("NATS server is healthy")
 	})
 	if err != nil {
 		err = fmt.Errorf("error subscribing to health subject: %v", err)
