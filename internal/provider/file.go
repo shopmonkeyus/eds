@@ -124,7 +124,10 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	if _, err := p.stdin.Write(buf); err != nil {
 		return fmt.Errorf("stdin: %w", err)
 	}
-	p.stdin.Write(EOL)
+	if _, err := p.stdin.Write(EOL); err != nil {
+		return fmt.Errorf("stdin: %w", err)
+	}
+
 	err = p.readStout()
 
 	if err != nil {
