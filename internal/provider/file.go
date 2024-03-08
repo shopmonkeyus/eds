@@ -100,7 +100,7 @@ func (p *FileProvider) readStout() error {
 			return fmt.Errorf("error processing message")
 		default:
 			if p.verbose {
-				p.logger.Debug("stdout read: ", line)
+				p.logger.Debug("stdout read: %s", line)
 			}
 		}
 
