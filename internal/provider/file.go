@@ -92,7 +92,7 @@ func (p *FileProvider) readStout() error {
 	for p.scanner.Scan() {
 		line := p.scanner.Text()
 
-		switch p.scanner.Text() {
+		switch line {
 		case OK:
 			p.logger.Debug("success processing message")
 			return nil
@@ -100,7 +100,7 @@ func (p *FileProvider) readStout() error {
 			return fmt.Errorf("error processing message")
 		default:
 			if p.verbose {
-				p.logger.Debug(line)
+				p.logger.Debug("stdout read: ", line)
 			}
 		}
 
