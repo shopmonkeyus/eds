@@ -20,6 +20,7 @@ def read_stream_from_stdin():
             input_data = eds_input.get("data")
             sys.stdout.write(f"[EDS Echo Python] data: {json.dumps(input_data, indent=4)}\n")
             sys.stdout.write("OK\n")
+
         except Exception as err:
              sys.stdout.write(f"\n[EDS Echo Python] error:{err}")
              sys.stdout.write("ERR\n")

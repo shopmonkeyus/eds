@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/nats-io/nats-server/v2/server"
 )
 
 type Dialect string
@@ -195,4 +197,13 @@ func DetermineSnowflakeConversion(newType string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported snowflake conversion for %s", newType)
 	}
+}
+
+// LoadConfig loads a configuration from a filename
+func LoadConfig(configFile string) *server.Options {
+	opts, err := server.ProcessConfigFile(configFile)
+	if err != nil {
+		panic(fmt.Sprintf("Error processing configuration file: %v", err))
+	}
+	return opts
 }

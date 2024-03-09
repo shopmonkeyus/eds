@@ -11,6 +11,8 @@ FROM alpine:3.17
 
 ENV APP_HOME /go/src/github.com/shopmonkeyus/eds-server
 RUN mkdir -p "$APP_HOME"
+RUN mkdir -p /var/lib/shopmonkey/eds-server
+
 WORKDIR "$APP_HOME"
 
 ARG GIT_SHA
@@ -18,6 +20,8 @@ ARG GIT_BRANCH
 ARG BUILD_DATE
 
 COPY --from=builder "$APP_HOME"/eds-server $APP_HOME
+COPY stream.conf "$APP_HOME"/stream.conf
+COPY server.conf "$APP_HOME"/server.conf
 
 ENV GIT_SHA $GIT_SHA
 ENV GIT_BRANCH $GIT_BRANCH

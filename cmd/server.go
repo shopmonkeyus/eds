@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -88,18 +87,13 @@ var serverCmd = &cobra.Command{
 		}
 		defer nc.Close()
 
-		serverConfigJSON, err := os.ReadFile("server.conf")
-		if err != nil {
-			panic(err)
-		}
-		serverConfig := server.Options{}
-
-		err = json.Unmarshal([]byte(serverConfigJSON), &serverConfig)
+		serverConfig := &server.Options{} // used for setting any defaults
+		serverConfig, err = server.ProcessConfigFile("server.conf")
 		if err != nil {
 			panic(err)
 		}
 
-		ns, err := server.NewServer(&serverConfig)
+		ns, err := server.NewServer(serverConfig)
 
 		if err != nil {
 			panic(err)
