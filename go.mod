@@ -3,7 +3,7 @@ module github.com/shopmonkeyus/eds-server
 go 1.21
 
 require (
-	github.com/jackc/pgx/v5 v5.5.1
+	github.com/jackc/pgx/v5 v5.5.5
 	github.com/microsoft/go-mssqldb v1.6.0
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
 	github.com/nats-io/nats-server/v2 v2.10.7
