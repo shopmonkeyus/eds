@@ -6,7 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.5.1
 	github.com/microsoft/go-mssqldb v1.6.0
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db
-	github.com/nats-io/nats-server/v2 v2.9.23
+	github.com/nats-io/nats-server/v2 v2.10.7
 	github.com/schollz/progressbar/v3 v3.14.1
 	github.com/shirou/gopsutil/v3 v3.23.11
 	github.com/shopmonkeyus/go-common v0.0.46
@@ -82,7 +82,7 @@ require (
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/term v0.15.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	golang.org/x/time v0.3.0 // indirect
+	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.16.1 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

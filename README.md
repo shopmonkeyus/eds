@@ -14,6 +14,15 @@ You can download release binary for different operation systems from the [Releas
 
 You will need [Golang](https://go.dev/dl/) version 1.20 or later to use this package.
 
+Create a new directory in `/var/lib` (if on mac, may require `sudo`)
+
+```bash
+sudo mkdir -p /var/lib/shopmonkey/eds-server
+sudo chmod 777 /var/lib/shopmonkey/eds-server
+```
+
+or update the location in the `server.conf` to be a writeable diretory.
+
 ## Basic Usage
 
 After downloading the `eds-server` binary and placing it in your path, you can start the server as follows:
