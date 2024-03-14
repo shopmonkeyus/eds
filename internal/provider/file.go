@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -19,8 +20,6 @@ import (
 )
 
 var EOL = []byte("\n")
-var OK = "OK"
-var ERR = "ERR"
 
 type FileProvider struct {
 	logger           logger.Logger
@@ -91,16 +90,14 @@ func (p *FileProvider) Stop() error {
 func (p *FileProvider) readStout() error {
 	for p.scanner.Scan() {
 		line := p.scanner.Text()
-
-		switch line {
-		case OK:
+		if strings.Contains(line, "OK") {
 			p.logger.Debug("success processing message")
 			return nil
-		case ERR:
+		} else if strings.Contains(line, "ERR") {
 			return fmt.Errorf("error processing message")
-		default:
+		} else {
 			if p.verbose {
-				p.logger.Debug("stdout read: %s", line)
+				p.logger.Debug("stdout read: <%s>", line)
 			}
 		}
 
