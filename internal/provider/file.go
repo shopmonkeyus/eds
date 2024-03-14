@@ -90,6 +90,9 @@ func (p *FileProvider) readStout() error {
 	for {
 		for p.scanner.Scan() {
 			line := p.scanner.Text()
+			if p.verbose {
+				p.logger.Debug("incoming stdout read: <%s>", line)
+			}
 			switch line {
 			case "OK":
 				p.logger.Debug("success processing message")
@@ -99,7 +102,7 @@ func (p *FileProvider) readStout() error {
 				return nil
 			default:
 				if p.verbose {
-					p.logger.Debug("stdout read: <%s>", line)
+					p.logger.Debug("default stdout read: <%s>", line)
 				}
 			}
 
@@ -133,9 +136,10 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	err = p.readStout()
 
 	if err != nil {
+		p.logger.Error("error in file provider, exiting %s", err.Error())
 		return err
 	}
-
+	p.logger.Debug("exiting file provider")
 	return nil
 }
 
