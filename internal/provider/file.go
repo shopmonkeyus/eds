@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -93,16 +94,14 @@ func (p *FileProvider) readStout() error {
 			if p.verbose {
 				p.logger.Debug("incoming stdout read: <%s>", line)
 			}
-			switch line {
-			case "OK":
-				p.logger.Debug("success processing message")
+			if strings.Contains(line, "OK") {
+				p.logger.Debug("success processing message: <%s>", line)
 				return nil
-			case "ERR":
-				p.logger.Debug("error processing message")
-				return nil
-			default:
+			} else if strings.Contains(line, "ERR") {
+				return fmt.Errorf("error processing message: <%s>", line)
+			} else {
 				if p.verbose {
-					p.logger.Debug("default stdout read: <%s>", line)
+					p.logger.Debug("stdout read: <%s>", line)
 				}
 			}
 
