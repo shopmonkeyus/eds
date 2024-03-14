@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	glog "log"
 
+	"github.com/gorilla/mux"
 	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
@@ -24,12 +28,16 @@ var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run the server",
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		hosts, _ := cmd.Flags().GetStringSlice("server")
 		creds, _ := cmd.Flags().GetString("creds")
 		importer, _ := cmd.Flags().GetString("importer")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		timestamp, _ := cmd.Flags().GetBool("timestamp")
+		onlyRunNatsProvider, _ := cmd.Flags().GetBool("nats-provider")
 
 		if !timestamp {
 			glog.SetFlags(0)
@@ -216,7 +224,7 @@ var serverCmd = &cobra.Command{
 		for _, url := range args {
 			urls = append(urls, url)
 		}
-		if len(urls) == 0 {
+		if len(urls) == 0 && !onlyRunNatsProvider {
 			logger.Error("error: missing required url argument")
 			os.Exit(1)
 		}
@@ -227,9 +235,44 @@ var serverCmd = &cobra.Command{
 		}
 		logger.Info("started nats provider")
 
+		rtr := mux.NewRouter()
+		port := 8080
+		srv := &http.Server{
+			Addr:           fmt.Sprintf(":%d", port),
+			Handler:        rtr,
+			ReadTimeout:    30 * time.Second,
+			WriteTimeout:   30 * time.Second,
+			IdleTimeout:    15 * time.Minute,
+			MaxHeaderBytes: 1 << 20,
+		}
+		srv.SetKeepAlivesEnabled(true)
+
+		// health check route
+		rtr.HandleFunc("/status/health", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("error starting server: %s", err)
+				os.Exit(1)
+			}
+		}()
+
 		runProviders(logger, urls, &schemaModelVersionCache, dryRun, verbose, importer, runProvidersCallback, nc)
+
 		<-csys.CreateShutdownChannel()
 		logger.Info("stopped nats provider")
+
+		sctx, scancel := context.WithTimeout(ctx, time.Second*15)
+		defer scancel()
+		srv.Shutdown(sctx)
+		wg.Wait()
+		logger.Info("👋 Bye")
 	},
 }
 

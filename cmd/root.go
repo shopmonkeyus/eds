@@ -175,4 +175,5 @@ func init() {
 	rootCmd.PersistentFlags().String("url", "", "the connection string")
 	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
 	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
+	rootCmd.PersistentFlags().Bool("nats-provider", false, "the connection string")
 }
