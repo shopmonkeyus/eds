@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -88,24 +87,33 @@ func (p *FileProvider) Stop() error {
 }
 
 func (p *FileProvider) readStout() error {
-	for p.scanner.Scan() {
-		line := p.scanner.Text()
-		if strings.Contains(line, "OK") {
-			p.logger.Debug("success processing message")
-			return nil
-		} else if strings.Contains(line, "ERR") {
-			return fmt.Errorf("error processing message")
-		} else {
+	for {
+		for p.scanner.Scan() {
+			line := p.scanner.Text()
 			if p.verbose {
-				p.logger.Debug("stdout read: <%s>", line)
+				p.logger.Debug("incoming stdout read: <%s>", line)
 			}
-		}
+			switch line {
+			case "OK":
+				p.logger.Debug("success processing message")
+				return nil
+			case "ERR":
+				p.logger.Debug("error processing message")
+				return nil
+			default:
+				if p.verbose {
+					p.logger.Debug("default stdout read: <%s>", line)
+				}
+			}
 
+		}
+		if err := p.scanner.Err(); err != nil {
+			p.logger.Error("error reading stdout:", err)
+			return nil
+		} else {
+			p.logger.Warn("got EOF, restarting scan")
+		}
 	}
-	if err := p.scanner.Err(); err != nil {
-		p.logger.Error("error reading stdout:", err)
-	}
-	return nil
 }
 
 // Process data received and return an error or nil if processed ok
@@ -128,9 +136,10 @@ func (p *FileProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	err = p.readStout()
 
 	if err != nil {
+		p.logger.Error("error in file provider, exiting %s", err.Error())
 		return err
 	}
-
+	p.logger.Debug("exiting file provider")
 	return nil
 }
 
