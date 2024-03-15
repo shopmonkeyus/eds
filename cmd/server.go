@@ -108,13 +108,12 @@ var serverCmd = &cobra.Command{
 		}
 
 		go ns.Start()
-
 		readyForConnectionCounter := 0
 		for !ns.ReadyForConnections(4 * time.Second) {
 			logger.Info("Waiting for nats server to start...")
 			readyForConnectionCounter++
 			if readyForConnectionCounter > 10 {
-				logger.Error("Local Nats server failed to start. Check to see if another instance is already running. Exiting...")
+				logger.Error("Local Nats server failed to start. Check to see if another instance is already running, and verify your server.conf file is configured properly. Exiting...")
 				os.Exit(1)
 			}
 		}
