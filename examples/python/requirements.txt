@@ -1,1 +1,2 @@
+aiohttp==3.9.3
 nats_py==2.7.2

@@ -1,4 +1,6 @@
+import aiohttp
 import asyncio
+import sys
 from nats.aio.client import Client as NATS
 from nats.aio.errors import NatsError
 
@@ -73,8 +75,58 @@ async def wait_for_exit(logger, nc):
         await nc.close()
     
 
-if __name__ == '__main__':
+async def healthcheck(logger, sleep_timer_in_seconds):
+    url = "http://localhost:8080/status/health"
+    timeout = 10 
+
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                response = await asyncio.wait_for(session.get(url), timeout=timeout)
+
+                if response.status == 200:
+                    logger.debug("Health check successful")
+                else:
+                    logger.error(f"Health check failed with status code: {response.status}")
+                    sys.exit(1)
+
+        except asyncio.TimeoutError:
+            logger.debug("Health check timed out")
+            sys.exit(1)
+        except aiohttp.ClientError as e:
+            logger.debug(f"Health check failed: {e}")
+            sys.exit(1)
+
+        await asyncio.sleep(sleep_timer_in_seconds) 
+
+async def run_tasks():
     # Initialize logger and other resources
     logger = ConsoleLogger()  # Initialize your logger 
+
     # Run the main function
-    asyncio.run(main( logger))
+    sleep_timer_in_seconds = 60 
+    task_healthcheck = asyncio.create_task(healthcheck(logger, sleep_timer_in_seconds))
+    task_main = asyncio.create_task(main(logger))
+
+    # Run the main function in a separate task
+    await asyncio.gather(task_main, task_healthcheck)
+
+    try:
+        asyncio.get_event_loop().run_forever()
+    except KeyboardInterrupt:
+        logger.info("Received KeyboardInterrupt. Exiting the program.")
+        pass
+    except asyncio.CancelledError:
+        logger.info("Received cancellation. Exiting the program.")
+        pass
+    except Exception as e:
+        logger.error(f"Error running tasks: {e}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+
+    # Run the tasks within the event loop
+    try:
+        asyncio.run(run_tasks())
+    except KeyboardInterrupt:
+        pass
