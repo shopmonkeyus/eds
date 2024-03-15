@@ -4,6 +4,9 @@ import sys
 from nats.aio.client import Client as NATS
 from nats.aio.errors import NatsError
 
+
+HEALTH_CHECK_FREQUENCY_IN_SECONDS = 60  # seconds
+HEALTH_CHECK_URL =  "http://localhost:8080/status/health"
 class ConsoleLogger:
     @staticmethod
     def error(message):
@@ -75,14 +78,13 @@ async def wait_for_exit(logger, nc):
         await nc.close()
     
 
-async def healthcheck(logger, sleep_timer_in_seconds):
-    url = "http://localhost:8080/status/health"
+async def healthcheck(logger):
     timeout = 10 
 
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                response = await asyncio.wait_for(session.get(url), timeout=timeout)
+                response = await asyncio.wait_for(session.get(HEALTH_CHECK_URL), timeout=timeout)
 
                 if response.status == 200:
                     logger.debug("Health check successful")
@@ -97,15 +99,14 @@ async def healthcheck(logger, sleep_timer_in_seconds):
             logger.debug(f"Health check failed: {e}")
             sys.exit(1)
 
-        await asyncio.sleep(sleep_timer_in_seconds) 
+        await asyncio.sleep(HEALTH_CHECK_FREQUENCY_IN_SECONDS) 
 
 async def run_tasks():
     # Initialize logger and other resources
     logger = ConsoleLogger()  # Initialize your logger 
 
     # Run the main function
-    sleep_timer_in_seconds = 60 
-    task_healthcheck = asyncio.create_task(healthcheck(logger, sleep_timer_in_seconds))
+    task_healthcheck = asyncio.create_task(healthcheck(logger))
     task_main = asyncio.create_task(main(logger))
 
     # Run the main function in a separate task
