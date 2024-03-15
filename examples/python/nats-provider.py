@@ -1,8 +1,4 @@
 import asyncio
-import os
-import jwt
-import sys
-import re
 from nats.aio.client import Client as NATS
 from nats.aio.errors import NatsError
 
@@ -38,9 +34,9 @@ async def message_handler(logger, msg):
 
     pass
 
-async def subscribe_to_messages(logger, js, company_id):
-    subject = f"dbchange.*.*.{company_id}.*.PUBLIC.>"
-    durable_name = "durable-" + company_id  # Define a durable name for the subscription
+async def subscribe_to_messages(logger, js):
+    subject = f"dbchange.>"
+    durable_name = "durable-nats-consumer" 
     try:
         # Subscribe to the subject with the message handler
         await js.subscribe(subject,  cb=lambda msg: message_handler_wrapper(logger, msg), durable=durable_name)
@@ -48,20 +44,16 @@ async def subscribe_to_messages(logger, js, company_id):
     except NatsError as e:
         logger.error(f"Error subscribing to subject {subject}: {e}")
 
-async def main(creds, logger):
+async def main(logger):
     # Initialize NATS client
     nc = NATS()
     js = nc.jetstream()
     # Connect to local NATS server
     await nc.connect(servers=["nats://0.0.0.0:4223"])
 
-    # List of company IDs - this could be grabbed from the creds file, or manually entered?
-    company_ids = getCompanyIds(creds, logger)
-
-    # Start subscribing to messages for each company ID
-    for company_id in company_ids:
+    await subscribe_to_messages(logger, js)
         
-        await subscribe_to_messages(logger, js, company_id)
+        
     # Wait for the program to exit
     await asyncio.create_task(wait_for_exit(logger, nc))
 
@@ -80,47 +72,9 @@ async def wait_for_exit(logger, nc):
         logger.error(f"Error waiting for exit: {e}")
         await nc.close()
     
-def getCompanyIds(creds, logger): 
-
-    if creds != "":
-        if not os.path.exists(creds):
-            logger.error("error: invalid credential file: %s", creds)
-            sys.exit()
-
-        try:
-            with open(creds, "rb") as file:
-                content = file.read()
-        except Exception as e:
-            logger.error(f"error: reading credentials file: {str(e)}")
-            sys.exit()
-        # Use regular expressions to extract the JWT token substring
-        pattern = rb"-----BEGIN NATS USER JWT-----(.*?)------END NATS USER JWT------"
-        match = re.search(pattern, content, re.DOTALL)
-
-        if match:
-            jwt_token_bytes = match.group(1)  # Extract the captured group
-            jwt_token = jwt_token_bytes.decode("utf-8").strip()
-        else:
-            logger.error("error: JWT token not found in file")
-            sys.exit()
-        try:
-            claim = jwt.decode(jwt_token, options={"verify_signature": False})
-        except jwt.exceptions.DecodeError as e:
-            logger.error(f"error: decoding JWT: {str(e)}")
-            sys.exit()
-        except Exception as e:
-            logger.error(f"error: parsing valid JWT: {str(e)}")
-            sys.exit()
-
-        companyIDs = claim["aud"].split(",")
-        if len(companyIDs) == 0:
-            logger.error(f"error: invalid JWT claim. missing audience")
-            sys.exit()
-        return companyIDs
 
 if __name__ == '__main__':
     # Initialize logger and other resources
-    creds = "../add-your/creds-file-here/credentialfile.creds"
     logger = ConsoleLogger()  # Initialize your logger 
     # Run the main function
-    asyncio.run(main(creds, logger))
+    asyncio.run(main( logger))
