@@ -49,6 +49,8 @@ The following are the supported providers:
 - [SQL Server DB](https://www.microsoft.com/en-us/sql-server)
 - [Snowflake DB](https://www.snowflake.com/)
 - File - use `file://<PATH>` to stream Json lines via STDIN to an executable provided by PATH
+- Nats Provider. Use the --nats-provider setting and it'll allow you to connect a nats consumer to the local NATS server and process messages via consumer
+  See [Nats Consumer Example](./examples/python/nats-provider.py)
 
 ## Development
 
@@ -86,6 +88,10 @@ You can silence log output with the `--silence` flag.
 ### Dump Messages
 
 When running the server, you can dump incoming change change events to a file by passing in the `--dump-dir` flag pointing to a folder to place the files. If the folder doesn't exist, it will be created.
+
+## Local NATS Configuration Notes
+
+Note that the `server.conf` file will point to a file directory via `store_dir`. When running EDS, be sure that the file directory is created or that you have the ability to create the file directory!
 
 ### NATS Logging
 
