@@ -143,6 +143,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		entry, err := p.mainNATSConn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJSON, modelRequestTimeout)
 
 		if err != nil {
+			p.logger.Trace("error getting schema for: %s for msgid: %s", modelVersionId, msgid)
 			return err
 		}
 		var foundSchema datatypes.SchemaResponse
