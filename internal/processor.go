@@ -26,6 +26,7 @@ type MessageProcessor struct {
 	companyID               []string
 	providers               []Provider
 	conn                    *nats.Conn
+	mainNATSConn            *nats.Conn
 	js                      nats.JetStreamContext
 	subscriber              []snats.Subscriber
 	dumpMessagesDir         string
@@ -41,6 +42,7 @@ type MessageProcessorOpts struct {
 	CompanyID               []string
 	Providers               []Provider
 	NatsConnection          *nats.Conn
+	MainNatsConnection      *nats.Conn
 	DumpMessagesDir         string
 	TraceNats               bool
 	ConsumerPrefix          string
@@ -78,6 +80,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		companyID:               opts.CompanyID,
 		providers:               opts.Providers,
 		conn:                    opts.NatsConnection,
+		mainNATSConn:            opts.MainNatsConnection,
 		dumpMessagesDir:         opts.DumpMessagesDir,
 		consumerPrefix:          opts.ConsumerPrefix,
 		js:                      js,
@@ -137,9 +140,10 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		// lookup version in nats kv
 		p.logger.Trace("looking up modelVersion for: %s for msgid: %s", modelVersionId, msgid)
 
-		entry, err := p.conn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJSON, modelRequestTimeout)
+		entry, err := p.mainNATSConn.Request(fmt.Sprintf("schema.%s.%s", model, modelVersion), emptyJSON, modelRequestTimeout)
 
 		if err != nil {
+			p.logger.Trace("error getting schema for: %s for msgid: %s", modelVersionId, msgid)
 			return err
 		}
 		var foundSchema datatypes.SchemaResponse
@@ -152,7 +156,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 			(*p.schemaModelVersionCache)[modelVersionId] = schema
 		} else {
-			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+			return fmt.Errorf("no schema found for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		}
 	}
 	var wg sync.WaitGroup
