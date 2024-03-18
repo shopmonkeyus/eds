@@ -156,7 +156,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 			(*p.schemaModelVersionCache)[modelVersionId] = schema
 		} else {
-			return fmt.Errorf("no schema found for for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+			return fmt.Errorf("no schema found for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		}
 	}
 	var wg sync.WaitGroup
