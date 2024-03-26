@@ -26,12 +26,13 @@ async def message_handler_wrapper(logger, msg):
 
 async def message_handler(logger, msg):
     subject = msg.subject
+    headers = msg.headers
     reply = msg.reply
     data = msg.data.decode()
     try:
         # Add your message handling logic here
         logger.info(f"Received a message on '{subject} {reply}': {data}")
-
+        logger.info(f"Received headers: {headers}")
         await msg.ack()  # Acknowledge the message to NATS so it doesn't get redelivered
     except Exception as e:
         logger.error(f"Error handling message: {e}")

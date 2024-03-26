@@ -113,7 +113,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		msg.AckSync()
 		return nil
 	}
-
+	data.MsgId = msgid
 	dumpFiles := p.dumpMessagesDir != ""
 	if dumpFiles {
 		ext := ".json"

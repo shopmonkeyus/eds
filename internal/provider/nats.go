@@ -84,7 +84,11 @@ func (p *NatsProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	if err != nil {
 		return err
 	}
-	_, err = p.js.Publish(subject, buf)
+	msg := nats.NewMsg(subject)
+	msg.Data = buf
+	msg.Header.Set(nats.MsgIdHdr, data.GetMsgId())
+
+	_, err = p.js.PublishMsg(msg)
 	if err != nil {
 		return err
 	}
