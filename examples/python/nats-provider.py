@@ -1,6 +1,7 @@
 import aiohttp
 import asyncio
 import sys
+from nats.js import api
 from nats.aio.client import Client as NATS
 from nats.aio.errors import NatsError
 
@@ -44,8 +45,11 @@ async def subscribe_to_messages(logger, js):
     subject = f"dbchange.>"
     durable_name = "durable-nats-consumer" 
     try:
-        # Subscribe to the subject with the message handler
-        await js.subscribe(subject,  cb=lambda msg: message_handler_wrapper(logger, msg), durable=durable_name)
+        # Set Max Ack Pending to 1 to ensure that only one message is sent to the consumer at a time
+        consumerConfig = api.ConsumerConfig()
+        consumerConfig.max_ack_pending = 1
+
+        await js.subscribe(subject,  cb=lambda msg: message_handler_wrapper(logger, msg), durable=durable_name, config=consumerConfig)
         logger.info(f"Subscribed to subject {subject}")
     except NatsError as e:
         logger.error(f"Error subscribing to subject {subject}: {e}")
