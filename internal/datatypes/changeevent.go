@@ -58,6 +58,7 @@ type ChangeEventPayload interface {
 	GetDiff() []string
 	// // GetSQL gets the
 	// GetSQL(model dm.Model) (string, []interface{}, error)
+	GetMsgId() string
 }
 
 type ChangeEvent struct {
@@ -77,6 +78,7 @@ type ChangeEvent struct {
 	Before        map[string]interface{} `json:"before"`
 	After         map[string]interface{} `json:"after"`
 	Diff          []string               `json:"diff,omitempty"`
+	MsgId         string                 `json:"msgId,omitempty"`
 }
 
 var _ ChangeEventPayload = (*ChangeEvent)(nil)
@@ -148,6 +150,10 @@ func (c *ChangeEvent) GetAfter() map[string]interface{} {
 
 func (c *ChangeEvent) GetDiff() []string {
 	return c.Diff
+}
+
+func (c *ChangeEvent) GetMsgId() string {
+	return c.MsgId
 }
 
 func FromChangeEvent(buf []byte, gzip bool) (*ChangeEvent, error) {
