@@ -54,18 +54,7 @@ func NewSnowflakeProvider(plogger logger.Logger, connString string, schemaModelC
 func (p *SnowflakeProvider) Start() error {
 	p.logger.Info("start")
 
-	//Testing whether there's an issue with the jdbc string we ask users to provide
-	snowflake_cfg, err := gosnowflake.ParseDSN(p.url)
-	if err != nil {
-		p.logger.Debug("failed to parse dsn. err: %v", err)
-		return err
-	}
-	dsn, err := gosnowflake.DSN(snowflake_cfg)
-	if err != nil {
-		p.logger.Debug("failed to convert config to dsn. err: %v", err)
-		return err
-	}
-	db, err := sql.Open("snowflake", dsn)
+	db, err := sql.Open("snowflake", p.url)
 	if err != nil {
 		p.logger.Error("unable to create connection: %w", err)
 	}
@@ -118,13 +107,18 @@ func (p *SnowflakeProvider) Process(data datatypes.ChangeEventPayload, schema dm
 
 	err := p.ensureTableSchema(schema)
 	if err != nil {
-		return err
+		return p.handleSnowflakeError(err, func() error {
+			return p.ensureTableSchema(schema)
+		})
 	}
 
 	err = p.upsertData(data, schema)
 	if err != nil {
-		return err
+		return p.handleSnowflakeError(err, func() error {
+			return p.upsertData(data, schema)
+		})
 	}
+
 	return nil
 }
 
@@ -407,6 +401,32 @@ func (p *SnowflakeProvider) ensureTableSchema(schema dm.Model) error {
 		p.modelVersionCache[modelVersionId] = true
 		p.logger.Debug("end applying model version: %v", modelVersionId)
 	}
+	return nil
+}
+
+func (p *SnowflakeProvider) handleSnowflakeError(err error, retryFunc func() error) error {
+	if snowErr, ok := err.(*gosnowflake.SnowflakeError); ok {
+		if snowErr.Number == 390114 {
+			// Authentication token has expired. Re-establish DB connection and retry
+			if err := p.reEstablishConnection(); err != nil {
+				return err
+			}
+			// Retry the operation
+			return retryFunc()
+		}
+	}
+	return err
+}
+
+func (p *SnowflakeProvider) reEstablishConnection() error {
+	p.logger.Error("Snowflake authentication token has expired. Re-establishing connection")
+	p.db.Close()
+	db, err := sql.Open("snowflake", p.url)
+	if err != nil {
+		p.logger.Error("unable to re-create snowflake connection: %w", err)
+		return err
+	}
+	p.db = db
 	return nil
 }
 
