@@ -56,7 +56,7 @@ func (p *SnowflakeProvider) Start() error {
 
 	db, err := sql.Open("snowflake", p.url)
 	if err != nil {
-		p.logger.Error("unable to create connection: %w", err)
+		p.logger.Error("unable to create connection: %s", err.Error())
 	}
 	p.db = db
 
@@ -67,14 +67,14 @@ func (p *SnowflakeProvider) Start() error {
 	);`
 	_, err = p.db.Exec(sql)
 	if err != nil {
-		return fmt.Errorf("unable to create _migration table: %w", err)
+		return fmt.Errorf("unable to create _migration table: %s", err.Error())
 	}
 	// fetch all the applied model version ids
 	// and we'll use this to decide whether or not to run a diff
 	query := `SELECT "model_version_id" from "_migration";`
 	rows, err := p.db.Query(query)
 	if err != nil {
-		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
+		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %s", err.Error())
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
 	defer rows.Close()
@@ -83,7 +83,7 @@ func (p *SnowflakeProvider) Start() error {
 		var modelVersionId string
 		err := rows.Scan(&modelVersionId)
 		if err != nil {
-			return fmt.Errorf("unable to fetch modelVersionId from _migration table: %w", err)
+			return fmt.Errorf("unable to fetch modelVersionId from _migration table: %s", err.Error())
 		}
 		p.modelVersionCache[modelVersionId] = true
 	}
@@ -423,7 +423,7 @@ func (p *SnowflakeProvider) reEstablishConnection() error {
 	p.db.Close()
 	db, err := sql.Open("snowflake", p.url)
 	if err != nil {
-		p.logger.Error("unable to re-create snowflake connection: %w", err)
+		p.logger.Error("unable to re-create snowflake connection: %s", err.Error())
 		return err
 	}
 	p.db = db
