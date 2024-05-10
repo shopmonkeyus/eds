@@ -54,20 +54,9 @@ func NewSnowflakeProvider(plogger logger.Logger, connString string, schemaModelC
 func (p *SnowflakeProvider) Start() error {
 	p.logger.Info("start")
 
-	//Testing whether there's an issue with the jdbc string we ask users to provide
-	snowflake_cfg, err := gosnowflake.ParseDSN(p.url)
+	db, err := sql.Open("snowflake", p.url)
 	if err != nil {
-		p.logger.Debug("failed to parse dsn. err: %v", err)
-		return err
-	}
-	dsn, err := gosnowflake.DSN(snowflake_cfg)
-	if err != nil {
-		p.logger.Debug("failed to convert config to dsn. err: %v", err)
-		return err
-	}
-	db, err := sql.Open("snowflake", dsn)
-	if err != nil {
-		p.logger.Error("unable to create connection: %w", err)
+		p.logger.Error("unable to create connection: %s", err.Error())
 	}
 	p.db = db
 
@@ -78,14 +67,14 @@ func (p *SnowflakeProvider) Start() error {
 	);`
 	_, err = p.db.Exec(sql)
 	if err != nil {
-		return fmt.Errorf("unable to create _migration table: %w", err)
+		return fmt.Errorf("unable to create _migration table: %s", err.Error())
 	}
 	// fetch all the applied model version ids
 	// and we'll use this to decide whether or not to run a diff
 	query := `SELECT "model_version_id" from "_migration";`
 	rows, err := p.db.Query(query)
 	if err != nil {
-		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %w", err)
+		return fmt.Errorf("unable to fetch modelVersionIds from _migration table: %s", err.Error())
 	}
 	p.modelVersionCache = make(map[string]bool, 0)
 	defer rows.Close()
@@ -94,7 +83,7 @@ func (p *SnowflakeProvider) Start() error {
 		var modelVersionId string
 		err := rows.Scan(&modelVersionId)
 		if err != nil {
-			return fmt.Errorf("unable to fetch modelVersionId from _migration table: %w", err)
+			return fmt.Errorf("unable to fetch modelVersionId from _migration table: %s", err.Error())
 		}
 		p.modelVersionCache[modelVersionId] = true
 	}
@@ -118,13 +107,18 @@ func (p *SnowflakeProvider) Process(data datatypes.ChangeEventPayload, schema dm
 
 	err := p.ensureTableSchema(schema)
 	if err != nil {
-		return err
+		return p.handleSnowflakeError(err, func() error {
+			return p.ensureTableSchema(schema)
+		})
 	}
 
 	err = p.upsertData(data, schema)
 	if err != nil {
-		return err
+		return p.handleSnowflakeError(err, func() error {
+			return p.upsertData(data, schema)
+		})
 	}
+
 	return nil
 }
 
@@ -407,6 +401,32 @@ func (p *SnowflakeProvider) ensureTableSchema(schema dm.Model) error {
 		p.modelVersionCache[modelVersionId] = true
 		p.logger.Debug("end applying model version: %v", modelVersionId)
 	}
+	return nil
+}
+
+func (p *SnowflakeProvider) handleSnowflakeError(err error, retryFunc func() error) error {
+	if snowErr, ok := err.(*gosnowflake.SnowflakeError); ok {
+		if snowErr.Number == 390114 {
+			// Authentication token has expired. Re-establish DB connection and retry
+			if err := p.reEstablishConnection(); err != nil {
+				return err
+			}
+			// Retry the operation
+			return retryFunc()
+		}
+	}
+	return err
+}
+
+func (p *SnowflakeProvider) reEstablishConnection() error {
+	p.logger.Error("Snowflake authentication token has expired. Re-establishing connection")
+	p.db.Close()
+	db, err := sql.Open("snowflake", p.url)
+	if err != nil {
+		p.logger.Error("unable to re-create snowflake connection: %s", err.Error())
+		return err
+	}
+	p.db = db
 	return nil
 }
 
