@@ -164,7 +164,7 @@ func (f *Field) SQLTypeSqlServer() string {
 		if f.IsList {
 			builder.WriteString("NVARCHAR(max)")
 		} else {
-			builder.WriteString("int")
+			builder.WriteString("bigint")
 		}
 	case "Double":
 		builder.WriteString("decmial")

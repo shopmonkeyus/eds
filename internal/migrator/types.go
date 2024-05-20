@@ -158,7 +158,7 @@ func (c Column) ConvertPostgresDataTypeToSqlserver(columnName string) string {
 			convertedDataType.WriteString("varchar(max)")
 		}
 	case "NUMBER":
-		convertedDataType.WriteString("int")
+		convertedDataType.WriteString("bigint")
 	case "BOOLEAN":
 		convertedDataType.WriteString("bit")
 	case "TIMESTAMP_TZ":
