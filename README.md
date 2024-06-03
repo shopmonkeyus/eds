@@ -91,6 +91,10 @@ When running the server, you can dump incoming change change events to a file by
 
 You can turn on advanced trace logging for communication between the NATS server by using the flag `--trace-nats`.
 
+### Local NATS Configuration
+
+You can set the port that your Local NATS can be accessed through via the `--port` flag.
+
 ## License
 
 All files in this repository are licensed under the [MIT license](https://opensource.org/licenses/MIT). See the [LICENSE](./LICENSE) file for details.

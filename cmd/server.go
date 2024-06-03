@@ -38,6 +38,7 @@ var serverCmd = &cobra.Command{
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		timestamp, _ := cmd.Flags().GetBool("timestamp")
 		onlyRunNatsProvider, _ := cmd.Flags().GetBool("nats-provider")
+		localNatsPort, _ := cmd.Flags().GetInt("port")
 
 		if !timestamp {
 			glog.SetFlags(0)
@@ -96,7 +97,7 @@ var serverCmd = &cobra.Command{
 		defer nc.Close()
 
 		serverConfig := &server.Options{} // used for setting any defaults
-		serverConfig.Port = 4223
+		serverConfig.Port = localNatsPort
 		serverConfig.MaxConn = -1
 		serverConfig.JetStream = true
 		serverConfig.StoreDir = "/var/lib/shopmonkey/eds-server"
@@ -295,4 +296,5 @@ func init() {
 	serverCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
 	serverCmd.Flags().Bool("timestamp", false, "Add timestamps to logging")
 	serverCmd.Flags().String("importer", "", "migrate data from your shopmonkey instance to your external database")
+	serverCmd.Flags().Int("port", 4223, "the port to run the local NATS server on")
 }
