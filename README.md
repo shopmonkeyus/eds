@@ -87,6 +87,10 @@ You can silence log output with the `--silence` flag.
 
 When running the server, you can dump incoming change change events to a file by passing in the `--dump-dir` flag pointing to a folder to place the files. If the folder doesn't exist, it will be created.
 
+## Local NATS Configuration Notes
+
+Note that the `server.conf` file will point to a file directory via `store_dir`. When running EDS, be sure that the file directory is created or that you have the ability to create the file directory!
+
 ### NATS Logging
 
 You can turn on advanced trace logging for communication between the NATS server by using the flag `--trace-nats`.
