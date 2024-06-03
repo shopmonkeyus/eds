@@ -96,9 +96,17 @@ var serverCmd = &cobra.Command{
 		defer nc.Close()
 
 		serverConfig := &server.Options{} // used for setting any defaults
-		serverConfig, err = server.ProcessConfigFile("server.conf")
-		if err != nil {
-			panic(err)
+		serverConfig.Port = 4223
+		serverConfig.MaxConn = -1
+		serverConfig.JetStream = true
+		serverConfig.StoreDir = "/var/lib/shopmonkey/eds-server"
+		serverConfig.JetStreamDomain = "leaf"
+		//Create the store dir if it doesn't exist
+		if _, err := os.Stat(serverConfig.StoreDir); os.IsNotExist(err) {
+			err = os.MkdirAll(serverConfig.StoreDir, 0755)
+			if err != nil {
+				panic(err)
+			}
 		}
 
 		ns, err := server.NewServer(serverConfig)
@@ -113,7 +121,7 @@ var serverCmd = &cobra.Command{
 			logger.Info("Waiting for nats server to start...")
 			readyForConnectionCounter++
 			if readyForConnectionCounter > 10 {
-				logger.Error("Local Nats server failed to start. Check to see if another instance is already running, and verify your server.conf file is configured properly. Exiting...")
+				logger.Error("Local Nats server failed to start. Check to see if another instance is already running. Exiting...")
 				os.Exit(1)
 			}
 		}

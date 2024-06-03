@@ -21,8 +21,6 @@ sudo mkdir -p /var/lib/shopmonkey/eds-server
 sudo chmod 777 /var/lib/shopmonkey/eds-server
 ```
 
-or update the location in the `server.conf` to be a writeable diretory.
-
 ## Basic Usage
 
 After downloading the `eds-server` binary and placing it in your path, you can start the server as follows:
@@ -88,10 +86,6 @@ You can silence log output with the `--silence` flag.
 ### Dump Messages
 
 When running the server, you can dump incoming change change events to a file by passing in the `--dump-dir` flag pointing to a folder to place the files. If the folder doesn't exist, it will be created.
-
-## Local NATS Configuration Notes
-
-Note that the `server.conf` file will point to a file directory via `store_dir`. When running EDS, be sure that the file directory is created or that you have the ability to create the file directory!
 
 ### NATS Logging
 
