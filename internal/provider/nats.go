@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal/datatypes"
@@ -19,27 +20,47 @@ type NatsProvider struct {
 
 func NewNatsProvider(logger logger.Logger, urlstring string, opts *ProviderOpts, remoteNc *nats.Conn) (*NatsProvider, error) {
 
-	streamConfig := nats.StreamConfig{}
-	streamConfig.Name = "dbchange"
-	streamConfig.Subjects = []string{"dbchange.>"}
-	streamConfig.Description = "dbchange stream for eds"
-	streamConfig.MaxConsumers = -1
-	streamConfig.MaxMsgs = -1
-	streamConfig.MaxBytes = -1
-	streamConfig.DiscardNewPerSubject = false
-	streamConfig.MaxAge = 604800000000000
-	streamConfig.MaxMsgsPerSubject = -1
-	streamConfig.MaxMsgSize = -1
-	streamConfig.Replicas = 1
-	streamConfig.NoAck = false
-	streamConfig.Duplicates = 86400000000000
-	streamConfig.Sealed = false
-	streamConfig.DenyDelete = false
-	streamConfig.DenyPurge = false
-	streamConfig.AllowRollup = false
+	defaultStreamConfig := nats.StreamConfig{}
+	defaultStreamConfig.Name = "dbchange"
+	defaultStreamConfig.Subjects = []string{"dbchange.>"}
+	defaultStreamConfig.Description = "dbchange stream for eds"
+	defaultStreamConfig.MaxConsumers = -1
+	defaultStreamConfig.MaxMsgs = -1
+	defaultStreamConfig.MaxBytes = -1
+	defaultStreamConfig.DiscardNewPerSubject = false
+	defaultStreamConfig.MaxAge = 604800000000000
+	defaultStreamConfig.MaxMsgsPerSubject = -1
+	defaultStreamConfig.MaxMsgSize = -1
+	defaultStreamConfig.Replicas = 1
+	defaultStreamConfig.NoAck = false
+	defaultStreamConfig.Duplicates = 86400000000000
+	defaultStreamConfig.Sealed = false
+	defaultStreamConfig.DenyDelete = false
+	defaultStreamConfig.DenyPurge = false
+	defaultStreamConfig.AllowRollup = false
 	var natsFileStorageType nats.StorageType
 	natsFileStorageType = nats.FileStorage
-	streamConfig.Storage = natsFileStorageType
+	defaultStreamConfig.Storage = natsFileStorageType
+
+	streamConfig := nats.StreamConfig{}
+
+	//See if the stream config file exists
+	_, err := os.Stat("stream.conf")
+	if err != nil {
+		streamConfig = defaultStreamConfig
+	}
+	streamConfigJSON, err := os.ReadFile("stream.conf")
+	if err != nil {
+		return nil, fmt.Errorf("1/2: unable to find and open stream config with error: %s", err)
+	}
+
+	err = json.Unmarshal([]byte(streamConfigJSON), &streamConfig)
+	if err != nil {
+		if e, ok := err.(*json.SyntaxError); ok {
+			logger.Error("syntax error at byte offset %d", e.Offset)
+		}
+		return nil, fmt.Errorf("2/2: unable to parse stream config with error: %s", err)
+	}
 
 	nc, err := nats.Connect(urlstring)
 	if err != nil {
