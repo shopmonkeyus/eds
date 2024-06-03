@@ -210,7 +210,7 @@ func (c Column) AlterTypeSQL(dialect util.Dialect, newType string) string {
 	dt := c.DataType
 
 	if dialect == util.Snowflake {
-		output := fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN "%s_column_change" %s;`, c.Table, c.Name, dt) + "\n"
+		output := fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN IF NOT EXISTS "%s_column_change" %s;`, c.Table, c.Name, dt) + "\n"
 		snowflakeDatatypeConversion, err := util.DetermineSnowflakeConversion(newType)
 		if err != nil {
 			panic(err)
