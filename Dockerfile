@@ -20,8 +20,6 @@ ARG BUILD_DATE
 
 COPY --from=builder "$APP_HOME"/eds-server $APP_HOME
 COPY stream.conf "$APP_HOME"/stream.conf
-COPY server.conf "$APP_HOME"/server.conf
-
 
 ENV GIT_SHA $GIT_SHA
 ENV GIT_BRANCH $GIT_BRANCH
