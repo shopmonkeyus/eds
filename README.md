@@ -95,6 +95,10 @@ Note that the `server.conf` file will point to a file directory via `store_dir`.
 
 You can turn on advanced trace logging for communication between the NATS server by using the flag `--trace-nats`.
 
+### Local NATS Configuration
+
+You can set the port that your Local NATS can be accessed through via the `--port` flag.
+
 ## License
 
 All files in this repository are licensed under the [MIT license](https://opensource.org/licenses/MIT). See the [LICENSE](./LICENSE) file for details.
