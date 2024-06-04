@@ -44,22 +44,21 @@ func NewNatsProvider(logger logger.Logger, urlstring string, opts *ProviderOpts,
 
 	streamConfig := nats.StreamConfig{}
 
-	//See if the stream config file exists
-	_, err := os.Stat("stream.conf")
-	if err != nil {
-		streamConfig = defaultStreamConfig
-	}
 	streamConfigJSON, err := os.ReadFile("stream.conf")
 	if err != nil {
-		return nil, fmt.Errorf("1/2: unable to find and open stream config with error: %s", err)
-	}
-
-	err = json.Unmarshal([]byte(streamConfigJSON), &streamConfig)
-	if err != nil {
-		if e, ok := err.(*json.SyntaxError); ok {
-			logger.Error("syntax error at byte offset %d", e.Offset)
+		if os.IsNotExist(err) {
+			streamConfig = defaultStreamConfig
+		} else {
+			return nil, fmt.Errorf("issue reading stream config: %w", err)
 		}
-		return nil, fmt.Errorf("2/2: unable to parse stream config with error: %s", err)
+	} else {
+		err = json.Unmarshal(streamConfigJSON, &streamConfig)
+		if err != nil {
+			if e, ok := err.(*json.SyntaxError); ok {
+				logger.Error("syntax error at byte offset %d", e.Offset)
+			}
+			return nil, fmt.Errorf("unable to parse stream config: %w", err)
+		}
 	}
 
 	nc, err := nats.Connect(urlstring)
