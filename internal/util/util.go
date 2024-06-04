@@ -172,7 +172,7 @@ func DetermineSnowflakeConversion(newType string) (string, error) {
 		return "TO_TIME", nil
 	case "timestamp":
 		return "TO_TIMESTAMP", nil
-	case "timestamp_ltz":
+	case "timestampltz":
 		return "TO_TIMESTAMP_LTZ", nil
 	case "timestamptz":
 		return "TO_TIMESTAMP_TZ", nil
