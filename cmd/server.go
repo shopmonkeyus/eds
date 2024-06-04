@@ -48,10 +48,14 @@ var serverCmd = &cobra.Command{
 
 		logger := newLogger(cmd)
 
-		var consumerStartTime time.Duration
+		var (
+			consumerStartTime time.Duration
+			err error
+		)
+
 		logger.Trace("consumer-start-time: %s", duration)
 		if duration != "" {
-			consumerStartTime, err := time.ParseDuration(duration)
+			consumerStartTime, err = time.ParseDuration(duration)
 			if err != nil {
 				logger.Error("error: invalid duration: %s", err)
 				os.Exit(1)
@@ -62,6 +66,7 @@ var serverCmd = &cobra.Command{
 			}
 			logger.Trace("consumer-start-time parsed: %s", consumerStartTime)
 		}
+		logger.Trace("consumer-start-time: %s", consumerStartTime)
 
 		if len(hosts) > 0 && creds == "" && strings.Contains(hosts[0], "connect.nats.shopmonkey.pub") {
 			logger.Error("error: missing required credentials file. use --creds and specify the location of your credentials file")
@@ -204,7 +209,7 @@ var serverCmd = &cobra.Command{
 				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
 				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
 				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
-				ConsumerStartTime:       consumerStartTime,
+				ConsumerLookbackDuration:       consumerStartTime,
 				SchemaModelVersionCache: &schemaModelVersionCache,
 			})
 			if err != nil {
@@ -235,7 +240,6 @@ var serverCmd = &cobra.Command{
 				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
 				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
 				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
-				ConsumerStartTime:       consumerStartTime,
 				SchemaModelVersionCache: &schemaModelVersionCache,
 			})
 			if err != nil {

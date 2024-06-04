@@ -34,7 +34,9 @@ type MessageProcessor struct {
 	context                 context.Context
 	cancel                  context.CancelFunc
 	schemaModelVersionCache *map[string]dm.Model
-	consumerStartTime		time.Duration
+	// consumerStartTime is the time to start the consumer
+	// this is different from the duration because it depends on when we run the process. 
+	consumerStartTime		time.Time 
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -48,7 +50,7 @@ type MessageProcessorOpts struct {
 	TraceNats               bool
 	ConsumerPrefix          string
 	SchemaModelVersionCache *map[string]dm.Model
-	ConsumerStartTime	    time.Duration
+	ConsumerLookbackDuration	    time.Duration // ConsumerLookbackDuration is the duration to look back for messages
 }
 
 // NewMessageProcessor will create a new processor for a given customer id
@@ -76,6 +78,12 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		}
 	}
 
+	consumerPrefix := opts.ConsumerPrefix
+	startTime := time.Now().Add(-opts.ConsumerLookbackDuration)
+	if opts.ConsumerLookbackDuration != 0 {
+		consumerPrefix = fmt.Sprintf("%s-%d", opts.ConsumerPrefix, startTime.UnixMilli())
+	}
+
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
 		logger:                  opts.Logger.WithPrefix("[nats]"),
@@ -84,13 +92,16 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		conn:                    opts.NatsConnection,
 		mainNATSConn:            opts.MainNatsConnection,
 		dumpMessagesDir:         opts.DumpMessagesDir,
-		consumerPrefix:          opts.ConsumerPrefix,
-		consumerStartTime: 	     opts.ConsumerStartTime,
+		consumerPrefix:          consumerPrefix,
 		js:                      js,
 		context:                 context,
 		cancel:                  cancel,
 		schemaModelVersionCache: opts.SchemaModelVersionCache,
 	}
+	if opts.ConsumerLookbackDuration != 0 {
+		processor.consumerStartTime = startTime
+	}
+
 	return processor, nil
 }
 
@@ -195,6 +206,7 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 func (p *MessageProcessor) Start() error {
 	p.logger.Trace("message processor starting")
 	p.logger.Trace("starting message processor for company ids: %s", p.companyID)
+	p.logger.Trace("Message Processor: %+v", p)
 	for _, companyID := range p.companyID {
 		name := fmt.Sprintf("%seds-server-%s", p.consumerPrefix, companyID)
 		p.logger.Trace("starting message processor for consumer: %s and company id: %s", name, companyID)
@@ -209,7 +221,7 @@ func (p *MessageProcessor) Start() error {
 			err error
 		)
 		p.logger.Trace("consumerStartTime: %v", p.consumerStartTime)
-		if p.consumerStartTime == 0 {
+		if p.consumerStartTime.IsZero() {
 			p.logger.Trace("creating consumer with New delivery policy")
 			c, err = snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
 				snats.WithExactlyOnceContext(p.context),
@@ -220,11 +232,11 @@ func (p *MessageProcessor) Start() error {
 			}
 		} else {
 			p.logger.Trace("creating consumer with StartTime delivery policy")
-			startTime := time.Now().Add(-p.consumerStartTime)
+			
 			c, err = snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
 				snats.WithExactlyOnceContext(p.context),
 				snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
-				snats.WithExactlyOnceByStartTimePolicy(startTime),
+				snats.WithExactlyOnceByStartTimePolicy(p.consumerStartTime),
 			)
 			if err != nil {
 				return err
