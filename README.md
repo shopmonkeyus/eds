@@ -102,7 +102,7 @@ Typically, local NATS runs on port 4223, and the health-check port runs on port 
 
 You can set the port that your Local NATS can be accessed through via the `--port` flag.
 
-You can set the heatlh-port to run health-checks on via the `--health-port` flag.
+You can set the health-port to run health-checks on via the `--health-port` flag.
 
 ## License
 
