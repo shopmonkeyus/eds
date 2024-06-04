@@ -344,7 +344,11 @@ func (m ModelChange) SQL(dialect util.Dialect) string {
 			// TODO: check dialect
 			sql.WriteString(spacer + fmt.Sprintf(`CONSTRAINT "%s" PRIMARY KEY (%s));`, index, util.QuoteJoin(pks, `"`, ",")))
 			sql.WriteString("\n")
+
+		} else {
+			sql.WriteString(");\n")
 		}
+
 	case UpdateAction:
 		for _, change := range m.FieldChanges {
 			column := NewColumnFromField(m.Model.Table, change.Field, dialect)
