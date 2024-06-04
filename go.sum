@@ -171,8 +171,6 @@ github.com/shoenig/go-m1cpu v0.1.6 h1:nxdKQNcEB6vzgA2E2bvzKIYRuNj7XNJ4S/aRSwKzFt
 github.com/shoenig/go-m1cpu v0.1.6/go.mod h1:1JJMcUBvfNwpq05QDQVAnx3gUHr9IYF7GNg9SUEw2VQ=
 github.com/shoenig/test v0.6.4 h1:kVTaSd7WLz5WZ2IaoM0RSzRsUD+m8wRR+5qvntpn4LU=
 github.com/shoenig/test v0.6.4/go.mod h1:byHiCGXqrVaflBLAMq/srcZIHynQPQgeyvkvXnjqq0k=
-github.com/shopmonkeyus/go-common v0.0.52 h1:yyGcUwbSdi7zJC6y2qQSSkDq2JSyvomGFtQG6KgCI78=
-github.com/shopmonkeyus/go-common v0.0.52/go.mod h1:TYJeKlKkTB9UTde8BFV6v4Gf23yEEB6hkEyahnno0mU=
 github.com/shopmonkeyus/go-common v0.0.53 h1:p1OLSou940u/imHqvHRaA+LMmykvD7SPpiOZB9UTIoM=
 github.com/shopmonkeyus/go-common v0.0.53/go.mod h1:TYJeKlKkTB9UTde8BFV6v4Gf23yEEB6hkEyahnno0mU=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=

@@ -40,12 +40,28 @@ var serverCmd = &cobra.Command{
 		onlyRunNatsProvider, _ := cmd.Flags().GetBool("nats-provider")
 		localNatsPort, _ := cmd.Flags().GetInt("port")
 		healthCheckPort, _ := cmd.Flags().GetInt("health-port")
-
+		duration, _ := cmd.Flags().GetString("consumer-start-time")
+	
 		if !timestamp {
 			glog.SetFlags(0)
 		}
 
 		logger := newLogger(cmd)
+
+		var consumerStartTime time.Duration
+		logger.Trace("consumer-start-time: %s", duration)
+		if duration != "" {
+			consumerStartTime, err := time.ParseDuration(duration)
+			if err != nil {
+				logger.Error("error: invalid duration: %s", err)
+				os.Exit(1)
+			}
+			if consumerStartTime > time.Hour*168 {
+				logger.Error("error: invalid duration. Max value is 168h")
+				os.Exit(1)
+			}
+			logger.Trace("consumer-start-time parsed: %s", consumerStartTime)
+		}
 
 		if len(hosts) > 0 && creds == "" && strings.Contains(hosts[0], "connect.nats.shopmonkey.pub") {
 			logger.Error("error: missing required credentials file. use --creds and specify the location of your credentials file")
@@ -188,6 +204,7 @@ var serverCmd = &cobra.Command{
 				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
 				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
 				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
+				ConsumerStartTime:       consumerStartTime,
 				SchemaModelVersionCache: &schemaModelVersionCache,
 			})
 			if err != nil {
@@ -218,6 +235,7 @@ var serverCmd = &cobra.Command{
 				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
 				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
 				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
+				ConsumerStartTime:       consumerStartTime,
 				SchemaModelVersionCache: &schemaModelVersionCache,
 			})
 			if err != nil {
@@ -303,4 +321,5 @@ func init() {
 	serverCmd.Flags().String("importer", "", "migrate data from your shopmonkey instance to your external database")
 	serverCmd.Flags().Int("port", 4223, "the port to run the local NATS server on")
 	serverCmd.Flags().Int("health-port", 8080, "the port to run the health check server on")
+	serverCmd.Flags().String("consumer-start-time", "", "A duration string with unit suffix. Example: 1h45m. Max value is 168h")
 }

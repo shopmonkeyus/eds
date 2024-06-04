@@ -34,6 +34,7 @@ type MessageProcessor struct {
 	context                 context.Context
 	cancel                  context.CancelFunc
 	schemaModelVersionCache *map[string]dm.Model
+	consumerStartTime		time.Duration
 }
 
 // MessageProcessorOpts is the options for the message processor
@@ -47,6 +48,7 @@ type MessageProcessorOpts struct {
 	TraceNats               bool
 	ConsumerPrefix          string
 	SchemaModelVersionCache *map[string]dm.Model
+	ConsumerStartTime	    time.Duration
 }
 
 // NewMessageProcessor will create a new processor for a given customer id
@@ -83,6 +85,7 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 		mainNATSConn:            opts.MainNatsConnection,
 		dumpMessagesDir:         opts.DumpMessagesDir,
 		consumerPrefix:          opts.ConsumerPrefix,
+		consumerStartTime: 	     opts.ConsumerStartTime,
 		js:                      js,
 		context:                 context,
 		cancel:                  cancel,
@@ -199,13 +202,35 @@ func (p *MessageProcessor) Start() error {
 		if companyID == "" {
 			companyID = "*"
 		}
-		c, err := snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
-			snats.WithExactlyOnceContext(p.context),
-			snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
+
+
+		var (
+			c snats.Subscriber
+			err error
 		)
-		if err != nil {
-			return err
+		p.logger.Trace("consumerStartTime: %v", p.consumerStartTime)
+		if p.consumerStartTime == 0 {
+			p.logger.Trace("creating consumer with New delivery policy")
+			c, err = snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
+				snats.WithExactlyOnceContext(p.context),
+				snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
+			)
+			if err != nil {
+				return err
+			}
+		} else {
+			p.logger.Trace("creating consumer with StartTime delivery policy")
+			startTime := time.Now().Add(-p.consumerStartTime)
+			c, err = snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
+				snats.WithExactlyOnceContext(p.context),
+				snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
+				snats.WithExactlyOnceByStartTimePolicy(startTime),
+			)
+			if err != nil {
+				return err
+			}	
 		}
+		 
 		p.subscriber = append(p.subscriber, c)
 		p.logger.Trace("message processor started for consumer: %s and company id: %s", name, companyID)
 	}
