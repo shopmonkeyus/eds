@@ -186,6 +186,8 @@ func (c Column) ConvertPostgresDataTypeToSnowflake() string {
 		convertedDataType.WriteString("BOOLEAN")
 	case "TIMESTAMP_TZ":
 		convertedDataType.WriteString("TIMESTAMPTZ")
+	case "TIMESTAMP_NTZ":
+		convertedDataType.WriteString("TIMESTAMP")
 	default:
 		convertedDataType.WriteString(c.DataType)
 	}
