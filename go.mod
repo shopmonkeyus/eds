@@ -12,7 +12,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.10.16
 	github.com/schollz/progressbar/v3 v3.14.1
 	github.com/shirou/gopsutil/v3 v3.23.11
-	github.com/shopmonkeyus/go-common v0.0.52
+	github.com/shopmonkeyus/go-common v0.0.53
 	github.com/snowflakedb/gosnowflake v1.10.1
 	github.com/stretchr/testify v1.9.0
 )
