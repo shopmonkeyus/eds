@@ -39,6 +39,7 @@ var serverCmd = &cobra.Command{
 		timestamp, _ := cmd.Flags().GetBool("timestamp")
 		onlyRunNatsProvider, _ := cmd.Flags().GetBool("nats-provider")
 		localNatsPort, _ := cmd.Flags().GetInt("port")
+		healthCheckPort, _ := cmd.Flags().GetInt("health-port")
 
 		if !timestamp {
 			glog.SetFlags(0)
@@ -250,7 +251,7 @@ var serverCmd = &cobra.Command{
 		logger.Info("started nats provider")
 
 		rtr := mux.NewRouter()
-		port := 8080
+		port := healthCheckPort
 		srv := &http.Server{
 			Addr:           fmt.Sprintf(":%d", port),
 			Handler:        rtr,
@@ -301,4 +302,5 @@ func init() {
 	serverCmd.Flags().Bool("timestamp", false, "Add timestamps to logging")
 	serverCmd.Flags().String("importer", "", "migrate data from your shopmonkey instance to your external database")
 	serverCmd.Flags().Int("port", 4223, "the port to run the local NATS server on")
+	serverCmd.Flags().Int("health-port", 8080, "the port to run the health check server on")
 }

@@ -97,7 +97,12 @@ You can turn on advanced trace logging for communication between the NATS server
 
 ### Local NATS Configuration
 
+If you plan on running multiple instances of EDS Server on the same container, you will need to manually set a separate port and health-port for each instance.
+Typically, local NATS runs on port 4223, and the health-check port runs on port 8080.
+
 You can set the port that your Local NATS can be accessed through via the `--port` flag.
+
+You can set the heatlh-port to run health-checks on via the `--health-port` flag.
 
 ## License
 
