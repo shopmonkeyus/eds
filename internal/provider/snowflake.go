@@ -269,7 +269,12 @@ func (p *SnowflakeProvider) getSQL(c datatypes.ChangeEventPayload, m dm.Model) (
 				} else {
 					isFirstColumn = false
 				}
-				updateColumns.WriteString(fmt.Sprintf(`"%s" = :%d`, field.Name, columnCount))
+
+				if field.Type == "Json" || field.IsList {
+					updateColumns.WriteString(fmt.Sprintf(`"%s" = parse_json(:%d)`, field.Name, columnCount))
+				} else {
+					updateColumns.WriteString(fmt.Sprintf(`"%s" = :%d`, field.Name, columnCount))
+				}
 
 				val, err := util.TryConvertJson(field.Type, data[field.Name])
 				if err != nil {
@@ -341,8 +346,6 @@ func (p *SnowflakeProvider) importSQL(data map[string]interface{}, m dm.Model) (
 			// if yes, then add column
 			sqlColumns.WriteString(fmt.Sprintf(`"%s"`, field.Name))
 			if field.Type == "Json" || field.IsList {
-				//Snowflake doesn't currently support inserting map[string]interface values, but supports converting
-				//a map to a json string, and then inserting it using the parse_json function
 				sqlValuePlaceHolder.WriteString(fmt.Sprintf(`parse_json(:%d)`, columnCount))
 			} else {
 				sqlValuePlaceHolder.WriteString(fmt.Sprintf(`:%d`, columnCount))
