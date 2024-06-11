@@ -35,22 +35,22 @@ type MessageProcessor struct {
 	cancel                  context.CancelFunc
 	schemaModelVersionCache *map[string]dm.Model
 	// consumerStartTime is the time to start the consumer
-	// this is different from the duration because it depends on when we run the process. 
-	consumerStartTime		time.Time 
+	// this is different from the duration because it depends on when we run the process.
+	consumerStartTime time.Time
 }
 
 // MessageProcessorOpts is the options for the message processor
 type MessageProcessorOpts struct {
-	Logger                  logger.Logger
-	CompanyID               []string
-	Providers               []Provider
-	NatsConnection          *nats.Conn
-	MainNatsConnection      *nats.Conn
-	DumpMessagesDir         string
-	TraceNats               bool
-	ConsumerPrefix          string
-	SchemaModelVersionCache *map[string]dm.Model
-	ConsumerLookbackDuration	    time.Duration // ConsumerLookbackDuration is the duration to look back for messages
+	Logger                   logger.Logger
+	CompanyID                []string
+	Providers                []Provider
+	NatsConnection           *nats.Conn
+	MainNatsConnection       *nats.Conn
+	DumpMessagesDir          string
+	TraceNats                bool
+	ConsumerPrefix           string
+	SchemaModelVersionCache  *map[string]dm.Model
+	ConsumerLookbackDuration time.Duration // ConsumerLookbackDuration is the duration to look back for messages
 }
 
 // NewMessageProcessor will create a new processor for a given customer id
@@ -196,6 +196,11 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 	}
 
 	if err := msg.AckSync(); err != nil {
+		//if we already acked this message, continue
+		if err == nats.ErrMsgAlreadyAckd {
+			p.logger.Trace("message already acked: %s", msgid)
+			return nil
+		}
 		p.logger.Error("error calling ack for message: %s. %s", data, err)
 		return err
 	}
@@ -215,9 +220,8 @@ func (p *MessageProcessor) Start() error {
 			companyID = "*"
 		}
 
-
 		var (
-			c snats.Subscriber
+			c   snats.Subscriber
 			err error
 		)
 		p.logger.Trace("consumerStartTime: %v", p.consumerStartTime)
@@ -232,7 +236,7 @@ func (p *MessageProcessor) Start() error {
 			}
 		} else {
 			p.logger.Trace("creating consumer with StartTime delivery policy")
-			
+
 			c, err = snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
 				snats.WithExactlyOnceContext(p.context),
 				snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
@@ -240,9 +244,9 @@ func (p *MessageProcessor) Start() error {
 			)
 			if err != nil {
 				return err
-			}	
+			}
 		}
-		 
+
 		p.subscriber = append(p.subscriber, c)
 		p.logger.Trace("message processor started for consumer: %s and company id: %s", name, companyID)
 	}
