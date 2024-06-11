@@ -41,7 +41,7 @@ var serverCmd = &cobra.Command{
 		localNatsPort, _ := cmd.Flags().GetInt("port")
 		healthCheckPort, _ := cmd.Flags().GetInt("health-port")
 		duration, _ := cmd.Flags().GetString("consumer-start-time")
-	
+
 		if !timestamp {
 			glog.SetFlags(0)
 		}
@@ -50,7 +50,7 @@ var serverCmd = &cobra.Command{
 
 		var (
 			consumerStartTime time.Duration
-			err error
+			err               error
 		)
 
 		logger.Trace("consumer-start-time: %s", duration)
@@ -201,16 +201,16 @@ var serverCmd = &cobra.Command{
 		var runLocalNatsCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
 			logger.Trace("creating message processor")
 			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
-				Logger:                  logger,
-				CompanyID:               companyIDs,
-				Providers:               providers,
-				NatsConnection:          nc,
-				MainNatsConnection:      nc,
-				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
-				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
-				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
-				ConsumerLookbackDuration:       consumerStartTime,
-				SchemaModelVersionCache: &schemaModelVersionCache,
+				Logger:                   logger,
+				CompanyID:                companyIDs,
+				Providers:                providers,
+				NatsConnection:           nc,
+				MainNatsConnection:       nc,
+				TraceNats:                mustFlagBool(cmd, "trace-nats", false),
+				DumpMessagesDir:          mustFlagString(cmd, "dump-dir", false),
+				ConsumerPrefix:           mustFlagString(cmd, "consumer-prefix", false),
+				ConsumerLookbackDuration: consumerStartTime,
+				SchemaModelVersionCache:  &schemaModelVersionCache,
 			})
 			if err != nil {
 				return err
