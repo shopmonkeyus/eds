@@ -13,7 +13,6 @@ import (
 
 	"github.com/gorilla/mux"
 	jwt "github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
@@ -38,7 +37,6 @@ var serverCmd = &cobra.Command{
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		timestamp, _ := cmd.Flags().GetBool("timestamp")
 		onlyRunNatsProvider, _ := cmd.Flags().GetBool("nats-provider")
-		localNatsPort, _ := cmd.Flags().GetInt("port")
 		healthCheckPort, _ := cmd.Flags().GetInt("health-port")
 		duration, _ := cmd.Flags().GetString("consumer-start-time")
 
@@ -118,61 +116,8 @@ var serverCmd = &cobra.Command{
 		}
 		defer nc.Close()
 
-		defaultServerConfig := &server.Options{} // used for setting any defaults
-		defaultServerConfig.Port = localNatsPort
-		defaultServerConfig.MaxConn = -1
-		defaultServerConfig.JetStream = true
-		defaultServerConfig.StoreDir = "/var/lib/shopmonkey/eds-server"
-		defaultServerConfig.JetStreamDomain = "leaf"
-		//Create the store dir if it doesn't exist
-		if _, err := os.Stat(defaultServerConfig.StoreDir); os.IsNotExist(err) {
-			err = os.MkdirAll(defaultServerConfig.StoreDir, 0755)
-			if err != nil {
-				panic(err)
-			}
-		}
-		serverConfig := &server.Options{}
-		serverConfig, err = server.ProcessConfigFile("server.conf")
-		if err != nil {
-			serverConfig = defaultServerConfig
-		}
-		ns, err := server.NewServer(serverConfig)
-
 		if err != nil {
 			panic(err)
-		}
-
-		go ns.Start()
-		readyForConnectionCounter := 0
-		for !ns.ReadyForConnections(4 * time.Second) {
-			logger.Info("Waiting for nats server to start...")
-			readyForConnectionCounter++
-			if readyForConnectionCounter > 10 {
-				logger.Error("Local Nats server failed to start. Check to see if another instance is already running, and verify your server.conf file is configured properly. Exiting...")
-				os.Exit(1)
-			}
-		}
-
-		logger.Info("Nats server started at url: %s", ns.ClientURL())
-		//Create our own NATs server for the providers to read from
-		opts := &provider.ProviderOpts{
-			DryRun:   dryRun,
-			Verbose:  verbose,
-			Importer: importer,
-		}
-		natsProvider, err := provider.NewNatsProvider(logger, ns.ClientURL(), opts, nc)
-		if err != nil {
-			logger.Error("error creating nats provider: %s", err)
-			os.Exit(1)
-		}
-
-		//Create a local NATs server (leaf-node) for the providers to read from
-		localNatsServerConnection := natsProvider.GetNatsConn()
-
-		err = natsProvider.AddHealthCheck()
-		if err != nil {
-			logger.Error("error adding health check: %s", err)
-			os.Exit(1)
 		}
 
 		schemaModelVersionCache := make(map[string]dm.Model)
@@ -198,36 +143,6 @@ var serverCmd = &cobra.Command{
 				schemaModelVersionCache[tableName] = latestSchema
 			}
 		}
-		var runLocalNatsCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
-			logger.Trace("creating message processor")
-			processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
-				Logger:                   logger,
-				CompanyID:                companyIDs,
-				Providers:                providers,
-				NatsConnection:           nc,
-				MainNatsConnection:       nc,
-				TraceNats:                mustFlagBool(cmd, "trace-nats", false),
-				DumpMessagesDir:          mustFlagString(cmd, "dump-dir", false),
-				ConsumerPrefix:           mustFlagString(cmd, "consumer-prefix", false),
-				ConsumerLookbackDuration: consumerStartTime,
-				SchemaModelVersionCache:  &schemaModelVersionCache,
-			})
-			if err != nil {
-				return err
-			}
-			defer processor.Stop()
-
-			logger.Trace("starting message processor")
-
-			if err := processor.Start(); err != nil {
-				return fmt.Errorf("processor start: %s", err)
-			}
-			logger.Info("started message processor")
-			<-csys.CreateShutdownChannel()
-			logger.Info("stopped message processor")
-			return nil
-		}
-		go runLocalProvider(logger, natsProvider, runLocalNatsCallback, nc)
 
 		var runProvidersCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
 			logger.Trace("creating message processor")
@@ -235,7 +150,7 @@ var serverCmd = &cobra.Command{
 				Logger:                  logger,
 				CompanyID:               companyIDs,
 				Providers:               providers,
-				NatsConnection:          localNatsServerConnection,
+				NatsConnection:          nc,
 				MainNatsConnection:      nc,
 				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
 				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
@@ -265,12 +180,6 @@ var serverCmd = &cobra.Command{
 			logger.Error("error: missing required url argument")
 			os.Exit(1)
 		}
-		defer natsProvider.Stop()
-		if err := natsProvider.Start(); err != nil {
-			logger.Error("error starting nats provider: %s", err)
-			os.Exit(1)
-		}
-		logger.Info("started nats provider")
 
 		rtr := mux.NewRouter()
 		port := healthCheckPort
