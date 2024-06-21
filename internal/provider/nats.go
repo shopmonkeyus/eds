@@ -105,7 +105,6 @@ func (p *NatsProvider) Process(data datatypes.ChangeEventPayload, schema dm.Mode
 	companyId := *data.GetCompanyID()
 
 	subject := fmt.Sprintf("dbchange.%s.%s.%s.%s.PUBLIC.%d.%s", data.GetTable(), data.GetOperation(), companyId, location, data.GetVersion(), data.GetID())
-
 	p.logger.Debug(`Republish Message to: %s`, subject)
 
 	buf, err := json.MarshalIndent(data, "", " ")
