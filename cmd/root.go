@@ -159,7 +159,7 @@ func newLogger(cmd *cobra.Command) logger.Logger {
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:  "eds-server",
-	Long: "Shopmonkey Enterprise Data Streaming server",
+	Long: "Shopmonkey Enterprise Data Streaming server \nFor detailed information, see: https://shopmonkey.dev/eds \nand https://github.com/shopmonkeyus/eds-server/blob/main/README.md ",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
