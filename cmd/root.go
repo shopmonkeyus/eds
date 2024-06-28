@@ -152,8 +152,8 @@ func processFile(logger logger.Logger, fileName string, providers []internal.Pro
 	return nil
 }
 
-func newLogger(cmd *cobra.Command) logger.Logger {
-	return logger.NewConsoleLogger()
+func newLogger(cmd *cobra.Command, levels ...logger.LogLevel) logger.Logger {
+	return logger.NewConsoleLogger(levels...)
 }
 
 // rootCmd represents the base command when called without any subcommands
