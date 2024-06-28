@@ -227,7 +227,9 @@ func (p *MessageProcessor) Start() error {
 			p.logger.Trace("creating consumer with New delivery policy")
 			c, err = snats.NewExactlyOnceConsumer(p.logger, p.js, "dbchange", name, "dbchange.*.*."+companyID+".*.PUBLIC.>", p.callback,
 				snats.WithExactlyOnceContext(p.context),
-				snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
+				snats.WithExactlyOnceReplicas(1),             // TODO: make configurable for testing
+				snats.WithExactlyOnceAckWait(30*time.Second), //This will fix the warning on start-up but may cause issues for long running messages
+				snats.WithExactlyOnceMaxRequestBatch(4096),
 			)
 			if err != nil {
 				return err

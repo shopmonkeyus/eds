@@ -19,6 +19,7 @@ import (
 	dm "github.com/shopmonkeyus/eds-server/internal/model"
 	"github.com/shopmonkeyus/eds-server/internal/provider"
 	"github.com/shopmonkeyus/eds-server/internal/util"
+	glogger "github.com/shopmonkeyus/go-common/logger"
 	snats "github.com/shopmonkeyus/go-common/nats"
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
@@ -42,12 +43,16 @@ var serverCmd = &cobra.Command{
 		localNatsPort, _ := cmd.Flags().GetInt("port")
 		healthCheckPort, _ := cmd.Flags().GetInt("health-port")
 		duration, _ := cmd.Flags().GetString("consumer-start-time")
-
+		enableDebug, _ := cmd.Flags().GetBool("enable-debug")
 		if !timestamp {
 			glog.SetFlags(0)
 		}
-
-		logger := newLogger(cmd)
+		var logger glogger.Logger
+		if enableDebug {
+			logger = newLogger(cmd, glogger.LevelDebug)
+		} else {
+			logger = newLogger(cmd, glogger.LevelInfo)
+		}
 
 		var (
 			consumerStartTime time.Duration
@@ -347,4 +352,5 @@ func init() {
 	serverCmd.Flags().Int("port", 4223, "the port to run the local NATS server on")
 	serverCmd.Flags().Int("health-port", 8080, "the port to run the health check server on")
 	serverCmd.Flags().String("consumer-start-time", "", "A duration string with unit suffix. Example: 1h45m. Max value is 168h")
+	serverCmd.Flags().Bool("enable-debug", false, "enable debug mode")
 }
