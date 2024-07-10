@@ -11,11 +11,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/shopmonkeyus/eds-server/internal/util"
 	glogger "github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 )
@@ -90,12 +90,19 @@ func quoteIdentifier(name string) string {
 	return `"` + name + `"`
 }
 
+var skipFields = map[string]bool{
+	"meta": true,
+}
+
 func (s schema) createSQL() string {
 	var sql strings.Builder
 	sql.WriteString("CREATE OR REPLACE TABLE ")
 	sql.WriteString(quoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
 	for name, prop := range s.Properties {
+		if skipFields[name] {
+			continue
+		}
 		sql.WriteString("\t")
 		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
@@ -205,6 +212,24 @@ type exportJobResponse struct {
 	Tables    map[string]exportJobTableData `json:"tables"`
 }
 
+func (e *exportJobResponse) String() string {
+	var tablesAndStatus []string
+	var pending, completed, failed int
+	for table, data := range e.Tables {
+		tablesAndStatus = append(tablesAndStatus, fmt.Sprintf("%s: %s", table, data.Status))
+		switch data.Status {
+		case "Pending":
+			pending++
+		case "Completed":
+			completed++
+		case "Failed":
+			failed++
+		}
+	}
+	slices.Sort(tablesAndStatus)
+	return fmt.Sprintf("%s\n %d/%d", strings.Join(tablesAndStatus, "\n"), completed, len(e.Tables))
+}
+
 func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL+"/v3/export/bulk/"+jobID, nil)
 	if err != nil {
@@ -231,8 +256,8 @@ func pollUntilComplete(ctx context.Context, log glogger.Logger, apiURL string, a
 		if err != nil {
 			return exportJobResponse{}, err
 		}
-		log.Debug("job status: %s", util.MustJSONStringify(job, false))
-		if job.Completed && len(job.Tables) > 0 {
+		log.Debug("job status: %s", job.String())
+		if job.Completed {
 			return *job, nil
 		}
 		// TODO: check for errors!
@@ -267,10 +292,8 @@ func migrateDB(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[s
 	return nil
 }
 
-func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[string]schema, only []string, jobID string, dataDir string, dryRun bool) error {
-
+func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables []string, jobID string, dataDir string, dryRun bool) error {
 	executeSQL := sqlExecuter(ctx, log, db, dryRun)
-
 	stageName := "eds_import_" + jobID
 	log.Debug("creating stage %s", stageName)
 	// create a stage
@@ -280,23 +303,17 @@ func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[s
 	}
 
 	// upload files
-	for _, schema := range tables {
-		if shouldSkip(schema.Table, only, nil) {
-			continue
-		}
+	for _, table := range tables {
 		// put 'file:///Users/robindiddams/work/eds-server/dist/6271949614cbe915929e0e0f/user.json.gz' @eds_import_6271949614cbe915929e0e0f SOURCE_COMPRESSION=gzip;
-		if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/%s/*.ndjson.gz' @%s/%s SOURCE_COMPRESSION=gzip`, dataDir, schema.Table, stageName, schema.Table)); err != nil {
+		if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/%s/*.ndjson.gz' @%s/%s SOURCE_COMPRESSION=gzip`, dataDir, table, stageName, table)); err != nil {
 			return fmt.Errorf("error uploading files: %s", err)
 		}
 	}
 
 	// import the data
-	for _, schema := range tables {
-		if shouldSkip(schema.Table, only, nil) {
-			continue
-		}
+	for _, table := range tables {
 		// COPY INTO "user" FROM @eds_import_HNGX9AK9KZM7AF11E07HO7/usertest10 MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true);
-		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s/%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP')`, quoteIdentifier(schema.Table), stageName, schema.Table)); err != nil {
+		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s/%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP')`, quoteIdentifier(table), stageName, table)); err != nil {
 			return fmt.Errorf("error importing data: %s", err)
 		}
 	}
@@ -334,12 +351,16 @@ type donwloadPacket struct {
 	url   string
 }
 
-func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, dir string) error {
+func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, dir string) ([]string, error) {
 	var downloads []donwloadPacket
+	var tablesWithData []string
 	for table, tableData := range data {
 		tableDir := filepath.Join(dir, table)
 		if err := os.MkdirAll(tableDir, 0755); err != nil {
-			return fmt.Errorf("error creating dir: %s", err)
+			return nil, fmt.Errorf("error creating dir: %s", err)
+		}
+		if len(tableData.URLs) > 0 {
+			tablesWithData = append(tablesWithData, table)
 		}
 		for _, fullURL := range tableData.URLs {
 			downloads = append(downloads, donwloadPacket{table, fullURL})
@@ -347,7 +368,7 @@ func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, di
 	}
 	if len(downloads) == 0 {
 		log.Info("no files to download")
-		return nil
+		return nil, nil
 	}
 
 	log.Info("downloading %d files", len(downloads))
@@ -379,13 +400,13 @@ func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, di
 	// check for errors
 	select {
 	case err := <-errors:
-		return err
+		return nil, err
 	default:
 	}
 	// wait for the downloads to finish
 	downloadWG.Wait()
 
-	return nil
+	return tablesWithData, nil
 }
 
 var importCmd = &cobra.Command{
@@ -400,6 +421,7 @@ var importCmd = &cobra.Command{
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		apiKey, _ := cmd.Flags().GetString("api-key")
 		only, _ := cmd.Flags().GetStringSlice("only")
+		jobID, _ := cmd.Flags().GetString("job-id")
 
 		log.Info("🚀 Starting import")
 		if dryRun {
@@ -424,16 +446,18 @@ var importCmd = &cobra.Command{
 
 		defer db.Close()
 
-		// create a new job from the api
-		jobID, err := createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
-			Tables: only,
-		})
-		if err != nil {
-			log.Error("error creating export job: %s", err)
-			os.Exit(1)
-		}
+		if jobID == "" {
+			// create a new job from the api
+			jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
+				Tables: only,
+			})
+			if err != nil {
+				log.Error("error creating export job: %s", err)
+				os.Exit(1)
+			}
 
-		log.Info("created job: %s", jobID)
+			log.Info("created job: %s", jobID)
+		}
 
 		// poll until the job is complete
 		job, err := pollUntilComplete(ctx, log, apiURL, apiKey, jobID)
@@ -462,13 +486,14 @@ var importCmd = &cobra.Command{
 		}()
 
 		// get the urls from the api
-		if err := bulkDownloadData(log, job.Tables, dir); err != nil {
+		tables, err := bulkDownloadData(log, job.Tables, dir)
+		if err != nil {
 			log.Error("error downloading files: %s", err)
 			success = false
 			os.Exit(1)
 		}
 
-		if err := runImport(ctx, log, db, schema, only, jobID, dir, dryRun); err != nil {
+		if err := runImport(ctx, log, db, tables, jobID, dir, dryRun); err != nil {
 			log.Error("error running import: %s", err)
 			success = false
 			os.Exit(1)
@@ -484,5 +509,6 @@ func init() {
 	importCmd.Flags().String("db-url", "", "snowflake connection string")
 	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
+	importCmd.Flags().String("job-id", "", "resume an existing job")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 }
