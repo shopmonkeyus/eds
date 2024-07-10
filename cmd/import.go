@@ -1,15 +1,21 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	glogger "github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 )
@@ -127,6 +133,113 @@ func loadSchema(apiURL string) (map[string]schema, error) {
 	return tables, nil
 }
 
+// generic api response
+type apiResponse[T any] struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    T      `json:"data"`
+}
+
+func decodeShopmonkeyAPIResponse[T any](resp *http.Response) (*T, error) {
+	var apiResp apiResponse[T]
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("error decoding response: %s", err)
+	}
+	if !apiResp.Success {
+		return nil, fmt.Errorf("api error: %s", apiResp.Message)
+	}
+	return &apiResp.Data, nil
+}
+
+type exportJobCreateResponse struct {
+	JobID string `json:"jobId"`
+}
+
+type exportJobCreateRequest struct {
+	CompanyIDs  []string `json:"companyIds,omitempty"`
+	LocationIDs []string `json:"locationIds,omitempty"`
+	Tables      []string `json:"tables,omitempty"`
+}
+
+func createExportJob(ctx context.Context, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
+	// encode the request
+	body, err := json.Marshal(filters)
+	if err != nil {
+		return "", fmt.Errorf("error encoding request: %s", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL+"/v3/export/bulk", bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating request: %s", err)
+	}
+	req.Header = http.Header{
+		"Authorization": {"Bearer " + apiKey},
+		"Content-Type":  {"application/json"},
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error fetching schema: %s", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		buf, _ := io.ReadAll(resp.Body)
+		fmt.Println(string(buf))
+	}
+
+	job, err := decodeShopmonkeyAPIResponse[exportJobCreateResponse](resp)
+	if err != nil {
+		return "", fmt.Errorf("error decoding response: %s", err)
+	}
+	return job.JobID, nil
+}
+
+type exportJobTableData struct {
+	Error  string   `json:"error"`
+	Status string   `json:"status"`
+	URLs   []string `json:"urls"`
+}
+
+type exportJobResponse struct {
+	Completed bool                          `json:"completed"`
+	Tables    map[string]exportJobTableData `json:"tables"`
+}
+
+func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL+"/v3/export/bulk/"+jobID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %s", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching schema: %s", err)
+	}
+	defer resp.Body.Close()
+
+	job, err := decodeShopmonkeyAPIResponse[exportJobResponse](resp)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding response: %s", err)
+	}
+	return job, nil
+}
+
+func pollUntilComplete(ctx context.Context, log glogger.Logger, apiURL string, apiKey string, jobID string) (exportJobResponse, error) {
+	for {
+		log.Info("checking job status")
+		job, err := checkExportJob(ctx, apiURL, apiKey, jobID)
+		if err != nil {
+			return exportJobResponse{}, err
+		}
+		log.Debug("job status: %s", util.MustJSONStringify(job, false))
+		if job.Completed && len(job.Tables) > 0 {
+			return *job, nil
+		}
+		// TODO: check for errors!
+		time.Sleep(5 * time.Second)
+	}
+}
+
 func sqlExecuter(ctx context.Context, log glogger.Logger, db *sql.DB, dryRun bool) func(sql string) error {
 	return func(sql string) error {
 		if dryRun {
@@ -172,17 +285,102 @@ func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[s
 			continue
 		}
 		// put 'file:///Users/robindiddams/work/eds-server/dist/6271949614cbe915929e0e0f/user.json.gz' @eds_import_6271949614cbe915929e0e0f SOURCE_COMPRESSION=gzip;
-		if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/%s/*.json.gz' @%s/%s SOURCE_COMPRESSION=gzip`, dataDir, schema.Table, stageName, schema.Table)); err != nil {
+		if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/%s/*.ndjson.gz' @%s/%s SOURCE_COMPRESSION=gzip`, dataDir, schema.Table, stageName, schema.Table)); err != nil {
 			return fmt.Errorf("error uploading files: %s", err)
 		}
 	}
 
 	// import the data
+	for _, schema := range tables {
+		if shouldSkip(schema.Table, only, nil) {
+			continue
+		}
+		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s/%s FILE_FORMAT = (TYPE = 'JSON' COMPRESSION = 'GZIP')`, schema.Table, stageName, schema.Table)); err != nil {
+			return fmt.Errorf("error importing data: %s", err)
+		}
+	}
+	return nil
+}
 
-	// 	COPY INTO user_data
-	// FROM @eds_import_6271949614cbe915929e0e0f/user.json.gz
-	// FILE_FORMAT = (TYPE = 'JSON' COMPRESSION = 'GZIP');
-	// TODO!
+func downloadFile(log glogger.Logger, dir string, fullURL string) error {
+	parsedURL, err := url.Parse(fullURL)
+	if err != nil {
+		return fmt.Errorf("error parsing url: %s", err)
+	}
+	baseFileName := filepath.Base(parsedURL.Path)
+	// download the file
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		return fmt.Errorf("error fetching data: %s", err)
+	}
+	defer resp.Body.Close()
+	filename := fmt.Sprintf("%s/%s", dir, baseFileName)
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("error creating file: %s", err)
+	}
+	if _, err := io.Copy(file, resp.Body); err != nil {
+		return fmt.Errorf("error writing file: %s", err)
+	}
+	log.Debug("downloaded file %s", filename)
+	return nil
+}
+
+type donwloadPacket struct {
+	table string
+	url   string
+}
+
+func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, dir string) error {
+	var downloads []donwloadPacket
+	for table, tableData := range data {
+		tableDir := filepath.Join(dir, table)
+		if err := os.MkdirAll(tableDir, 0755); err != nil {
+			return fmt.Errorf("error creating dir: %s", err)
+		}
+		for _, fullURL := range tableData.URLs {
+			downloads = append(downloads, donwloadPacket{table, fullURL})
+		}
+	}
+	if len(downloads) == 0 {
+		log.Info("no files to download")
+		return nil
+	}
+
+	log.Info("downloading %d files", len(downloads))
+	concurrency := 10
+	downloadChan := make(chan donwloadPacket, len(downloads))
+	var downloadWG sync.WaitGroup
+	errors := make(chan error, concurrency)
+
+	// start the download workers
+	for i := 0; i < concurrency; i++ {
+		downloadWG.Add(1)
+		go func() {
+			defer downloadWG.Done()
+			for packet := range downloadChan {
+				if err := downloadFile(log, filepath.Join(dir, packet.table), packet.url); err != nil {
+					errors <- fmt.Errorf("error downloading file: %s", err)
+					return
+				}
+			}
+		}()
+	}
+
+	// send the downloads
+	for _, packet := range downloads {
+		downloadChan <- packet
+	}
+	close(downloadChan)
+
+	// check for errors
+	select {
+	case err := <-errors:
+		return err
+	default:
+	}
+	// wait for the downloads to finish
+	downloadWG.Wait()
 
 	return nil
 }
@@ -193,15 +391,20 @@ var importCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		log := newLogger(cmd, glogger.LevelDebug)
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		apiURL, _ := cmd.Flags().GetString("api-url")
+		apiKey, _ := cmd.Flags().GetString("api-key")
 		only, _ := cmd.Flags().GetStringSlice("only")
 
-		log := newLogger(cmd, glogger.LevelDebug)
 		log.Info("🚀 Starting import")
 		if dryRun {
 			log.Info("🚨 Dry run enabled")
+		}
+
+		if cmd.Flags().Changed("api-url") {
+			log.Info("using alternative API url: %s", apiURL)
 		}
 
 		schema, err := loadSchema(apiURL)
@@ -218,11 +421,23 @@ var importCmd = &cobra.Command{
 
 		defer db.Close()
 
-		jobID := fmt.Sprintf("%d", time.Now().Unix()) // todo: generate a unique job id
-
 		// create a new job from the api
+		jobID, err := createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
+			Tables: only,
+		})
+		if err != nil {
+			log.Error("error creating export job: %s", err)
+			return
+		}
 
-		// get the urls from the api
+		log.Info("created job: %s", jobID)
+
+		// poll until the job is complete
+		job, err := pollUntilComplete(ctx, log, apiURL, apiKey, jobID)
+		if err != nil {
+			log.Error("error polling job: %s", err)
+			return
+		}
 
 		// download the files
 		dir, err := os.MkdirTemp("", "eds-import")
@@ -232,6 +447,11 @@ var importCmd = &cobra.Command{
 		}
 		defer os.RemoveAll(dir)
 
+		// get the urls from the api
+		if err := bulkDownloadData(log, job.Tables, dir); err != nil {
+			log.Error("error downloading files: %s", err)
+			return
+		}
 		// migrate the db
 		if err := migrateDB(ctx, log, db, schema, only, dryRun); err != nil {
 			log.Error("error migrating db: %s", err)
@@ -252,5 +472,6 @@ func init() {
 	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
 	importCmd.Flags().String("db-url", "", "snowflake connection string")
 	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 }
