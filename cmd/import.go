@@ -295,7 +295,8 @@ func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[s
 		if shouldSkip(schema.Table, only, nil) {
 			continue
 		}
-		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s/%s FILE_FORMAT = (TYPE = 'JSON' COMPRESSION = 'GZIP')`, schema.Table, stageName, schema.Table)); err != nil {
+		// COPY INTO "user" FROM @eds_import_HNGX9AK9KZM7AF11E07HO7/usertest10 MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true);
+		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s/%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP')`, quoteIdentifier(schema.Table), stageName, schema.Table)); err != nil {
 			return fmt.Errorf("error importing data: %s", err)
 		}
 	}
@@ -307,6 +308,7 @@ func downloadFile(log glogger.Logger, dir string, fullURL string) error {
 	if err != nil {
 		return fmt.Errorf("error parsing url: %s", err)
 	}
+	// TODO rmove ndjson with json
 	baseFileName := filepath.Base(parsedURL.Path)
 	// download the file
 	resp, err := http.Get(fullURL)
@@ -319,6 +321,7 @@ func downloadFile(log glogger.Logger, dir string, fullURL string) error {
 	if err != nil {
 		return fmt.Errorf("error creating file: %s", err)
 	}
+	defer file.Close()
 	if _, err := io.Copy(file, resp.Body); err != nil {
 		return fmt.Errorf("error writing file: %s", err)
 	}
@@ -427,7 +430,7 @@ var importCmd = &cobra.Command{
 		})
 		if err != nil {
 			log.Error("error creating export job: %s", err)
-			return
+			os.Exit(1)
 		}
 
 		log.Info("created job: %s", jobID)
@@ -436,31 +439,39 @@ var importCmd = &cobra.Command{
 		job, err := pollUntilComplete(ctx, log, apiURL, apiKey, jobID)
 		if err != nil {
 			log.Error("error polling job: %s", err)
-			return
+			os.Exit(1)
+		}
+
+		// migrate the db
+		if err := migrateDB(ctx, log, db, schema, only, dryRun); err != nil {
+			log.Error("error migrating db: %s", err)
+			os.Exit(1)
 		}
 
 		// download the files
 		dir, err := os.MkdirTemp("", "eds-import")
 		if err != nil {
 			log.Error("error creating temp dir: %s", err)
-			return
+			os.Exit(1)
 		}
-		defer os.RemoveAll(dir)
+		success := true
+		defer func() {
+			if success {
+				os.RemoveAll(dir)
+			}
+		}()
 
 		// get the urls from the api
 		if err := bulkDownloadData(log, job.Tables, dir); err != nil {
 			log.Error("error downloading files: %s", err)
-			return
-		}
-		// migrate the db
-		if err := migrateDB(ctx, log, db, schema, only, dryRun); err != nil {
-			log.Error("error migrating db: %s", err)
-			return
+			success = false
+			os.Exit(1)
 		}
 
 		if err := runImport(ctx, log, db, schema, only, jobID, dir, dryRun); err != nil {
 			log.Error("error running import: %s", err)
-			return
+			success = false
+			os.Exit(1)
 		}
 
 		log.Info("👋 Bye")
