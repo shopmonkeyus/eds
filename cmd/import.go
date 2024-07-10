@@ -26,6 +26,16 @@ func connect2DB(ctx context.Context, url string) (*sql.DB, error) {
 	return db, nil
 }
 
+func shouldSkip(table string, only []string, except []string) bool {
+	if len(only) > 0 && !sliceContains(only, table) {
+		return true
+	}
+	if len(except) > 0 && sliceContains(except, table) {
+		return true
+	}
+	return false
+}
+
 type property struct {
 	Type     string `json:"type"`
 	Format   string `json:"format"`
@@ -70,14 +80,18 @@ func sliceContains(slice []string, val string) bool {
 	return false
 }
 
+func quoteIdentifier(name string) string {
+	return `"` + name + `"`
+}
+
 func (s schema) createSQL() string {
 	var sql strings.Builder
 	sql.WriteString("CREATE OR REPLACE TABLE ")
-	sql.WriteString(s.Table)
+	sql.WriteString(quoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
 	for name, prop := range s.Properties {
 		sql.WriteString("\t")
-		sql.WriteString(name)
+		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop.Type, prop.Format))
 		if sliceContains(s.Required, name) && !prop.Nullable {
@@ -88,7 +102,7 @@ func (s schema) createSQL() string {
 	if len(s.PrimaryKeys) > 0 {
 		sql.WriteString("\tPRIMARY KEY (")
 		for i, pk := range s.PrimaryKeys {
-			sql.WriteString(pk)
+			sql.WriteString(quoteIdentifier(pk))
 			if i < len(s.PrimaryKeys)-1 {
 				sql.WriteString(", ")
 			}
@@ -99,8 +113,8 @@ func (s schema) createSQL() string {
 	return sql.String()
 }
 
-func loadSchema() (map[string]schema, error) {
-	resp, err := http.Get("https://api.shopmonkey.cloud/v3/schema")
+func loadSchema(apiURL string) (map[string]schema, error) {
+	resp, err := http.Get(apiURL + "/v3/schema")
 	if err != nil {
 		return nil, fmt.Errorf("error fetching schema: %s", err)
 	}
@@ -113,22 +127,10 @@ func loadSchema() (map[string]schema, error) {
 	return tables, nil
 }
 
-func migrateDB(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[string]schema) error {
-	for _, schema := range tables {
-		sql := schema.createSQL()
-		log.Debug("%s", sql)
-		if _, err := db.ExecContext(ctx, sql); err != nil {
-			return fmt.Errorf("error creating table: %s. %w", schema.Table, err)
-		}
-	}
-	return nil
-}
-
-func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[string]schema, jobID string, dataDir string, dryRun bool) error {
-
-	executeSQL := func(sql string) error {
+func sqlExecuter(ctx context.Context, log glogger.Logger, db *sql.DB, dryRun bool) func(sql string) error {
+	return func(sql string) error {
 		if dryRun {
-			log.Info("🚨 Dry run: would have run: %s", sql)
+			log.Info("%s", sql)
 			return nil
 		}
 		log.Debug("executing: %s", sql)
@@ -137,18 +139,40 @@ func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[s
 		}
 		return nil
 	}
+}
 
+func migrateDB(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[string]schema, only []string, dryRun bool) error {
+	executeSQL := sqlExecuter(ctx, log, db, dryRun)
+	for _, schema := range tables {
+		if shouldSkip(schema.Table, only, nil) {
+			continue
+		}
+		if err := executeSQL(schema.createSQL()); err != nil {
+			return fmt.Errorf("error creating table: %s. %w", schema.Table, err)
+		}
+	}
+	return nil
+}
+
+func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[string]schema, only []string, jobID string, dataDir string, dryRun bool) error {
+
+	executeSQL := sqlExecuter(ctx, log, db, dryRun)
+
+	stageName := "eds_import_" + jobID
+	log.Debug("creating stage %s", stageName)
 	// create a stage
 	// CREATE TEMP STAGE eds_import_6271949614cbe915929e0e0f;
-	if err := executeSQL("CREATE TEMP STAGE eds_import_" + jobID); err != nil {
+	if err := executeSQL("CREATE TEMP STAGE " + stageName); err != nil {
 		return fmt.Errorf("error creating stage: %s", err)
 	}
 
 	// upload files
 	for _, schema := range tables {
-		table := schema.Table
+		if shouldSkip(schema.Table, only, nil) {
+			continue
+		}
 		// put 'file:///Users/robindiddams/work/eds-server/dist/6271949614cbe915929e0e0f/user.json.gz' @eds_import_6271949614cbe915929e0e0f SOURCE_COMPRESSION=gzip;
-		if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/%s/*.json.gz' @eds_import_%s/%s SOURCE_COMPRESSION=gzip`, dataDir, table, jobID, table)); err != nil {
+		if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/%s/*.json.gz' @%s/%s SOURCE_COMPRESSION=gzip`, dataDir, schema.Table, stageName, schema.Table)); err != nil {
 			return fmt.Errorf("error uploading files: %s", err)
 		}
 	}
@@ -171,6 +195,8 @@ var importCmd = &cobra.Command{
 		defer cancel()
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		apiURL, _ := cmd.Flags().GetString("api-url")
+		only, _ := cmd.Flags().GetStringSlice("only")
 
 		log := newLogger(cmd, glogger.LevelDebug)
 		log.Info("🚀 Starting import")
@@ -178,7 +204,7 @@ var importCmd = &cobra.Command{
 			log.Info("🚨 Dry run enabled")
 		}
 
-		schema, err := loadSchema()
+		schema, err := loadSchema(apiURL)
 		if err != nil {
 			log.Error("error loading schema: %s", err)
 			os.Exit(1)
@@ -192,7 +218,7 @@ var importCmd = &cobra.Command{
 
 		defer db.Close()
 
-		jobID := string(time.Now().Unix()) // todo: generate a unique job id
+		jobID := fmt.Sprintf("%d", time.Now().Unix()) // todo: generate a unique job id
 
 		// create a new job from the api
 
@@ -207,12 +233,12 @@ var importCmd = &cobra.Command{
 		defer os.RemoveAll(dir)
 
 		// migrate the db
-		if err := migrateDB(ctx, log, db, schema); err != nil {
+		if err := migrateDB(ctx, log, db, schema, only, dryRun); err != nil {
 			log.Error("error migrating db: %s", err)
 			return
 		}
 
-		if err := runImport(ctx, log, db, schema, jobID, dir, dryRun); err != nil {
+		if err := runImport(ctx, log, db, schema, only, jobID, dir, dryRun); err != nil {
 			log.Error("error running import: %s", err)
 			return
 		}
@@ -225,4 +251,6 @@ func init() {
 	rootCmd.AddCommand(importCmd)
 	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
 	importCmd.Flags().String("db-url", "", "snowflake connection string")
+	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 }
