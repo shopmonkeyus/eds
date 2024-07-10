@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	glogger "github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 )
@@ -296,24 +298,20 @@ func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables []str
 	executeSQL := sqlExecuter(ctx, log, db, dryRun)
 	stageName := "eds_import_" + jobID
 	log.Debug("creating stage %s", stageName)
+
 	// create a stage
-	// CREATE TEMP STAGE eds_import_6271949614cbe915929e0e0f;
 	if err := executeSQL("CREATE TEMP STAGE " + stageName); err != nil {
 		return fmt.Errorf("error creating stage: %s", err)
 	}
 
 	// upload files
-	for _, table := range tables {
-		// put 'file:///Users/robindiddams/work/eds-server/dist/6271949614cbe915929e0e0f/user.json.gz' @eds_import_6271949614cbe915929e0e0f SOURCE_COMPRESSION=gzip;
-		if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/%s/*.ndjson.gz' @%s/%s SOURCE_COMPRESSION=gzip`, dataDir, table, stageName, table)); err != nil {
-			return fmt.Errorf("error uploading files: %s", err)
-		}
+	if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/*.ndjson.gz' @%s SOURCE_COMPRESSION=gzip`, dataDir, stageName)); err != nil {
+		return fmt.Errorf("error uploading files: %s", err)
 	}
 
 	// import the data
 	for _, table := range tables {
-		// COPY INTO "user" FROM @eds_import_HNGX9AK9KZM7AF11E07HO7/usertest10 MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true);
-		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s/%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP')`, quoteIdentifier(table), stageName, table)); err != nil {
+		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP') PATTERN='.*-%s-.*'`, quoteIdentifier(table), stageName, table)); err != nil {
 			return fmt.Errorf("error importing data: %s", err)
 		}
 	}
@@ -346,25 +344,16 @@ func downloadFile(log glogger.Logger, dir string, fullURL string) error {
 	return nil
 }
 
-type donwloadPacket struct {
-	table string
-	url   string
-}
-
 func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, dir string) ([]string, error) {
-	var downloads []donwloadPacket
+	var downloads []string
 	var tablesWithData []string
 	for table, tableData := range data {
-		tableDir := filepath.Join(dir, table)
-		if err := os.MkdirAll(tableDir, 0755); err != nil {
-			return nil, fmt.Errorf("error creating dir: %s", err)
-		}
 		if len(tableData.URLs) > 0 {
 			tablesWithData = append(tablesWithData, table)
+		} else {
+			log.Debug("no data for table %s", table)
 		}
-		for _, fullURL := range tableData.URLs {
-			downloads = append(downloads, donwloadPacket{table, fullURL})
-		}
+		downloads = append(downloads, tableData.URLs...)
 	}
 	if len(downloads) == 0 {
 		log.Info("no files to download")
@@ -373,7 +362,7 @@ func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, di
 
 	log.Info("downloading %d files", len(downloads))
 	concurrency := 10
-	downloadChan := make(chan donwloadPacket, len(downloads))
+	downloadChan := make(chan string, len(downloads))
 	var downloadWG sync.WaitGroup
 	errors := make(chan error, concurrency)
 
@@ -382,8 +371,8 @@ func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, di
 		downloadWG.Add(1)
 		go func() {
 			defer downloadWG.Done()
-			for packet := range downloadChan {
-				if err := downloadFile(log, filepath.Join(dir, packet.table), packet.url); err != nil {
+			for url := range downloadChan {
+				if err := downloadFile(log, dir, url); err != nil {
 					errors <- fmt.Errorf("error downloading file: %s", err)
 					return
 				}
@@ -413,6 +402,7 @@ var importCmd = &cobra.Command{
 	Use:   "import",
 	Short: "import data from your shopmonkey instance to your external database",
 	Run: func(cmd *cobra.Command, args []string) {
+		started := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		log := newLogger(cmd, glogger.LevelDebug)
@@ -422,11 +412,8 @@ var importCmd = &cobra.Command{
 		apiKey, _ := cmd.Flags().GetString("api-key")
 		only, _ := cmd.Flags().GetStringSlice("only")
 		jobID, _ := cmd.Flags().GetString("job-id")
-
-		log.Info("🚀 Starting import")
-		if dryRun {
-			log.Info("🚨 Dry run enabled")
-		}
+		confirmed, _ := cmd.Flags().GetBool("confirm-danger")
+		dbUrl := mustFlagString(cmd, "db-url", true)
 
 		if cmd.Flags().Changed("api-url") {
 			log.Info("using alternative API url: %s", apiURL)
@@ -438,13 +425,44 @@ var importCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		db, err := connect2DB(ctx, mustFlagString(cmd, "db-url", true))
+		db, err := connect2DB(ctx, dbUrl)
 		if err != nil {
 			log.Error("error connecting to db: %s", err)
 			os.Exit(1)
 		}
 
 		defer db.Close()
+
+		log.Info("🚀 Starting import")
+		if dryRun {
+			log.Info("🚨 Dry run enabled")
+		} else if !confirmed {
+			// get last 2 elements of dbUrl
+
+			parts := strings.Split(dbUrl, "/")
+			dbName := parts[len(parts)-2]
+			schemaName := parts[len(parts)-1]
+
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewConfirm().
+						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s/%s", dbName, schemaName)).
+						Affirmative("Confirm").
+						Negative("Cancel").
+						Value(&confirmed),
+				),
+			)
+			if err := form.Run(); err != nil {
+				if !errors.Is(err, huh.ErrUserAborted) {
+					log.Error("error running form: %s", err)
+					log.Info("You may use --confirm-danger to skip this prompt")
+					os.Exit(1)
+				}
+			}
+			if !confirmed {
+				os.Exit(0)
+			}
+		}
 
 		if jobID == "" {
 			// create a new job from the api
@@ -499,7 +517,7 @@ var importCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		log.Info("👋 Bye")
+		log.Info("👋 Completed in %v", time.Since(started))
 	},
 }
 
@@ -510,5 +528,6 @@ func init() {
 	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
 	importCmd.Flags().String("job-id", "", "resume an existing job")
+	importCmd.Flags().Bool("confirm-danger", false, "skip the confirmation prompt")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 }
