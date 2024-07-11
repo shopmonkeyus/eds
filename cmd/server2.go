@@ -107,6 +107,7 @@ var server2Cmd = &cobra.Command{
 		dbUrl := mustFlagString(cmd, "db-url", true)
 		creds, _ := cmd.Flags().GetString("creds")
 		apiURL, _ := cmd.Flags().GetString("api-url")
+		consumerPrefix, _ := cmd.Flags().GetString("consumer-prefix")
 
 		var schema map[string]schema
 		var err error
@@ -120,13 +121,18 @@ var server2Cmd = &cobra.Command{
 		var natsCredentials nats.Option
 		var companyIDs []string
 		companyName := "unknown"
-		// FIXME: remove
-		companyIDs = []string{"6287a4154d1a72cc5ce091bb"}
 
 		if natsurl != "" {
 			natsCredentials, companyIDs, companyName, err = getNatsCreds(creds)
 			if err != nil {
 				log.Error("error: %s", err)
+				os.Exit(1)
+			}
+		} else {
+			log.Info("no credentials, running local nats")
+			companyIDs, _ = cmd.Flags().GetStringSlice("company-id")
+			if len(companyIDs) == 0 {
+				log.Error("error: no company ids provided use --company-id")
 				os.Exit(1)
 			}
 		}
@@ -259,8 +265,6 @@ var server2Cmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		consumerPrefix := "robin-is-testing"
-
 		name := fmt.Sprintf("%seds-server-%s", consumerPrefix, strings.Join(companyIDs, "-"))
 		var subjects []string
 		for _, companyID := range companyIDs {
@@ -326,6 +330,9 @@ var server2Cmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(server2Cmd)
+	server2Cmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
+	server2Cmd.Flags().StringSlice("company-id", nil, "the company id to listen for, only useful for local testing")
+	server2Cmd.Flags().MarkHidden("company-id") // hide this flag since its only useful to shopmonkey employees
 	server2Cmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	server2Cmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	server2Cmd.Flags().String("db-url", "", "Snowflake Database connection string")
