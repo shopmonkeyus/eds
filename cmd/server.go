@@ -49,9 +49,9 @@ var serverCmd = &cobra.Command{
 		}
 		var logger glogger.Logger
 		if enableDebug {
-			logger = newLogger(cmd, glogger.LevelDebug)
+			logger = newLogger(glogger.LevelDebug)
 		} else {
-			logger = newLogger(cmd, glogger.LevelInfo)
+			logger = newLogger(glogger.LevelInfo)
 		}
 
 		var (

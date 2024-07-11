@@ -152,7 +152,7 @@ func processFile(logger logger.Logger, fileName string, providers []internal.Pro
 	return nil
 }
 
-func newLogger(cmd *cobra.Command, levels ...logger.LogLevel) logger.Logger {
+func newLogger(levels ...logger.LogLevel) logger.Logger {
 	return logger.NewConsoleLogger(levels...)
 }
 

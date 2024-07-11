@@ -5,6 +5,7 @@ go 1.22
 toolchain go1.22.3
 
 require (
+	github.com/charmbracelet/huh/spinner v0.0.0-20240709222038-80fcf53648bd
 	github.com/gorilla/mux v1.8.1
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/microsoft/go-mssqldb v1.6.0
@@ -18,6 +19,11 @@ require (
 	github.com/snowflakedb/gosnowflake v1.10.1
 	github.com/stretchr/testify v1.9.0
 
+)
+
+require (
+	github.com/charmbracelet/harmonica v0.2.0 // indirect
+	github.com/muesli/reflow v0.3.0 // indirect
 )
 
 require (
@@ -44,10 +50,10 @@ require (
 	github.com/aws/smithy-go v1.20.2 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/catppuccin/go v0.2.0 // indirect
-	github.com/charmbracelet/bubbles v0.18.0 // indirect
-	github.com/charmbracelet/bubbletea v0.26.4 // indirect
+	github.com/charmbracelet/bubbles v0.18.0
+	github.com/charmbracelet/bubbletea v0.26.4
 	github.com/charmbracelet/huh v0.5.1
-	github.com/charmbracelet/lipgloss v0.11.0 // indirect
+	github.com/charmbracelet/lipgloss v0.11.0
 	github.com/charmbracelet/x/ansi v0.1.2 // indirect
 	github.com/charmbracelet/x/exp/strings v0.0.0-20240617190524-788ec55faed1 // indirect
 	github.com/charmbracelet/x/input v0.1.2 // indirect
