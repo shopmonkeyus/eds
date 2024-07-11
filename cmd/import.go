@@ -21,7 +21,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/shopmonkeyus/eds-server/internal/util"
-	glogger "github.com/shopmonkeyus/go-common/logger"
+	"github.com/shopmonkeyus/go-common/logger"
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 )
@@ -300,7 +300,7 @@ func pollUntilComplete(ctx context.Context, apiURL string, apiKey string, jobID 
 	}
 }
 
-func sqlExecuter(ctx context.Context, log glogger.Logger, db *sql.DB, dryRun bool) func(sql string) error {
+func sqlExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool) func(sql string) error {
 	return func(sql string) error {
 		if dryRun {
 			log.Info("%s", sql)
@@ -314,7 +314,7 @@ func sqlExecuter(ctx context.Context, log glogger.Logger, db *sql.DB, dryRun boo
 	}
 }
 
-func migrateDB(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[string]schema, only []string, dryRun bool, progressbar *util.ProgressBar) error {
+func migrateDB(ctx context.Context, log logger.Logger, db *sql.DB, tables map[string]schema, only []string, dryRun bool, progressbar *util.ProgressBar) error {
 	executeSQL := sqlExecuter(ctx, log, db, dryRun)
 	total := len(tables)
 	var i int
@@ -342,7 +342,7 @@ func toFileURI(dir string, file string) string {
 	return fmt.Sprintf("file://%s/%s", absDir, file)
 }
 
-func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables []string, jobID string, dataDir string, dryRun bool, parallel int, progressbar *util.ProgressBar) error {
+func runImport(ctx context.Context, log logger.Logger, db *sql.DB, tables []string, jobID string, dataDir string, dryRun bool, parallel int, progressbar *util.ProgressBar) error {
 	executeSQL := sqlExecuter(ctx, log, db, dryRun)
 	stageName := "eds_import_" + jobID
 	log.Debug("creating stage %s", stageName)
@@ -370,7 +370,7 @@ func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables []str
 	return nil
 }
 
-func downloadFile(log glogger.Logger, dir string, fullURL string) error {
+func downloadFile(log logger.Logger, dir string, fullURL string) error {
 	parsedURL, err := url.Parse(fullURL)
 	if err != nil {
 		return fmt.Errorf("error parsing url: %s", err)
@@ -394,7 +394,7 @@ func downloadFile(log glogger.Logger, dir string, fullURL string) error {
 	return nil
 }
 
-func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, dir string, progressbar *util.ProgressBar) ([]string, error) {
+func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string, progressbar *util.ProgressBar) ([]string, error) {
 	var downloads []string
 	var tablesWithData []string
 	for table, tableData := range data {
@@ -478,11 +478,11 @@ var importCmd = &cobra.Command{
 			parallel = 99
 		}
 		glog.SetFlags(0)
-		var log glogger.Logger
+		var log logger.Logger
 		if enableDebug {
-			log = newLogger(glogger.LevelTrace)
+			log = newLogger(logger.LevelTrace)
 		} else {
-			log = newLogger(glogger.LevelInfo)
+			log = newLogger(logger.LevelInfo)
 		}
 
 		if !dryRun && !confirmed {

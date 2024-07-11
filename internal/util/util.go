@@ -118,6 +118,11 @@ func MustJSONStringify(val interface{}, pretty bool) string {
 	return string(buf)
 }
 
+func JSONStringify(val any) string {
+	buf, _ := json.Marshal(val)
+	return string(buf)
+}
+
 func Dedupe(vals []string) []string {
 	dedupe := make(map[string]bool)
 	results := make([]string, 0)
