@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	glog "log"
 	"net/http"
 	"net/url"
 	"os"
@@ -466,14 +467,13 @@ var importCmd = &cobra.Command{
 		} else if parallel > 99 {
 			parallel = 99
 		}
+		glog.SetFlags(0)
 		var log glogger.Logger
 		if enableDebug {
 			log = newLogger(glogger.LevelTrace)
 		} else {
 			log = newLogger(glogger.LevelInfo)
 		}
-
-		fmt.Print("\033[H\033[2J") // clear the screen
 
 		if !dryRun && !confirmed {
 			parts := strings.Split(dbUrl, "/")
