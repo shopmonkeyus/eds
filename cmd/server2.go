@@ -83,12 +83,14 @@ type DBChangeEvent struct {
 	Diff         []string        `json:"diff,omitempty"`
 }
 
-func (c *DBChangeEvent) ToSQL() string {
-	// @jhaynie here!
-	if c.Operation == "DELETE" {
-		return string(c.Before)
-	}
-	return string(c.After)
+func (c *DBChangeEvent) ToSQL(schema map[string]schema) string {
+	var sql strings.Builder
+	// // @jhaynie here!
+	// if c.Operation == "DELETE" {
+	// 	return string(c.Before)
+	// }
+	// return string(c.After)
+	return sql.String()
 }
 
 var server2Cmd = &cobra.Command{
@@ -102,6 +104,16 @@ var server2Cmd = &cobra.Command{
 		natsurl, _ := cmd.Flags().GetString("server")
 		dbUrl := mustFlagString(cmd, "db-url", true)
 		creds, _ := cmd.Flags().GetString("creds")
+		apiURL, _ := cmd.Flags().GetString("api-url")
+
+		var schema map[string]schema
+		var err error
+
+		schema, err = loadSchema(apiURL)
+		if err != nil {
+			log.Error("error loading schema: %s", err)
+			os.Exit(1)
+		}
 
 		var natsCredentials nats.Option
 		var companyIDs []string
@@ -109,7 +121,6 @@ var server2Cmd = &cobra.Command{
 		// FIXME: remove
 		companyIDs = []string{"6287a4154d1a72cc5ce091bb"}
 
-		var err error
 		if natsurl != "" {
 			natsCredentials, companyIDs, companyName, err = getNatsCreds(creds)
 			if err != nil {
@@ -183,7 +194,7 @@ var server2Cmd = &cobra.Command{
 							log.Error("error unmarshalling %s (subject:%s,seq:%d,msgid:%v): %s", "dbchange", msg.Subject, md.Sequence.Consumer, msg.Header.Get(nats.MsgIdHdr), err)
 							os.Exit(1)
 						}
-						if _, err := builder.WriteString(evt.ToSQL()); err != nil {
+						if _, err := builder.WriteString(evt.ToSQL(schema)); err != nil {
 							log.Error("error writing to buffer: %s", err)
 							os.Exit(1)
 						}
@@ -288,5 +299,5 @@ func init() {
 	server2Cmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	server2Cmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	server2Cmd.Flags().String("db-url", "", "Snowflake Database connection string")
-
+	server2Cmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 }
