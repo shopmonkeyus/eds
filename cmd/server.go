@@ -245,7 +245,7 @@ var serverCmd = &cobra.Command{
 				return nil
 			}
 
-			go runLocalProvider(logger, natsProvider, runLocalNatsCallback, nc)
+			go runLocalProvider(logger, natsProvider, runLocalNatsCallback)
 		}
 		var runProvidersCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
 			logger.Trace("creating message processor")
@@ -280,10 +280,8 @@ var serverCmd = &cobra.Command{
 			return nil
 		}
 
-		urls := []string{}
-		for _, url := range args {
-			urls = append(urls, url)
-		}
+		urls := args
+
 		if len(urls) == 0 && !onlyRunNatsProvider {
 			logger.Error("error: missing required url argument")
 			os.Exit(1)

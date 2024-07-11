@@ -40,7 +40,7 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 
 type ProviderFunc func(p []internal.Provider) error
 
-func runLocalProvider(logger logger.Logger, natsProvider internal.Provider, fn ProviderFunc, nc *nats.Conn) {
+func runLocalProvider(logger logger.Logger, natsProvider internal.Provider, fn ProviderFunc) {
 	providers := []internal.Provider{natsProvider}
 	ferr := fn(providers)
 	if ferr != nil {
@@ -57,7 +57,6 @@ func runLocalProvider(logger logger.Logger, natsProvider internal.Provider, fn P
 			os.Exit(1)
 		}
 	}
-
 }
 
 func runProviders(logger logger.Logger, urls []string, schemaModelCache *map[string]dm.Model, dryRun bool, verbose bool, importer string, fn ProviderFunc, nc *nats.Conn) {
