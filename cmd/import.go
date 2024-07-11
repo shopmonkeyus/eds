@@ -268,12 +268,17 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 	if err != nil {
 		return nil, fmt.Errorf("error decoding response: %s", err)
 	}
+	for table, data := range job.Tables {
+		if data.Status == "Failed" {
+			return job, fmt.Errorf("error exporting table %s: %s", table, data.Error)
+		}
+	}
 	return job, nil
 }
 
 func pollUntilComplete(ctx context.Context, apiURL string, apiKey string, jobID string, progressbar *util.ProgressBar) (exportJobResponse, error) {
 	for {
-		progressbar.SetMessage("Checking for Export Status")
+		progressbar.SetMessage("Checking for Export Status (" + jobID + ")")
 		job, err := checkExportJob(ctx, apiURL, apiKey, jobID)
 		if err != nil {
 			return exportJobResponse{}, err
@@ -359,9 +364,7 @@ func downloadFile(log glogger.Logger, dir string, fullURL string) error {
 	if err != nil {
 		return fmt.Errorf("error parsing url: %s", err)
 	}
-	// TODO rmove ndjson with json
 	baseFileName := filepath.Base(parsedURL.Path)
-	// download the file
 	resp, err := http.Get(fullURL)
 	if err != nil {
 		return fmt.Errorf("error fetching data: %s", err)
@@ -392,7 +395,7 @@ func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, di
 		downloads = append(downloads, tableData.URLs...)
 	}
 	if len(downloads) == 0 {
-		log.Info("no files to download")
+		log.Debug("no files to download")
 		return nil, nil
 	}
 
@@ -426,14 +429,15 @@ func bulkDownloadData(log glogger.Logger, data map[string]exportJobTableData, di
 	}
 	close(downloadChan)
 
+	// wait for the downloads to finish
+	downloadWG.Wait()
+
 	// check for errors
 	select {
 	case err := <-errors:
 		return nil, err
 	default:
 	}
-	// wait for the downloads to finish
-	downloadWG.Wait()
 
 	return tablesWithData, nil
 }
@@ -464,7 +468,7 @@ var importCmd = &cobra.Command{
 		}
 		var log glogger.Logger
 		if enableDebug {
-			log = newLogger(glogger.LevelDebug)
+			log = newLogger(glogger.LevelTrace)
 		} else {
 			log = newLogger(glogger.LevelInfo)
 		}

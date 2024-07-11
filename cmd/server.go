@@ -43,7 +43,7 @@ var serverCmd = &cobra.Command{
 		localNatsPort, _ := cmd.Flags().GetInt("port")
 		healthCheckPort, _ := cmd.Flags().GetInt("health-port")
 		duration, _ := cmd.Flags().GetString("consumer-start-time")
-		enableDebug, _ := cmd.Flags().GetBool("enable-debug")
+		enableDebug, _ := cmd.Flags().GetBool("debug")
 		if !timestamp {
 			glog.SetFlags(0)
 		}
@@ -350,5 +350,5 @@ func init() {
 	serverCmd.Flags().Int("port", 4223, "the port to run the local NATS server on")
 	serverCmd.Flags().Int("health-port", 8080, "the port to run the health check server on")
 	serverCmd.Flags().String("consumer-start-time", "", "A duration string with unit suffix. Example: 1h45m. Max value is 168h")
-	serverCmd.Flags().Bool("enable-debug", false, "enable debug mode")
+	serverCmd.Flags().Bool("debug", false, "enable debug mode")
 }

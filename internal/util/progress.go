@@ -22,7 +22,7 @@ func NewProgressBar(ctx context.Context, cancelFunc context.CancelFunc) *Progres
 		ctx:        ctx,
 		cancelFunc: cancelFunc,
 	}
-	m.program = tea.NewProgram(&m, tea.WithAltScreen())
+	m.program = tea.NewProgram(&m, tea.WithAltScreen(), tea.WithContext(ctx), tea.WithoutSignalHandler())
 
 	go func(m *ProgressBar) {
 		if _, err := m.program.Run(); err != nil {
