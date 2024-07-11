@@ -333,6 +333,15 @@ func migrateDB(ctx context.Context, log glogger.Logger, db *sql.DB, tables map[s
 	return nil
 }
 
+func toFileURI(dir string, file string) string {
+	absDir := filepath.Clean(dir)
+	if os.PathSeparator == '\\' {
+		// if windows replace the backslashes
+		return fmt.Sprintf("file://%s/%s", strings.ReplaceAll(absDir, "\\", "/"), file)
+	}
+	return fmt.Sprintf("file://%s/%s", absDir, file)
+}
+
 func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables []string, jobID string, dataDir string, dryRun bool, parallel int, progressbar *util.ProgressBar) error {
 	executeSQL := sqlExecuter(ctx, log, db, dryRun)
 	stageName := "eds_import_" + jobID
@@ -344,8 +353,9 @@ func runImport(ctx context.Context, log glogger.Logger, db *sql.DB, tables []str
 	}
 
 	// upload files
-	progressbar.SetMessage("Uploading files...")
-	if err := executeSQL(fmt.Sprintf(`PUT 'file://%s/*.ndjson.gz' @%s PARALLEL=%d SOURCE_COMPRESSION=gzip`, dataDir, stageName, parallel)); err != nil {
+	fileURI := toFileURI(dataDir, "*.ndjson.gz")
+	progressbar.SetMessage("Uploading files from path " + fileURI)
+	if err := executeSQL(fmt.Sprintf(`PUT '%s' @%s PARALLEL=%d SOURCE_COMPRESSION=gzip`, fileURI, stageName, parallel)); err != nil {
 		return fmt.Errorf("error uploading files: %s", err)
 	}
 
@@ -371,7 +381,7 @@ func downloadFile(log glogger.Logger, dir string, fullURL string) error {
 		return fmt.Errorf("error fetching data: %s", err)
 	}
 	defer resp.Body.Close()
-	filename := fmt.Sprintf("%s/%s", dir, baseFileName)
+	filename := filepath.Join(dir, baseFileName)
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("error creating file: %s", err)
