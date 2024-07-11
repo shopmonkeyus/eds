@@ -2,8 +2,6 @@ module github.com/shopmonkeyus/eds-server
 
 go 1.22
 
-toolchain go1.22.3
-
 require (
 	github.com/charmbracelet/huh/spinner v0.0.0-20240709222038-80fcf53648bd
 	github.com/gorilla/mux v1.8.1
