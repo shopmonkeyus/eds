@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	jwt "github.com/nats-io/jwt/v2"
@@ -329,6 +330,8 @@ var server2Cmd = &cobra.Command{
 		}
 		defer db.Close()
 
+		errorChan := make(chan error)
+		var wg sync.WaitGroup
 		createHandler := func(logger logger.Logger) (func(ctx context.Context, msg jetstream.Msg) error, error) {
 			buffer := make(chan jetstream.Msg, maxAckPending)
 			pending := make([]jetstream.Msg, 0)
@@ -375,7 +378,23 @@ var server2Cmd = &cobra.Command{
 				pendingStarted = nil
 				return nil
 			}
+			nackEverything := func() {
+				for _, m := range pending {
+					if err := m.Nak(); err != nil {
+						logger.Error("error nacking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
+					}
+				}
+			}
+			handleError := func(err error) {
+				log.Error("error: %s", err)
+				nackEverything()
+				if !isCancelled(ctx) {
+					errorChan <- err
+				}
+			}
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
 				for {
 					select {
 					case msg := <-buffer:
@@ -384,19 +403,20 @@ var server2Cmd = &cobra.Command{
 						md, _ := msg.Metadata()
 						var evt DBChangeEvent
 						if err := json.Unmarshal(buf, &evt); err != nil {
-							msg.Ack()
 							log.Trace("record error: %s", string(buf))
 							log.Error("error unmarshalling %s (subject:%s,seq:%d,msgid:%v): %s", "dbchange", msg.Subject, md.Sequence.Consumer, msg.Headers().Get(nats.MsgIdHdr), err)
-							os.Exit(1)
+							handleError(err)
+							return
 						}
 						sql, err := evt.ToSQL(schema)
 						if err != nil {
 							log.Error("error creating sql for %s: %s", string(msg.Data()), err)
-							os.Exit(1)
+							handleError(err)
+							return
 						}
 						if _, err := builder.WriteString(sql); err != nil {
-							log.Error("error writing to buffer: %s", err)
-							os.Exit(1)
+							handleError(fmt.Errorf("error writing to buffer: %w", err))
+							return
 						}
 						queries++
 						if pendingStarted == nil {
@@ -408,22 +428,16 @@ var server2Cmd = &cobra.Command{
 						}
 						if len(pending) >= maxBatchSize || time.Since(*pendingStarted) >= maxPendingLatency {
 							if err := flush(); err != nil {
-								log.Error("error flushing: %s", err)
-								for _, m := range pending {
-									m.Nak()
-								}
-								os.Exit(1)
+								handleError(fmt.Errorf("error flushing: %w", err))
+								return
 							}
 						}
 					default:
 						count := len(pending)
 						if count > 0 && count < maxBatchSize && time.Since(*pendingStarted) >= minPendingLatency {
 							if err := flush(); err != nil {
-								log.Error("error flushing: %s", err)
-								for _, m := range pending {
-									m.Nak()
-								}
-								os.Exit(1)
+								handleError(fmt.Errorf("error flushing: %w", err))
+								return
 							}
 							continue
 						}
@@ -432,6 +446,8 @@ var server2Cmd = &cobra.Command{
 						}
 						select {
 						case <-ctx.Done():
+							log.Info("context done")
+							nackEverything()
 							return
 						default:
 							time.Sleep(emptyBufferPauseTime)
@@ -441,7 +457,6 @@ var server2Cmd = &cobra.Command{
 			}()
 
 			return func(ctx context.Context, msg jetstream.Msg) error {
-				msg.InProgress()
 				buffer <- msg
 				return nil
 			}, nil
@@ -494,16 +509,16 @@ var server2Cmd = &cobra.Command{
 		}
 		log.Info("starting consumer %s on %s", name, subjects)
 		sub, err := consumer.Consume(func(msg jetstream.Msg) {
-			log2 := log.With(map[string]any{
+			log := log.With(map[string]any{
 				"msgId":   msg.Headers().Get(nats.MsgIdHdr),
 				"subject": msg.Subject(),
 			})
 			if m, err := msg.Metadata(); err == nil {
-				log2.Trace("msg received (deliveries %d)", m.NumDelivered)
+				log.Trace("msg received (deliveries %d)", m.NumDelivered)
 			}
 			// TODO: pass log
 			if err := handler(ctx, msg); err != nil {
-				log2.Error("error processing message: %v", err)
+				log.Error("error processing message: %v", err)
 				return
 			}
 		})
@@ -513,16 +528,21 @@ var server2Cmd = &cobra.Command{
 		}
 
 		log.Info("server is running")
-		<-csys.CreateShutdownChannel()
-		log.Info("shutting down")
 
-		log.Debug("draining consumer")
-		sub.Drain()
+		// wait for shutdown or error
+		select {
+		case err := <-errorChan:
+			log.Error("error: %s", err)
+		case <-csys.CreateShutdownChannel():
+			log.Info("shutting down")
+		}
 
 		log.Debug("stopping consumer")
 		sub.Stop()
 
 		cancel()
+
+		wg.Wait()
 
 		log.Info("👋 Bye")
 	},
