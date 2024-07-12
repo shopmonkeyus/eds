@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -105,10 +106,17 @@ func (s schema) createSQL() string {
 	sql.WriteString("CREATE OR REPLACE TABLE ")
 	sql.WriteString(quoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
-	for name, prop := range s.Properties {
-		if skipFields[name] {
+	var columns []string
+	for name := range s.Properties {
+		if skipFields[name] || sliceContains(s.PrimaryKeys, name) {
 			continue
 		}
+		columns = append(columns, name)
+	}
+	sort.Strings(columns)
+	columns = append(s.PrimaryKeys, columns...)
+	for _, name := range columns {
+		prop := s.Properties[name]
 		sql.WriteString("\t")
 		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
@@ -132,16 +140,23 @@ func (s schema) createSQL() string {
 	return sql.String()
 }
 
-func loadSchema(apiURL string) (map[string]schema, error) {
+func loadSchema(apiURL string, tableOrder bool) (map[string]*schema, error) {
 	resp, err := http.Get(apiURL + "/v3/schema")
 	if err != nil {
 		return nil, fmt.Errorf("error fetching schema: %s", err)
 	}
 	defer resp.Body.Close()
-	tables := make(map[string]schema)
+	tables := make(map[string]*schema)
 	dec := json.NewDecoder(resp.Body)
 	if err := dec.Decode(&tables); err != nil {
 		return nil, fmt.Errorf("error decoding schema: %s", err)
+	}
+	if tableOrder {
+		// put it table name as key
+		for _, d := range tables {
+			tables[d.Table] = d
+			// delete(tables, object)
+		}
 	}
 	return tables, nil
 }
@@ -314,7 +329,7 @@ func sqlExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool
 	}
 }
 
-func migrateDB(ctx context.Context, log logger.Logger, db *sql.DB, tables map[string]schema, only []string, dryRun bool, progressbar *util.ProgressBar) error {
+func migrateDB(ctx context.Context, log logger.Logger, db *sql.DB, tables map[string]*schema, only []string, dryRun bool, progressbar *util.ProgressBar) error {
 	executeSQL := sqlExecuter(ctx, log, db, dryRun)
 	total := len(tables)
 	var i int
@@ -550,10 +565,10 @@ var importCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		var schema map[string]schema
+		var schema map[string]*schema
 
 		util.RunTaskWithSpinner("Loading schema...", func() {
-			schema, err = loadSchema(apiURL)
+			schema, err = loadSchema(apiURL, false)
 			if err != nil {
 				log.Error("error loading schema: %s", err)
 				os.Exit(1)

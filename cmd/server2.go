@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,14 +86,194 @@ type DBChangeEvent struct {
 	Diff         []string        `json:"diff,omitempty"`
 }
 
-func (c *DBChangeEvent) ToSQL(schema map[string]schema) string {
+func quoteString(val string) string {
+	return "'" + strings.ReplaceAll(val, "'", "''") + "'"
+}
+
+func quoteValue(value any) string {
+	var str string
+	switch arg := value.(type) {
+	case nil:
+		str = "NULL"
+	case int:
+		str = strconv.FormatInt(int64(arg), 10)
+	case int8:
+		str = strconv.FormatInt(int64(arg), 10)
+	case int16:
+		str = strconv.FormatInt(int64(arg), 10)
+	case int32:
+		str = strconv.FormatInt(int64(arg), 10)
+	case *int32:
+		if arg == nil {
+			str = "NULL"
+		} else {
+			str = strconv.FormatInt(int64(*arg), 10)
+		}
+	case int64:
+		str = strconv.FormatInt(arg, 10)
+	case *int64:
+		if arg == nil {
+			str = "NULL"
+		} else {
+			str = strconv.FormatInt(*arg, 10)
+		}
+	case float32:
+		str = strconv.FormatFloat(float64(arg), 'f', -1, 32)
+	case float64:
+		str = strconv.FormatFloat(arg, 'f', -1, 64)
+	case *float64:
+		if arg == nil {
+			str = "NULL"
+		} else {
+			str = strconv.FormatFloat(*arg, 'f', -1, 64)
+		}
+	case bool:
+		str = strconv.FormatBool(arg)
+	case *bool:
+		if arg == nil {
+			str = "NULL"
+		} else {
+			str = strconv.FormatBool(*arg)
+		}
+	case string:
+		str = quoteString(arg)
+	case *time.Time:
+		if arg == nil {
+			str = "NULL"
+		} else {
+			str = (*arg).Truncate(time.Microsecond).Format("'2006-01-02 15:04:05.999999999Z07:00:00'")
+		}
+	case time.Time:
+		str = arg.Truncate(time.Microsecond).Format("'2006-01-02 15:04:05.999999999Z07:00:00'")
+	case map[string]interface{}:
+		str = quoteString(util.JSONStringify(arg))
+	default:
+		value := reflect.ValueOf(arg)
+		if value.Kind() == reflect.Ptr {
+			if value.IsNil() {
+				str = "NULL"
+			} else {
+				if value.Elem().Kind() == reflect.Struct {
+					str = quoteString(util.JSONStringify(arg))
+				} else {
+					str = quoteString(fmt.Sprintf("%v", value.Elem().Interface()))
+				}
+			}
+		} else if value.Kind() == reflect.Struct {
+			str = quoteString(util.JSONStringify(arg))
+		} else {
+			str = quoteString(fmt.Sprintf("%v", arg))
+		}
+	}
+	return str
+}
+
+// func quoteStringValues(vals []string) []string {
+// 	res := make([]string, len(vals))
+// 	for i, val := range vals {
+// 		res[i] = quoteValue(val)
+// 	}
+// 	return res
+// }
+
+func quoteStringIdentifiers(vals []string) []string {
+	res := make([]string, len(vals))
+	for i, val := range vals {
+		res[i] = quoteIdentifier(val)
+	}
+	return res
+}
+
+func (c *DBChangeEvent) ToSQL(schema map[string]*schema) (string, error) {
 	var sql strings.Builder
-	// // @jhaynie here!
-	// if c.Operation == "DELETE" {
-	// 	return string(c.Before)
-	// }
-	// return string(c.After)
-	return sql.String()
+	model := schema[c.Table]
+	primaryKeys := model.PrimaryKeys
+	if c.Operation == "DELETE" {
+		sql.WriteString("DELETE FROM ")
+		sql.WriteString(quoteIdentifier(c.Table))
+		sql.WriteString(" WHERE ")
+		predicate := make([]string, 0)
+		for i, pk := range primaryKeys {
+			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
+		}
+		sql.WriteString(strings.Join(predicate, " AND "))
+		sql.WriteString(";\n")
+	} else {
+		o := make(map[string]any)
+		if err := json.Unmarshal(c.After, &o); err != nil {
+			return "", err
+		}
+		sql.WriteString("MERGE INTO ")
+		sql.WriteString(quoteIdentifier(c.Table))
+		sql.WriteString(" USING (SELECT ")
+		sql.WriteString(strings.Join(quoteStringIdentifiers(primaryKeys), ","))
+		sql.WriteString(" FROM ")
+		sql.WriteString(quoteIdentifier(c.Table))
+		sql.WriteString(" WHERE ")
+		sourcePredicates := make([]string, 0)
+		sourceNullPredicates := make([]string, 0)
+		targetPredicates := make([]string, 0)
+		for _, pk := range primaryKeys {
+			val := o[pk]
+			sourcePredicates = append(sourcePredicates, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(val)))
+			sourceNullPredicates = append(sourceNullPredicates, fmt.Sprintf("NULL AS %s", quoteIdentifier(pk)))
+			targetPredicates = append(targetPredicates, fmt.Sprintf("source.%s=%s.%s", quoteIdentifier(pk), quoteIdentifier(c.Table), quoteIdentifier(pk)))
+		}
+		columns := make([]string, 0)
+		columnNames := make([]string, 0)
+		for name := range model.Properties {
+			if !skipFields[name] {
+				columns = append(columns, quoteIdentifier(name))
+				columnNames = append(columnNames, name)
+			}
+		}
+		sort.Strings(columns)     // TODO: optimize
+		sort.Strings(columnNames) // TODO: optimize
+		insertVals := make([]string, 0)
+		updateValues := make([]string, 0)
+		if c.Operation == "UPDATE" {
+			for _, name := range c.Diff {
+				if val, ok := o[name]; ok {
+					v := quoteValue(val)
+					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+				} else {
+					updateValues = append(updateValues, "NULL")
+				}
+			}
+			for _, name := range columnNames {
+				if val, ok := o[name]; ok {
+					v := quoteValue(val)
+					insertVals = append(insertVals, v)
+				} else {
+					insertVals = append(insertVals, "NULL")
+				}
+			}
+		} else {
+			for _, name := range columnNames {
+				if val, ok := o[name]; ok {
+					v := quoteValue(val)
+					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+					insertVals = append(insertVals, v)
+				} else {
+					updateValues = append(updateValues, "NULL")
+					insertVals = append(insertVals, "NULL")
+				}
+			}
+		}
+		sql.WriteString(strings.Join(sourcePredicates, " AND "))
+		sql.WriteString(" UNION SELECT ")
+		sql.WriteString(strings.Join(sourceNullPredicates, " AND "))
+		sql.WriteString(" LIMIT 1) AS source ON ")
+		sql.WriteString(strings.Join(targetPredicates, " AND "))
+		sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
+		sql.WriteString(strings.Join(updateValues, " AND "))
+		sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
+		sql.WriteString(strings.Join(columns, ","))
+		sql.WriteString(") VALUES (")
+		sql.WriteString(strings.Join(insertVals, ","))
+		sql.WriteString(");\n")
+	}
+	return sql.String(), nil
 }
 
 var server2Cmd = &cobra.Command{
@@ -106,10 +289,10 @@ var server2Cmd = &cobra.Command{
 		creds, _ := cmd.Flags().GetString("creds")
 		apiURL, _ := cmd.Flags().GetString("api-url")
 
-		var schema map[string]schema
+		var schema map[string]*schema
 		var err error
 
-		schema, err = loadSchema(apiURL)
+		schema, err = loadSchema(apiURL, true)
 		if err != nil {
 			log.Error("error loading schema: %s", err)
 			os.Exit(1)
@@ -194,7 +377,12 @@ var server2Cmd = &cobra.Command{
 							log.Error("error unmarshalling %s (subject:%s,seq:%d,msgid:%v): %s", "dbchange", msg.Subject, md.Sequence.Consumer, msg.Header.Get(nats.MsgIdHdr), err)
 							os.Exit(1)
 						}
-						if _, err := builder.WriteString(evt.ToSQL(schema)); err != nil {
+						sql, err := evt.ToSQL(schema)
+						if err != nil {
+							log.Error("error creating sql for %s: %s", string(msg.Data), err)
+							os.Exit(1)
+						}
+						if _, err := builder.WriteString(sql); err != nil {
 							log.Error("error writing to buffer: %s", err)
 							os.Exit(1)
 						}
