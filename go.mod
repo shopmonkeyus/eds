@@ -4,6 +4,7 @@ go 1.22
 
 require (
 	github.com/charmbracelet/huh/spinner v0.0.0-20240709222038-80fcf53648bd
+	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/gorilla/mux v1.8.1
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/microsoft/go-mssqldb v1.6.0
