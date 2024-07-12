@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 
 	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	cnats "github.com/shopmonkeyus/go-common/nats"
@@ -21,8 +23,8 @@ import (
 )
 
 const (
-	traceInsertQueries = false // if we should log insert sql
-	traceInserts       = true  // if we should log inserts
+	traceInsertQueries = true // if we should log insert sql
+	traceInserts       = true // if we should log inserts
 
 	maxAckPending        = 25_000                 // this is currently our system max
 	maxBatchSize         = 100_000                // maximum number of messages to batch insert at a time
@@ -62,7 +64,7 @@ func getNatsCreds(creds string) (nats.Option, []string, string, error) {
 		}
 	}
 	if len(companyIDs) == 0 {
-		return nil, nil, "", fmt.Errorf("error: issue parsing company ID from JWT claims. Ensure the JWT has the correct permissions.")
+		return nil, nil, "", errors.New("error: issue parsing company ID from JWT claims. Ensure the JWT has the correct permissions")
 	}
 	companyName := claim.Name
 	if companyName == "" {
@@ -288,6 +290,7 @@ var server2Cmd = &cobra.Command{
 		dbUrl := mustFlagString(cmd, "db-url", true)
 		creds, _ := cmd.Flags().GetString("creds")
 		apiURL, _ := cmd.Flags().GetString("api-url")
+		consumerPrefix, _ := cmd.Flags().GetString("consumer-prefix")
 
 		var schema map[string]*schema
 		var err error
@@ -301,13 +304,18 @@ var server2Cmd = &cobra.Command{
 		var natsCredentials nats.Option
 		var companyIDs []string
 		companyName := "unknown"
-		// FIXME: remove
-		companyIDs = []string{"6287a4154d1a72cc5ce091bb"}
 
 		if natsurl != "" {
 			natsCredentials, companyIDs, companyName, err = getNatsCreds(creds)
 			if err != nil {
 				log.Error("error: %s", err)
+				os.Exit(1)
+			}
+		} else {
+			log.Info("no credentials, running local nats")
+			companyIDs, _ = cmd.Flags().GetStringSlice("company-id")
+			if len(companyIDs) == 0 {
+				log.Error("error: no company ids provided use --company-id")
 				os.Exit(1)
 			}
 		}
@@ -327,9 +335,9 @@ var server2Cmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		createHandler := func(logger logger.Logger) (cnats.Handler, error) {
-			buffer := make(chan *nats.Msg, maxAckPending)
-			pending := make([]*nats.Msg, 0)
+		createHandler := func(logger logger.Logger) (func(ctx context.Context, msg jetstream.Msg) error, error) {
+			buffer := make(chan jetstream.Msg, maxAckPending)
+			pending := make([]jetstream.Msg, 0)
 			var pendingStarted *time.Time
 			var builder strings.Builder
 			flush := func() {
@@ -339,10 +347,16 @@ var server2Cmd = &cobra.Command{
 				}
 				tv := time.Now()
 
-				if _, err := db.ExecContext(ctx, q); err != nil {
-					// TODO: nack all the messages
-					logger.Error("error running %s: %s", err, q)
-					os.Exit(1)
+				if q == "" {
+					logger.Warn("%d messages, but no data to insert", len(pending))
+				} else {
+					if _, err := db.ExecContext(ctx, q); err != nil {
+						for _, m := range pending {
+							m.Nak()
+						}
+						logger.Error("error executing %s: %s", q, err)
+						os.Exit(1)
+					}
 				}
 
 				// ack all the messages only after inserted
@@ -369,12 +383,13 @@ var server2Cmd = &cobra.Command{
 					select {
 					case msg := <-buffer:
 						pending = append(pending, msg)
+						buf := msg.Data()
 						md, _ := msg.Metadata()
 						var evt DBChangeEvent
-						if err := json.Unmarshal(msg.Data, &evt); err != nil {
+						if err := json.Unmarshal(buf, &evt); err != nil {
 							msg.Ack()
-							log.Trace("record error: %s", string(msg.Data))
-							log.Error("error unmarshalling %s (subject:%s,seq:%d,msgid:%v): %s", "dbchange", msg.Subject, md.Sequence.Consumer, msg.Header.Get(nats.MsgIdHdr), err)
+							log.Trace("record error: %s", string(buf))
+							log.Error("error unmarshalling %s (subject:%s,seq:%d,msgid:%v): %s", "dbchange", msg.Subject, md.Sequence.Consumer, msg.Headers().Get(nats.MsgIdHdr), err)
 							os.Exit(1)
 						}
 						sql, err := evt.ToSQL(schema)
@@ -415,8 +430,8 @@ var server2Cmd = &cobra.Command{
 				}
 			}()
 
-			return func(ctx context.Context, buf []byte, msg *nats.Msg) error {
-				msg.Data = buf // buf will be different if encoding is gzip etc
+			return func(ctx context.Context, msg jetstream.Msg) error {
+				msg.InProgress()
 				buffer <- msg
 				return nil
 			}, nil
@@ -425,58 +440,77 @@ var server2Cmd = &cobra.Command{
 		replicas := 1
 
 		jslogger := log.WithPrefix("[nats-js]")
-		js, err := nc.JetStream(&nats.ClientTrace{
+		js, err := jetstream.New(nc, jetstream.WithClientTrace(&jetstream.ClientTrace{
 			RequestSent: func(subj string, payload []byte) {
 				jslogger.Trace("nats tx: %s: %s", subj, string(payload))
 			},
 			ResponseReceived: func(subj string, payload []byte, hdr nats.Header) {
 				jslogger.Trace("nats rx: %s: %s", subj, string(payload))
 			},
-		})
+		}))
 		if err != nil {
-			log.Error("error creating jetstream: %v", err)
+			log.Error("error creating jetstream client: %v", err)
 			os.Exit(1)
 		}
-		subscribers := make([]cnats.Subscriber, 0)
 
-		consumerPrefix := "robin-is-testing"
-
+		name := fmt.Sprintf("%seds-server-%s", consumerPrefix, strings.Join(companyIDs, "-"))
+		var subjects []string
 		for _, companyID := range companyIDs {
-
-			name := fmt.Sprintf("%seds-server-%s", consumerPrefix, companyID)
 			subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
-
-			log.Info("starting consumer %s on %s", name, subject)
-			handler, err := createHandler(log)
-			if err != nil {
-				log.Error("error creating handler: %v", err)
-				os.Exit(1)
-			}
-			sub, err := cnats.NewQueueConsumer(log, js, "dbchange", name, subject, handler,
-				cnats.WithQueueContext(ctx),
-				cnats.WithQueueReplicas(replicas),
-				cnats.WithQueueDelivery(nats.DeliverNewPolicy),
-				cnats.WithQueueMaxDeliver(1_000),
-				cnats.WithQueueAckWait(time.Minute*5),
-				cnats.WithQueueMaxAckPending(maxAckPending),
-				cnats.WithQueueMaxRequestBatch(maxPendingBuffer),
-				cnats.WithQueueDisableSubscriberLogging(),
-			)
-			if err != nil {
-				log.Error("error creating consumer: %v", err)
-				os.Exit(1)
-			}
-			subscribers = append(subscribers, sub)
+			subjects = append(subjects, subject)
 		}
+		config := jetstream.ConsumerConfig{
+			Durable:         name,
+			MaxAckPending:   maxAckPending,
+			MaxDeliver:      1_000,
+			AckWait:         time.Minute * 5,
+			Replicas:        replicas,
+			DeliverPolicy:   jetstream.DeliverNewPolicy,
+			MaxRequestBatch: maxPendingBuffer,
+			FilterSubjects:  subjects,
+			AckPolicy:       jetstream.AckExplicitPolicy,
+		}
+		consumer, err := js.CreateOrUpdateConsumer(ctx, "dbchange", config)
+		if err != nil {
+			log.Error("error getting consumer: %v", err)
+			os.Exit(1)
+		}
+		handler, err := createHandler(log)
+		if err != nil {
+			log.Error("error creating handler: %v", err)
+			os.Exit(1)
+		}
+		log.Info("starting consumer %s on %s", name, subjects)
+		sub, err := consumer.Consume(func(msg jetstream.Msg) {
+			log2 := log.With(map[string]any{
+				"msgId":   msg.Headers().Get(nats.MsgIdHdr),
+				"subject": msg.Subject(),
+			})
+			if m, err := msg.Metadata(); err == nil {
+				log2.Trace("msg received (deliveries %d)", m.NumDelivered)
+			}
+			// TODO: pass log
+			if err := handler(ctx, msg); err != nil {
+				log2.Error("error processing message: %v", err)
+				return
+			}
+		})
+		if err != nil {
+			log.Error("error consuming: %v", err)
+			os.Exit(1)
+		}
+
 		log.Info("server is running")
 		<-csys.CreateShutdownChannel()
 		log.Info("shutting down")
 
-		cancel()
+		log.Debug("draining consumer")
+		sub.Drain()
 
-		for _, sub := range subscribers {
-			sub.Close()
-		}
+		log.Debug("stopping consumer")
+		sub.Stop()
+
+		cancel()
 
 		log.Info("👋 Bye")
 	},
@@ -484,6 +518,9 @@ var server2Cmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(server2Cmd)
+	server2Cmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
+	server2Cmd.Flags().StringSlice("company-id", nil, "the company id to listen for, only useful for local testing")
+	server2Cmd.Flags().MarkHidden("company-id") // hide this flag since its only useful to shopmonkey employees
 	server2Cmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	server2Cmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	server2Cmd.Flags().String("db-url", "", "Snowflake Database connection string")

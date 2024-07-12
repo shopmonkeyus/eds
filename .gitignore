@@ -4,3 +4,4 @@
 *.creds
 /postgres-data
 /sqlserver-data
+.DS_Store
