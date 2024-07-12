@@ -19,6 +19,7 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 	cnats "github.com/shopmonkeyus/go-common/nats"
 	csys "github.com/shopmonkeyus/go-common/sys"
+	snowflake "github.com/snowflakedb/gosnowflake"
 	"github.com/spf13/cobra"
 )
 
@@ -161,22 +162,12 @@ func quoteValue(value any) string {
 					str = quoteString(fmt.Sprintf("%v", value.Elem().Interface()))
 				}
 			}
-		} else if value.Kind() == reflect.Struct {
-			str = quoteString(util.JSONStringify(arg))
 		} else {
-			str = quoteString(fmt.Sprintf("%v", arg))
+			str = quoteString(util.JSONStringify(arg))
 		}
 	}
 	return str
 }
-
-// func quoteStringValues(vals []string) []string {
-// 	res := make([]string, len(vals))
-// 	for i, val := range vals {
-// 		res[i] = quoteValue(val)
-// 	}
-// 	return res
-// }
 
 func quoteStringIdentifiers(vals []string) []string {
 	res := make([]string, len(vals))
@@ -194,7 +185,7 @@ func (c *DBChangeEvent) ToSQL(schema map[string]*schema) (string, error) {
 		sql.WriteString("DELETE FROM ")
 		sql.WriteString(quoteIdentifier(c.Table))
 		sql.WriteString(" WHERE ")
-		predicate := make([]string, 0)
+		var predicate []string
 		for i, pk := range primaryKeys {
 			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
 		}
@@ -212,17 +203,17 @@ func (c *DBChangeEvent) ToSQL(schema map[string]*schema) (string, error) {
 		sql.WriteString(" FROM ")
 		sql.WriteString(quoteIdentifier(c.Table))
 		sql.WriteString(" WHERE ")
-		sourcePredicates := make([]string, 0)
-		sourceNullPredicates := make([]string, 0)
-		targetPredicates := make([]string, 0)
+		var sourcePredicates []string
+		var sourceNullPredicates []string
+		var targetPredicates []string
 		for _, pk := range primaryKeys {
 			val := o[pk]
 			sourcePredicates = append(sourcePredicates, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(val)))
 			sourceNullPredicates = append(sourceNullPredicates, fmt.Sprintf("NULL AS %s", quoteIdentifier(pk)))
 			targetPredicates = append(targetPredicates, fmt.Sprintf("source.%s=%s.%s", quoteIdentifier(pk), quoteIdentifier(c.Table), quoteIdentifier(pk)))
 		}
-		columns := make([]string, 0)
-		columnNames := make([]string, 0)
+		var columns []string
+		var columnNames []string
 		for name := range model.Properties {
 			if !skipFields[name] {
 				columns = append(columns, quoteIdentifier(name))
@@ -231,10 +222,13 @@ func (c *DBChangeEvent) ToSQL(schema map[string]*schema) (string, error) {
 		}
 		sort.Strings(columns)     // TODO: optimize
 		sort.Strings(columnNames) // TODO: optimize
-		insertVals := make([]string, 0)
-		updateValues := make([]string, 0)
+		var insertVals []string
+		var updateValues []string
 		if c.Operation == "UPDATE" {
 			for _, name := range c.Diff {
+				if skipFields[name] {
+					continue
+				}
 				if val, ok := o[name]; ok {
 					v := quoteValue(val)
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
@@ -268,7 +262,7 @@ func (c *DBChangeEvent) ToSQL(schema map[string]*schema) (string, error) {
 		sql.WriteString(" LIMIT 1) AS source ON ")
 		sql.WriteString(strings.Join(targetPredicates, " AND "))
 		sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
-		sql.WriteString(strings.Join(updateValues, " AND "))
+		sql.WriteString(strings.Join(updateValues, ","))
 		sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
 		sql.WriteString(strings.Join(columns, ","))
 		sql.WriteString(") VALUES (")
@@ -340,7 +334,8 @@ var server2Cmd = &cobra.Command{
 			pending := make([]jetstream.Msg, 0)
 			var pendingStarted *time.Time
 			var builder strings.Builder
-			flush := func() {
+			var queries int
+			flush := func() error {
 				q := builder.String()
 				if traceInsertQueries {
 					logger.Trace("running %s", q)
@@ -350,20 +345,20 @@ var server2Cmd = &cobra.Command{
 				if q == "" {
 					logger.Warn("%d messages, but no data to insert", len(pending))
 				} else {
-					if _, err := db.ExecContext(ctx, q); err != nil {
-						for _, m := range pending {
-							m.Nak()
-						}
+					execCTX, err := snowflake.WithMultiStatement(ctx, queries)
+					if err != nil {
+						return fmt.Errorf("error creating exec context: %w", err)
+					}
+					if _, err := db.ExecContext(execCTX, q); err != nil {
 						logger.Error("error executing %s: %s", q, err)
-						os.Exit(1)
+						return fmt.Errorf("error executing sql: %w", err)
 					}
 				}
 
 				// ack all the messages only after inserted
 				for _, m := range pending {
 					if err := m.Ack(); err != nil {
-						logger.Error("error acking %s: %s", err, q)
-						os.Exit(1)
+						return fmt.Errorf("error acking msg %s: %w", m.Headers().Get(nats.MsgIdHdr), err)
 					}
 				}
 				latency := time.Since(tv)
@@ -376,7 +371,9 @@ var server2Cmd = &cobra.Command{
 				}
 				pending = pending[:0]
 				builder.Reset()
+				queries = 0
 				pendingStarted = nil
+				return nil
 			}
 			go func() {
 				for {
@@ -394,13 +391,14 @@ var server2Cmd = &cobra.Command{
 						}
 						sql, err := evt.ToSQL(schema)
 						if err != nil {
-							log.Error("error creating sql for %s: %s", string(msg.Data), err)
+							log.Error("error creating sql for %s: %s", string(msg.Data()), err)
 							os.Exit(1)
 						}
 						if _, err := builder.WriteString(sql); err != nil {
 							log.Error("error writing to buffer: %s", err)
 							os.Exit(1)
 						}
+						queries++
 						if pendingStarted == nil {
 							ts := time.Now()
 							pendingStarted = &ts
@@ -409,12 +407,24 @@ var server2Cmd = &cobra.Command{
 							continue // if we have a large number, just keep going to try and catchup
 						}
 						if len(pending) >= maxBatchSize || time.Since(*pendingStarted) >= maxPendingLatency {
-							flush()
+							if err := flush(); err != nil {
+								log.Error("error flushing: %s", err)
+								for _, m := range pending {
+									m.Nak()
+								}
+								os.Exit(1)
+							}
 						}
 					default:
 						count := len(pending)
 						if count > 0 && count < maxBatchSize && time.Since(*pendingStarted) >= minPendingLatency {
-							flush()
+							if err := flush(); err != nil {
+								log.Error("error flushing: %s", err)
+								for _, m := range pending {
+									m.Nak()
+								}
+								os.Exit(1)
+							}
 							continue
 						}
 						if count > 0 {
@@ -470,11 +480,13 @@ var server2Cmd = &cobra.Command{
 			FilterSubjects:  subjects,
 			AckPolicy:       jetstream.AckExplicitPolicy,
 		}
-		consumer, err := js.CreateOrUpdateConsumer(ctx, "dbchange", config)
+		createConsumerContext, cancelCreate := context.WithDeadline(ctx, time.Now().Add(time.Minute*10))
+		consumer, err := js.CreateOrUpdateConsumer(createConsumerContext, "dbchange", config)
 		if err != nil {
 			log.Error("error getting consumer: %v", err)
 			os.Exit(1)
 		}
+		cancelCreate()
 		handler, err := createHandler(log)
 		if err != nil {
 			log.Error("error creating handler: %v", err)
