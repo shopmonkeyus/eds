@@ -42,7 +42,7 @@ type Processor interface {
 	// Return -1 to indicate that there is no limit.
 	MaxBatchSize() int
 
-	// Process a single events. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
+	// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
 	Process(event DBChangeEvent) (bool, error)
 
 	// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.

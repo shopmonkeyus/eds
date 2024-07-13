@@ -161,7 +161,7 @@ func (c *Consumer) bufferer() {
 				"subject": msg.Subject(),
 			})
 			if m, err := msg.Metadata(); err == nil {
-				log.Trace("msg received (deliveries %d)", m.NumDelivered)
+				log.Trace("msg received (deliveries: %d)", m.NumDelivered)
 			}
 			c.pending = append(c.pending, msg)
 			buf := msg.Data()

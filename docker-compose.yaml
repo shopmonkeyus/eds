@@ -1,0 +1,7 @@
+services:
+  s3:
+    image: localstack/localstack:s3-latest
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      LOCALSTACK_AUTH_TOKEN: "eds"

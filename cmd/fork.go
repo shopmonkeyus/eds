@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	_ "github.com/shopmonkeyus/eds-server/internal/processors/postgresql"
+	_ "github.com/shopmonkeyus/eds-server/internal/processors/s3"
 	_ "github.com/shopmonkeyus/eds-server/internal/processors/snowflake"
 )
 
