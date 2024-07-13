@@ -10,11 +10,29 @@ This repository contains the reference implementation of the Enterprise Data Str
 
 You can download release binary for different operation systems from the [Release](https://github.com/shopmonkeyus/eds-server/releases) section.
 
-## Local Development Requirements
+## Get Help
+
+```
+./eds-server help
+```
+
+## Local Development
+
+### Requirements
 
 You will need [Golang](https://go.dev/dl/) version 1.22 or later to use this package.
 
 You will need to install [Nats](https://nats.io/) to use this package.
+
+### Creating a manual release locally
+
+You will need to install [Go Releaser](https://goreleaser.com/install/).
+
+Run the following:
+
+```
+goreleaser release --snapshot --clean
+```
 
 ## License
 

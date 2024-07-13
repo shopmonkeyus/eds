@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/fatih/color"
@@ -165,7 +166,7 @@ func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessio
 	}
 	logger.Trace("logs uploaded successfully for session: %s", sessionId)
 	if errored {
-		logger.Info("error log files saved to %s", logfile)
+		logger.Info("error log files saved to %s for session: %s", logfile, sessionId)
 	}
 }
 
@@ -305,7 +306,7 @@ var serverHelpCmd = &cobra.Command{
 			fmt.Println()
 			fmt.Println("Example usage:")
 			fmt.Println()
-			c := os.Args[0]
+			c := filepath.Base(os.Args[0])
 			if Version == "dev" {
 				c = "go run . "
 			}

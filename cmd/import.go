@@ -23,9 +23,6 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
-
-	_ "github.com/shopmonkeyus/eds-server/internal/processors/postgresql"
-	_ "github.com/shopmonkeyus/eds-server/internal/processors/snowflake"
 )
 
 // generic api response
@@ -160,8 +157,12 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 }
 
 func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, jobID string) (exportJobResponse, error) {
-	logger.Info("Checking for Export Status (" + jobID + ")")
+	var lastPrinted time.Time
 	for {
+		if lastPrinted.IsZero() || time.Since(lastPrinted) > time.Minute {
+			logger.Info("Checking for Export Status (" + jobID + ")")
+			lastPrinted = time.Now()
+		}
 		job, err := checkExportJob(ctx, apiURL, apiKey, jobID)
 		if err != nil {
 			return exportJobResponse{}, err
@@ -172,7 +173,7 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 		if job.Completed {
 			return *job, nil
 		}
-		logger.Debug("Waiting for Export to Complete")
+		logger.Debug("Waiting for Export to Complete: %s", job.String())
 		select {
 		case <-ctx.Done():
 			return exportJobResponse{}, nil
@@ -241,7 +242,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 					return
 				}
 				val := atomic.AddInt32(&completed, 1)
-				log.Debug("download completed: %d/%d (%f)", val, int(total), (float64(val) / total))
+				log.Debug("download completed: %d/%d (%.2f%%)", val, int(total), 100*(float64(val)/total))
 			}
 		}()
 	}

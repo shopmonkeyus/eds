@@ -109,6 +109,6 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
 	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
-	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
+	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 }

@@ -194,7 +194,7 @@ func getConnectionStringFromURL(urlString string) (string, error) {
 		str.WriteString("@")
 	}
 	str.WriteString(u.Host)
-	if u.Path[0:1] != "/" {
+	if !strings.HasPrefix(u.Path, "/") {
 		str.WriteString("/")
 	}
 	str.WriteString(u.Path)
