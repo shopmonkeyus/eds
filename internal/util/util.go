@@ -67,3 +67,27 @@ func GetFreePort() (port int, err error) {
 	}
 	return
 }
+
+// ListDir will return an array of files recursively walking into sub directories
+func ListDir(dir string) ([]string, error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, 0)
+	for _, file := range files {
+		if file.IsDir() {
+			newres, err := ListDir(filepath.Join(dir, file.Name()))
+			if err != nil {
+				return nil, err
+			}
+			res = append(res, newres...)
+		} else {
+			if file.Name() == ".DS_Store" {
+				continue
+			}
+			res = append(res, filepath.Join(dir, file.Name()))
+		}
+	}
+	return res, nil
+}

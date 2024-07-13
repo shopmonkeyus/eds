@@ -24,6 +24,7 @@ import (
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 
+	_ "github.com/shopmonkeyus/eds-server/internal/processors/postgresql"
 	_ "github.com/shopmonkeyus/eds-server/internal/processors/snowflake"
 )
 
@@ -240,7 +241,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 					return
 				}
 				val := atomic.AddInt32(&completed, 1)
-				log.Info("completed: %d/%d (%f)", val, total, (float64(val) / total))
+				log.Debug("download completed: %d/%d (%f)", val, int(total), (float64(val) / total))
 			}
 		}()
 	}
@@ -261,7 +262,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	default:
 	}
 
-	log.Info("downloaded %d files in %v", len(downloads), time.Since(started))
+	log.Info("Downloaded %d files in %v", len(downloads), time.Since(started))
 
 	return tablesWithData, nil
 }
@@ -291,6 +292,7 @@ var importCmd = &cobra.Command{
 
 		logger, closer := newLogger(cmd)
 		defer closer()
+		logger = logger.WithPrefix("[import]")
 
 		if !dryRun && !confirmed {
 
@@ -359,7 +361,7 @@ var importCmd = &cobra.Command{
 		var err error
 
 		// load the schema from the api fresh
-		registry, err := registry.NewAPIRegistry(apiURL, apiKey)
+		registry, err := registry.NewAPIRegistry(apiURL)
 		if err != nil {
 			logger.Fatal("error creating registry: %s", err)
 		}

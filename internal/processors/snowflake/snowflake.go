@@ -125,20 +125,6 @@ func (p *snowflakeProcessor) Flush() error {
 	return nil
 }
 
-func (p *snowflakeProcessor) sqlExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool) func(sql string) error {
-	return func(sql string) error {
-		if dryRun {
-			log.Info("[dry-run] %s", sql)
-			return nil
-		}
-		log.Debug("executing: %s", sql)
-		if _, err := db.ExecContext(ctx, sql); err != nil {
-			return err
-		}
-		return nil
-	}
-}
-
 // Import is called to import data from the source.
 func (p *snowflakeProcessor) Import(config internal.ImporterConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
@@ -153,7 +139,7 @@ func (p *snowflakeProcessor) Import(config internal.ImporterConfig) error {
 	}
 
 	logger := config.Logger.WithPrefix("[snowflake]")
-	executeSQL := p.sqlExecuter(config.Context, logger, db, config.DryRun)
+	executeSQL := util.SQLExecuter(config.Context, logger, db, config.DryRun)
 
 	// create all the tables
 	for _, table := range config.Tables {

@@ -30,7 +30,7 @@ func (r *APIRegistry) Save(filename string) error {
 }
 
 // NewAPIRegistry creates a new schema registry from the API. This implementation doesn't support versioning.
-func NewAPIRegistry(apiURL string, apiKey string) (internal.SchemaRegistry, error) {
+func NewAPIRegistry(apiURL string) (internal.SchemaRegistry, error) {
 	var registry FileRegistry
 	resp, err := http.Get(apiURL + "/v3/schema")
 	if err != nil {

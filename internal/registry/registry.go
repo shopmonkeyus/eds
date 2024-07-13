@@ -15,12 +15,9 @@ var skipFields = map[string]bool{"meta": true}
 func sortTable(tables internal.SchemaMap) internal.SchemaMap {
 	kv := make(internal.SchemaMap)
 	for _, d := range tables {
-		for key := range skipFields {
-			delete(d.Properties, key)
-		}
 		var columns []string
 		for name := range d.Properties {
-			if util.SliceContains(d.PrimaryKeys, name) {
+			if skipFields[name] || util.SliceContains(d.PrimaryKeys, name) {
 				continue
 			}
 			columns = append(columns, name)

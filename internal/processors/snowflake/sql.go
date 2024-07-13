@@ -137,6 +137,9 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 		var updateValues []string
 		if c.Operation == "UPDATE" {
 			for _, name := range c.Diff {
+				if !util.SliceContains(model.Columns, name) {
+					continue
+				}
 				if val, ok := o[name]; ok {
 					v := quoteValue(val)
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
