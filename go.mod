@@ -3,7 +3,6 @@ module github.com/shopmonkeyus/eds-server
 go 1.22
 
 require (
-	github.com/charmbracelet/huh/spinner v0.0.0-20240709222038-80fcf53648bd
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/nats-io/jwt/v2 v2.5.7
 	github.com/nats-io/nats.go v1.36.0

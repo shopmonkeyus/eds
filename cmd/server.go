@@ -167,18 +167,42 @@ func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessio
 	}
 }
 
+func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", fwdport))
+		if err != nil {
+			logger.Error("health check failed: %s", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if resp.StatusCode != http.StatusOK {
+			logger.Error("health check failed: %d", resp.StatusCode)
+		}
+		w.WriteHeader(resp.StatusCode)
+	})
+	go func() {
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("failed to start health check server: %s", err)
+		}
+	}()
+}
+
 var serverIgnoreFlags = map[string]bool{
-	"--api-url": true,
-	"--api-key": true,
-	"--silent":  true,
+	"--api-url":     true,
+	"--api-key":     true,
+	"--silent":      true,
+	"--health-port": true,
 }
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run the server",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, closer := newLogger(cmd)
 		closer()
+
+		logger = logger.WithPrefix("[server]")
 
 		prefix := mustFlagString(cmd, "consumer-prefix", false)
 		if prefix != "" {
@@ -201,6 +225,15 @@ var serverCmd = &cobra.Command{
 			}
 			_args = append(_args, arg)
 		}
+
+		// setup health check server
+		fwdPort, err := util.GetFreePort()
+		if err != nil {
+			logger.Fatal("failed to get free port: %s", err)
+		}
+		healthPort := mustFlagInt(cmd, "health-port", true)
+		runHealthCheckServer(logger, healthPort, fwdPort)
+		_args = append(_args, "--health-port", fmt.Sprintf("%d", fwdPort))
 
 		// main loop
 		var failures int
@@ -249,9 +282,12 @@ func init() {
 	serverCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	serverCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
-	serverCmd.Flags().String("db-url", "", "database connection string")
+	serverCmd.Flags().String("url", "", "provider connection string")
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
 	serverCmd.Flags().Int("replicas", 1, "the number of consumer replicas")
+	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
+	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
+	serverCmd.Flags().Int("health-port", 8080, "the port to listen for health checks")
 }

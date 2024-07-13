@@ -8,7 +8,7 @@ import (
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the current version of the EDS server",
+	Short: "Print the current version of the server",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println(Version)
 	},

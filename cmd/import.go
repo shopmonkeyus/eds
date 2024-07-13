@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,152 +12,20 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/registry"
 	"github.com/shopmonkeyus/go-common/logger"
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
+
+	_ "github.com/shopmonkeyus/eds-server/internal/processors/snowflake"
 )
-
-func connect2DB(ctx context.Context, url string) (*sql.DB, error) {
-	db, err := sql.Open("snowflake", url)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create connection: %s", err.Error())
-	}
-	row := db.QueryRowContext(ctx, "SELECT 1")
-	if err := row.Err(); err != nil {
-		return nil, fmt.Errorf("unable to ping db: %s", err.Error())
-	}
-	return db, nil
-}
-
-func shouldSkip(table string, only []string, except []string) bool {
-	if len(only) > 0 && !sliceContains(only, table) {
-		return true
-	}
-	if len(except) > 0 && sliceContains(except, table) {
-		return true
-	}
-	return false
-}
-
-type property struct {
-	Type     string `json:"type"`
-	Format   string `json:"format"`
-	Nullable bool   `json:"nullable"`
-}
-
-type schema struct {
-	Properties  map[string]property `json:"properties"`
-	Required    []string            `json:"required"`
-	PrimaryKeys []string            `json:"primaryKeys"`
-	Table       string              `json:"table"`
-}
-
-func propTypeToSQLType(propType string, format string) string {
-	switch propType {
-	case "string":
-		if format == "date-time" {
-			return "TIMESTAMP_NTZ"
-		}
-		return "STRING"
-	case "integer":
-		return "INTEGER"
-	case "number":
-		return "FLOAT"
-	case "boolean":
-		return "BOOLEAN"
-	case "object":
-		return "STRING"
-	case "array":
-		return "VARIANT"
-	default:
-		return "STRING"
-	}
-}
-
-func sliceContains(slice []string, val string) bool {
-	for _, s := range slice {
-		if s == val {
-			return true
-		}
-	}
-	return false
-}
-
-func quoteIdentifier(name string) string {
-	return `"` + name + `"`
-}
-
-var skipFields = map[string]bool{
-	"meta": true,
-}
-
-func (s schema) createSQL() string {
-	var sql strings.Builder
-	sql.WriteString("CREATE OR REPLACE TABLE ")
-	sql.WriteString(quoteIdentifier((s.Table)))
-	sql.WriteString(" (\n")
-	var columns []string
-	for name := range s.Properties {
-		if skipFields[name] || sliceContains(s.PrimaryKeys, name) {
-			continue
-		}
-		columns = append(columns, name)
-	}
-	sort.Strings(columns)
-	columns = append(s.PrimaryKeys, columns...)
-	for _, name := range columns {
-		prop := s.Properties[name]
-		sql.WriteString("\t")
-		sql.WriteString(quoteIdentifier(name))
-		sql.WriteString(" ")
-		sql.WriteString(propTypeToSQLType(prop.Type, prop.Format))
-		if sliceContains(s.Required, name) && !prop.Nullable {
-			sql.WriteString(" NOT NULL")
-		}
-		sql.WriteString(",\n")
-	}
-	if len(s.PrimaryKeys) > 0 {
-		sql.WriteString("\tPRIMARY KEY (")
-		for i, pk := range s.PrimaryKeys {
-			sql.WriteString(quoteIdentifier(pk))
-			if i < len(s.PrimaryKeys)-1 {
-				sql.WriteString(", ")
-			}
-		}
-		sql.WriteString(")")
-	}
-	sql.WriteString("\n);\n")
-	return sql.String()
-}
-
-func loadSchema(apiURL string, tableOrder bool) (map[string]*schema, error) {
-	resp, err := http.Get(apiURL + "/v3/schema")
-	if err != nil {
-		return nil, fmt.Errorf("error fetching schema: %s", err)
-	}
-	defer resp.Body.Close()
-	tables := make(map[string]*schema)
-	dec := json.NewDecoder(resp.Body)
-	if err := dec.Decode(&tables); err != nil {
-		return nil, fmt.Errorf("error decoding schema: %s", err)
-	}
-	if tableOrder {
-		// put it table name as key
-		for _, d := range tables {
-			tables[d.Table] = d
-			// delete(tables, object)
-		}
-	}
-	return tables, nil
-}
 
 // generic api response
 type apiResponse[T any] struct {
@@ -167,7 +34,7 @@ type apiResponse[T any] struct {
 	Data    T      `json:"data"`
 }
 
-func decodeShopmonkeyAPIResponse[T any](resp *http.Response) (*T, error) {
+func decodeAPIResponse[T any](resp *http.Response) (*T, error) {
 	var apiResp apiResponse[T]
 	dec := json.NewDecoder(resp.Body)
 	if err := dec.Decode(&apiResp); err != nil {
@@ -212,7 +79,7 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 		buf, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("API error: %s (status code=%d)", string(buf), resp.StatusCode)
 	}
-	job, err := decodeShopmonkeyAPIResponse[exportJobCreateResponse](resp)
+	job, err := decodeAPIResponse[exportJobCreateResponse](resp)
 	if err != nil {
 		return "", fmt.Errorf("error decoding response: %s", err)
 	}
@@ -279,7 +146,7 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 		return nil, fmt.Errorf("error fetching schema: %s", err)
 	}
 	defer resp.Body.Close()
-	job, err := decodeShopmonkeyAPIResponse[exportJobResponse](resp)
+	job, err := decodeAPIResponse[exportJobResponse](resp)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding response: %s", err)
 	}
@@ -291,9 +158,9 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 	return job, nil
 }
 
-func pollUntilComplete(ctx context.Context, apiURL string, apiKey string, jobID string, progressbar *util.ProgressBar) (exportJobResponse, error) {
+func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, jobID string) (exportJobResponse, error) {
+	logger.Info("Checking for Export Status (" + jobID + ")")
 	for {
-		progressbar.SetMessage("Checking for Export Status (" + jobID + ")")
 		job, err := checkExportJob(ctx, apiURL, apiKey, jobID)
 		if err != nil {
 			return exportJobResponse{}, err
@@ -301,87 +168,16 @@ func pollUntilComplete(ctx context.Context, apiURL string, apiKey string, jobID 
 		if job == nil {
 			return exportJobResponse{}, nil // cancelled
 		}
-		progressbar.SetProgress(job.GetProgress())
 		if job.Completed {
 			return *job, nil
 		}
-		progressbar.SetMessage("Waiting for Export to Complete")
+		logger.Debug("Waiting for Export to Complete")
 		select {
 		case <-ctx.Done():
 			return exportJobResponse{}, nil
 		case <-time.After(time.Second * 5):
 		}
 	}
-}
-
-func sqlExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool) func(sql string) error {
-	return func(sql string) error {
-		if dryRun {
-			log.Info("%s", sql)
-			return nil
-		}
-		log.Debug("executing: %s", sql)
-		if _, err := db.ExecContext(ctx, sql); err != nil {
-			return err
-		}
-		return nil
-	}
-}
-
-func migrateDB(ctx context.Context, log logger.Logger, db *sql.DB, tables map[string]*schema, only []string, dryRun bool, progressbar *util.ProgressBar) error {
-	executeSQL := sqlExecuter(ctx, log, db, dryRun)
-	total := len(tables)
-	var i int
-	for table, schema := range tables {
-		progressbar.SetProgress(float64(i) / float64(total))
-		i++
-		if shouldSkip(schema.Table, only, nil) {
-			continue
-		}
-		progressbar.SetMessage("Creating Schema ... " + table)
-		if err := executeSQL(schema.createSQL()); err != nil {
-			return fmt.Errorf("error creating table: %s. %w", schema.Table, err)
-		}
-		progressbar.SetMessage("Created Schema ... " + table)
-	}
-	return nil
-}
-
-func toFileURI(dir string, file string) string {
-	absDir := filepath.Clean(dir)
-	if os.PathSeparator == '\\' {
-		// if windows replace the backslashes
-		return fmt.Sprintf("file://%s/%s", strings.ReplaceAll(absDir, "\\", "/"), file)
-	}
-	return fmt.Sprintf("file://%s/%s", absDir, file)
-}
-
-func runImport(ctx context.Context, log logger.Logger, db *sql.DB, tables []string, jobID string, dataDir string, dryRun bool, parallel int, progressbar *util.ProgressBar) error {
-	executeSQL := sqlExecuter(ctx, log, db, dryRun)
-	stageName := "eds_import_" + jobID
-	log.Debug("creating stage %s", stageName)
-
-	// create a stage
-	if err := executeSQL("CREATE TEMP STAGE " + stageName); err != nil {
-		return fmt.Errorf("error creating stage: %s", err)
-	}
-
-	// upload files
-	fileURI := toFileURI(dataDir, "*.ndjson.gz")
-	progressbar.SetMessage("Uploading files from path " + fileURI)
-	if err := executeSQL(fmt.Sprintf(`PUT '%s' @%s PARALLEL=%d SOURCE_COMPRESSION=gzip`, fileURI, stageName, parallel)); err != nil {
-		return fmt.Errorf("error uploading files: %s", err)
-	}
-
-	// import the data
-	for i, table := range tables {
-		progressbar.SetMessage("Loading ... " + table)
-		if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP') PATTERN='.*-%s-.*'`, quoteIdentifier(table), stageName, table)); err != nil {
-			return fmt.Errorf("error importing data: %s", err)
-		}
-		progressbar.SetProgress(float64(i) / float64(len(tables)))
-	}
-	return nil
 }
 
 func downloadFile(log logger.Logger, dir string, fullURL string) error {
@@ -408,9 +204,10 @@ func downloadFile(log logger.Logger, dir string, fullURL string) error {
 	return nil
 }
 
-func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string, progressbar *util.ProgressBar) ([]string, error) {
+func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string) ([]string, error) {
 	var downloads []string
 	var tablesWithData []string
+	started := time.Now()
 	for table, tableData := range data {
 		if len(tableData.URLs) > 0 {
 			tablesWithData = append(tablesWithData, table)
@@ -443,7 +240,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 					return
 				}
 				val := atomic.AddInt32(&completed, 1)
-				progressbar.SetProgress(float64(val) / total)
+				log.Info("completed: %d/%d (%f)", val, total, (float64(val) / total))
 			}
 		}()
 	}
@@ -464,6 +261,8 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	default:
 	}
 
+	log.Info("downloaded %d files in %v", len(downloads), time.Since(started))
+
 	return tablesWithData, nil
 }
 
@@ -478,32 +277,40 @@ func isCancelled(ctx context.Context) bool {
 
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "import data from your shopmonkey instance to your external database",
+	Short: "import data from your Shopmonkey instance to your system",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		confirmed, _ := cmd.Flags().GetBool("confirm")
-		dbUrl := mustFlagString(cmd, "db-url", true)
+		providerUrl := mustFlagString(cmd, "url", true)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		parallel, _ := cmd.Flags().GetInt("parallel")
-		if parallel <= 0 {
-			parallel = 1
-		} else if parallel > 99 {
-			parallel = 99
-		}
-		log, closer := newLogger(cmd)
+		parallel := mustFlagInt(cmd, "parallel", false)
+		apiURL := mustFlagString(cmd, "api-url", true)
+		apiKey := mustFlagString(cmd, "api-key", true)
+		jobID := mustFlagString(cmd, "job-id", false)
+		schemaFile := mustFlagString(cmd, "schema", false)
+
+		logger, closer := newLogger(cmd)
 		defer closer()
 
 		if !dryRun && !confirmed {
-			parts := strings.Split(dbUrl, "/")
-			dbName := parts[len(parts)-2]
-			schemaName := parts[len(parts)-1]
+
+			u, err := url.Parse(providerUrl)
+			if err != nil {
+				logger.Fatal("error parsing url: %s", err)
+			}
+
+			// present a nicer looking provider
+			name := u.Scheme
+			if u.Path != "" {
+				name = name + ":" + u.Path[1:]
+			}
 
 			form := huh.NewForm(
 				huh.NewGroup(
 					huh.NewNote().
 						Title("\n🚨 WARNING 🚨"),
 					huh.NewConfirm().
-						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s/%s", dbName, schemaName)).
+						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s", name)).
 						Affirmative("Confirm").
 						Negative("Cancel").
 						Value(&confirmed),
@@ -514,14 +321,18 @@ var importCmd = &cobra.Command{
 
 			if err := form.Run(); err != nil {
 				if !errors.Is(err, huh.ErrUserAborted) {
-					log.Error("error running form: %s", err)
-					log.Info("You may use --confirm to skip this prompt")
+					logger.Error("error running form: %s", err)
+					logger.Info("You may use --confirm to skip this prompt")
 					os.Exit(1)
 				}
 			}
 			if !confirmed {
 				os.Exit(0)
 			}
+		}
+
+		if dryRun {
+			logger.Info("🚨 Dry run enabled")
 		}
 
 		started := time.Now()
@@ -538,80 +349,50 @@ var importCmd = &cobra.Command{
 			}
 		}()
 
-		apiURL, _ := cmd.Flags().GetString("api-url")
-		apiKey, _ := cmd.Flags().GetString("api-key")
 		only, _ := cmd.Flags().GetStringSlice("only")
-		jobID, _ := cmd.Flags().GetString("job-id")
-
 		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
 		locationIds, _ := cmd.Flags().GetStringSlice("locationIds")
 
 		if cmd.Flags().Changed("api-url") {
-			log.Info("using alternative API url: %s", apiURL)
+			logger.Info("using alternative API url: %s", apiURL)
 		}
 		var err error
 
-		db, err := connect2DB(ctx, dbUrl)
+		// load the schema from the api fresh
+		registry, err := registry.NewAPIRegistry(apiURL, apiKey)
 		if err != nil {
-			log.Error("error connecting to db: %s", err)
-			os.Exit(1)
+			logger.Fatal("error creating registry: %s", err)
 		}
-		defer db.Close()
 
-		var schema map[string]*schema
+		// save the new schema file
+		if err := registry.Save(schemaFile); err != nil {
+			logger.Fatal("error saving schema: %s", err)
+		}
 
-		util.RunTaskWithSpinner("Loading schema...", func() {
-			schema, err = loadSchema(apiURL, false)
-			if err != nil {
-				log.Error("error loading schema: %s", err)
-				os.Exit(1)
-			}
-		})
-
-		if dryRun {
-			log.Info("🚨 Dry run enabled")
+		// create a new importer for loading the data using the provider
+		importer, err := internal.NewImporter(ctx, logger, providerUrl, registry)
+		if err != nil {
+			logger.Fatal("error creating importer: %s", err)
 		}
 
 		if jobID == "" {
-			// create a new job from the api
-			util.RunTaskWithSpinner("Requesting Export...", func() {
-				jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
-					Tables:      only,
-					CompanyIDs:  companyIds,
-					LocationIDs: locationIds,
-				})
-				if err != nil {
-					log.Error("error creating export job: %s", err)
-					os.Exit(1)
-				}
+			logger.Info("Requesting Export...")
+			jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
+				Tables:      only,
+				CompanyIDs:  companyIds,
+				LocationIDs: locationIds,
 			})
-			log.Trace("created job: %s", jobID)
+			if err != nil {
+				logger.Fatal("error creating export job: %s", err)
+			}
+			logger.Trace("created job: %s", jobID)
 		}
 
-		var job exportJobResponse
-
-		util.RunWithProgress(ctx, cancel, func(progressbar *util.ProgressBar) {
-			// poll until the job is complete
-			progressbar.SetMessage("Waiting for Export to Complete...")
-			job, err = pollUntilComplete(ctx, apiURL, apiKey, jobID, progressbar)
-			if err != nil && !isCancelled(ctx) {
-				log.Error("error polling job: %s", err)
-				os.Exit(1)
-			}
-		})
-
-		if isCancelled(ctx) {
-			return
+		logger.Info("Waiting for Export to Complete...")
+		job, err := pollUntilComplete(ctx, logger, apiURL, apiKey, jobID)
+		if err != nil && !isCancelled(ctx) {
+			logger.Fatal("error polling job: %s", err)
 		}
-
-		util.RunWithProgress(ctx, cancel, func(progressbar *util.ProgressBar) {
-			// migrate the db
-			progressbar.SetMessage("Preparing Database Tables...")
-			if err := migrateDB(ctx, log, db, schema, only, dryRun, progressbar); err != nil {
-				log.Error("error migrating db: %s", err)
-				os.Exit(1)
-			}
-		})
 
 		if isCancelled(ctx) {
 			return
@@ -620,8 +401,7 @@ var importCmd = &cobra.Command{
 		// download the files
 		dir, err := os.MkdirTemp("", "eds-import")
 		if err != nil {
-			log.Error("error creating temp dir: %s", err)
-			os.Exit(1)
+			logger.Fatal("error creating temp dir: %s", err)
 		}
 		success := true
 		defer func() {
@@ -630,40 +410,41 @@ var importCmd = &cobra.Command{
 			}
 		}()
 
-		var tables []string
-
-		util.RunWithProgress(ctx, cancel, func(progressbar *util.ProgressBar) {
-			// get the urls from the api
-			progressbar.SetMessage("Downloading export data...")
-			tables, err = bulkDownloadData(log, job.Tables, dir, progressbar)
-			if err != nil {
-				log.Error("error downloading files: %s", err)
-				success = false
-				os.Exit(1)
-			}
-		})
+		logger.Info("Downloading export data...")
+		tables, err := bulkDownloadData(logger, job.Tables, dir)
+		if err != nil {
+			success = false
+			logger.Fatal("error downloading files: %s", err)
+		}
 
 		if isCancelled(ctx) {
 			return
 		}
 
-		util.RunWithProgress(ctx, cancel, func(progressbar *util.ProgressBar) {
-			progressbar.SetMessage("Importing data...")
-			if err := runImport(ctx, log, db, tables, jobID, dir, dryRun, parallel, progressbar); err != nil {
-				log.Error("error running import: %s", err)
-				success = false
-				os.Exit(1)
-			}
-		})
+		logger.Info("Importing data...")
+		if err := importer.Import(internal.ImporterConfig{
+			Context:        ctx,
+			URL:            providerUrl,
+			Logger:         logger,
+			SchemaRegistry: registry,
+			MaxParallel:    parallel,
+			JobID:          jobID,
+			DataDir:        dir,
+			DryRun:         dryRun,
+			Tables:         tables,
+		}); err != nil {
+			success = false
+			logger.Fatal("error running import: %s", err)
+		}
 
-		log.Info("👋 Loaded %d tables in %v", len(tables), time.Since(started))
+		logger.Info("👋 Loaded %d tables in %v", len(tables), time.Since(started))
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(importCmd)
-	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
-	importCmd.Flags().String("db-url", "", "Snowflake Database connection string")
+	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually changes")
+	importCmd.Flags().String("url", "", "provider connection string")
 	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
 	importCmd.Flags().String("job-id", "", "resume an existing job")
@@ -672,4 +453,5 @@ func init() {
 	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")
 	importCmd.Flags().StringSlice("locationIds", nil, "only import these location ids")
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
+	importCmd.Flags().String("schema", "schema.json", "the schema file to output")
 }
