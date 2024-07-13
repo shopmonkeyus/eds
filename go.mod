@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.27.11
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/denisbrodbeck/machineid v1.0.1
+	github.com/fatih/color v1.15.0
 	github.com/lib/pq v1.10.9
 	github.com/nats-io/jwt/v2 v2.5.7
 	github.com/nats-io/nats.go v1.36.0
@@ -23,6 +24,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.20.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.23.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.28.6 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
 )
 
 require (

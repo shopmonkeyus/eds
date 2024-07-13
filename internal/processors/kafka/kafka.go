@@ -3,6 +3,7 @@ package s3
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 
 	gokafka "github.com/segmentio/kafka-go"
@@ -39,6 +40,7 @@ type kafkaProcessor struct {
 
 var _ internal.Processor = (*kafkaProcessor)(nil)
 var _ internal.ProcessorLifecycle = (*kafkaProcessor)(nil)
+var _ internal.ProcessorHelp = (*kafkaProcessor)(nil)
 
 // Start the processor. This is called once at the beginning of the processor's lifecycle.
 func (p *kafkaProcessor) Start(pc internal.ProcessorConfig) error {
@@ -125,6 +127,27 @@ func (p *kafkaProcessor) Flush() error {
 		p.pending = nil
 	}
 	return nil
+}
+
+// Description is the description of the processor.
+func (p *kafkaProcessor) Description() string {
+	return "Supports streaming EDS messages to a Kafka topic."
+}
+
+// ExampleURL should return an example URL for configuring the processor.
+func (p *kafkaProcessor) ExampleURL() string {
+	return "kafka://kafka:9092/topic"
+}
+
+// Help should return a detailed help documentation for the processor.
+func (p *kafkaProcessor) Help() string {
+	var help strings.Builder
+	help.WriteString(util.GenerateHelpSection("Partitioning", "The partition key is calculated automatically based on the number of partitions for the topic and the incoming message.\nThe algorithm is to calculate a value (hash input) in the format: [TABLE].[COMPANY_ID].[LOCATION_ID].[PRIMARY_KEY]\nand use a hash function to generate a value modulo the number of topic partitions. This guarantees the correct ordering\nfor a given table and primary key while providing the ability to safely scale processing horizontally.\n"))
+	help.WriteString("\n")
+	help.WriteString(util.GenerateHelpSection("Message Key", "The message key is computed in the format: dbchange.[TABLE].[OPERATION].[COMPANY_ID].[LOCATION_ID].[MESSAGE_ID].\n"))
+	help.WriteString("\n")
+	help.WriteString(util.GenerateHelpSection("Message Value", "The message value is a JSON encoded value of the EDS DBChange event."))
+	return help.String()
 }
 
 func init() {

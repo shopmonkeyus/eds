@@ -210,6 +210,23 @@ done:
 	return nil
 }
 
+// Description is the description of the processor.
+func (p *snowflakeProcessor) Description() string {
+	return "Supports streaming EDS messages to a Snowflake database."
+}
+
+// ExampleURL should return an example URL for configuring the processor.
+func (p *snowflakeProcessor) ExampleURL() string {
+	return "snowflake://user:password@host/database"
+}
+
+// Help should return a detailed help documentation for the processor.
+func (p *snowflakeProcessor) Help() string {
+	var help strings.Builder
+	help.WriteString(util.GenerateHelpSection("Schema", "The database will match the public schema from the Shopmonkey transactional database.\n"))
+	return help.String()
+}
+
 func init() {
 	var processor snowflakeProcessor
 	internal.RegisterProcessor("snowflake", &processor)

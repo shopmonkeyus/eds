@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fatih/color"
+	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -275,8 +277,71 @@ var serverCmd = &cobra.Command{
 	},
 }
 
+var serverHelpCmd = &cobra.Command{
+	Use:   "help [processor]",
+	Short: "Get help for the server operations",
+	Args:  cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
+		cyan := color.New(color.FgCyan).SprintFunc()
+		black := color.New(color.FgBlack).SprintFunc()
+		whiteBold := color.New(color.FgWhite, color.Bold).SprintFunc()
+		white := color.New(color.FgWhite).SprintFunc()
+		green := color.New(color.FgGreen).SprintFunc()
+		blue := color.New(color.FgBlue, color.Bold).SprintFunc()
+		md := internal.GetProcessorMetadata()
+		fmt.Println()
+		fmt.Printf("%s\n", blue("Shopmonkey Enterprise Data Streaming (EDS) Server"))
+		fmt.Printf("%s\n", black("version: "+Version))
+		fmt.Println()
+		if len(args) == 0 {
+			fmt.Println("This server version supports the following integrations:")
+			fmt.Println()
+			for _, metadata := range md {
+				fmt.Printf("%-25s%s\n", yellow(metadata.Name), whiteBold(metadata.Description))
+				fmt.Printf("%14s%s: %s\n", "", black("Example url"), cyan(metadata.ExampleURL))
+				fmt.Println()
+			}
+			fmt.Println()
+			fmt.Println("Example usage:")
+			fmt.Println()
+			c := os.Args[0]
+			if Version == "dev" {
+				c = "go run . "
+			}
+			fmt.Printf(" $ %s\n", green(c+" server --url "+md[0].ExampleURL+" --api-key $TOKEN --creds /path/to/creds.json"))
+			fmt.Println()
+			fmt.Println(black("To get a full list of options, pass in the --help flag."))
+			fmt.Println()
+			fmt.Println(black("To get more detailed help for a specific integration run: " + c + "server help [name]"))
+			fmt.Println()
+		} else {
+			var metadata *internal.ProcessorMetadata
+			for _, processor := range md {
+				if processor.Name == args[0] {
+					metadata = &processor
+					break
+				}
+			}
+			if metadata == nil {
+				fmt.Printf("No integration named %s is not found.\n", yellow(args[0]))
+				fmt.Println()
+				os.Exit(1)
+			}
+			fmt.Printf("%s\n", yellow(metadata.Name))
+			fmt.Printf("%s\n", white(metadata.Description))
+			fmt.Printf("%s: %s\n", black("Example url"), cyan(metadata.ExampleURL))
+			fmt.Println()
+			fmt.Println(metadata.Help)
+			fmt.Println()
+		}
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(serverCmd)
+	serverCmd.AddCommand(serverHelpCmd)
+
 	// NOTE: sync these with forkCmd
 	serverCmd.Flags().String("consumer-prefix", "", "deprecated - use --consumer-suffix instead")
 	serverCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")

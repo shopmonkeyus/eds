@@ -51,11 +51,13 @@ type s3Processor struct {
 	config internal.ProcessorConfig
 	logger logger.Logger
 	bucket string
+	prefix string
 	s3     *awss3.Client
 }
 
 var _ internal.Processor = (*s3Processor)(nil)
 var _ internal.ProcessorLifecycle = (*s3Processor)(nil)
+var _ internal.ProcessorHelp = (*s3Processor)(nil)
 
 // Start the processor. This is called once at the beginning of the processor's lifecycle.
 func (p *s3Processor) Start(pc internal.ProcessorConfig) error {
@@ -75,6 +77,15 @@ func (p *s3Processor) Start(pc internal.ProcessorConfig) error {
 		host = ""
 	} else {
 		p.bucket = u.Path[1:] // trim off the forward slash
+
+		tok := strings.Split(p.bucket, "/")
+		if len(tok) > 1 {
+			p.bucket = tok[0]
+			p.prefix = strings.Join(tok[1:], "/")
+			if !strings.HasSuffix(p.prefix, "/") {
+				p.prefix += "/"
+			}
+		}
 	}
 
 	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
@@ -151,7 +162,7 @@ func (p *s3Processor) MaxBatchSize() int {
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
 func (p *s3Processor) Process(event internal.DBChangeEvent) (bool, error) {
-	key := fmt.Sprintf("%s/%s.json", event.Table, event.ID)
+	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
 	buf := []byte(util.JSONStringify(event))
 	_, err := p.s3.PutObject(p.config.Context, &awss3.PutObjectInput{
 		Bucket:        aws.String(p.bucket),
@@ -170,6 +181,27 @@ func (p *s3Processor) Process(event internal.DBChangeEvent) (bool, error) {
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
 func (p *s3Processor) Flush() error {
 	return nil
+}
+
+// Description is the description of the processor.
+func (p *s3Processor) Description() string {
+	return "Supports streaming EDS messages to a AWS S3 compatible destination."
+}
+
+// ExampleURL should return an example URL for configuring the processor.
+func (p *s3Processor) ExampleURL() string {
+	return "s3://bucket/folder"
+}
+
+// Help should return a detailed help documentation for the processor.
+func (p *s3Processor) Help() string {
+	var help strings.Builder
+	help.WriteString(util.GenerateHelpSection("AWS", "If using AWS, no special configuration is required and you can use the standard AWS environment variables to configure the access key, secret and region.\n"))
+	help.WriteString("\n")
+	help.WriteString(util.GenerateHelpSection("Google Cloud Storage", "To use GCS for storage, use the following url pattern: s3://storage.googleapis.com/bucket. See https://cloud.google.com/storage/docs/interoperability\n"))
+	help.WriteString("\n")
+	help.WriteString(util.GenerateHelpSection("LocalStack", "To use localstack for testing, use the following url pattern: s3://localhost:4566/bucket.\n"))
+	return help.String()
 }
 
 func init() {

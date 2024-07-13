@@ -32,6 +32,7 @@ type postgresqlProcessor struct {
 var _ internal.Processor = (*postgresqlProcessor)(nil)
 var _ internal.ProcessorLifecycle = (*postgresqlProcessor)(nil)
 var _ internal.Importer = (*postgresqlProcessor)(nil)
+var _ internal.ProcessorHelp = (*postgresqlProcessor)(nil)
 
 func (p *postgresqlProcessor) connectToDB(url string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", url)
@@ -226,8 +227,25 @@ func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
 	return nil
 }
 
+// Description is the description of the processor.
+func (p *postgresqlProcessor) Description() string {
+	return "Supports streaming EDS messages to a PostgreSQL database."
+}
+
+// ExampleURL should return an example URL for configuring the processor.
+func (p *postgresqlProcessor) ExampleURL() string {
+	return "postgres://localhost:26257/database"
+}
+
+// Help should return a detailed help documentation for the processor.
+func (p *postgresqlProcessor) Help() string {
+	var help strings.Builder
+	help.WriteString(util.GenerateHelpSection("Schema", "The database will match the public schema from the Shopmonkey transactional database.\n"))
+	return help.String()
+}
+
 func init() {
 	var processor postgresqlProcessor
-	internal.RegisterProcessor("postgresql", &processor)
-	internal.RegisterImporter("postgresql", &processor)
+	internal.RegisterProcessor("postgres", &processor)
+	internal.RegisterImporter("postgres", &processor)
 }

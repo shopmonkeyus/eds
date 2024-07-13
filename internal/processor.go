@@ -49,7 +49,45 @@ type Processor interface {
 	Flush() error
 }
 
+// ProcessorHelp is an interface that Processors implement for controlling the help system.
+type ProcessorHelp interface {
+
+	// Description is the description of the processor.
+	Description() string
+
+	// ExampleURL should return an example URL for configuring the processor.
+	ExampleURL() string
+
+	// Help should return a detailed help documentation for the processor.
+	Help() string
+}
+
+type ProcessorMetadata struct {
+	Name           string
+	Description    string
+	ExampleURL     string
+	Help           string
+	SupportsImport bool
+}
+
 var processorRegistry = map[string]Processor{}
+
+// GetProcessorMetadata returns the metadata for all the registered processors.
+func GetProcessorMetadata() []ProcessorMetadata {
+	var res []ProcessorMetadata
+	for name, processor := range processorRegistry {
+		if help, ok := processor.(ProcessorHelp); ok {
+			res = append(res, ProcessorMetadata{
+				Name:           name,
+				Description:    help.Description(),
+				ExampleURL:     help.ExampleURL(),
+				Help:           help.Help(),
+				SupportsImport: importerRegistry[name] != nil,
+			})
+		}
+	}
+	return res
+}
 
 // Register registers a processor for a given protocol.
 func RegisterProcessor(protocol string, processor Processor) {
