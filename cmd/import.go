@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	glog "log"
 	"net/http"
 	"net/url"
 	"os"
@@ -485,20 +484,14 @@ var importCmd = &cobra.Command{
 		confirmed, _ := cmd.Flags().GetBool("confirm")
 		dbUrl := mustFlagString(cmd, "db-url", true)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		enableDebug, _ := cmd.Flags().GetBool("debug")
 		parallel, _ := cmd.Flags().GetInt("parallel")
 		if parallel <= 0 {
 			parallel = 1
 		} else if parallel > 99 {
 			parallel = 99
 		}
-		glog.SetFlags(0)
-		var log logger.Logger
-		if enableDebug {
-			log = newLogger(logger.LevelTrace)
-		} else {
-			log = newLogger(logger.LevelInfo)
-		}
+		log, closer := newLogger(cmd)
+		defer closer()
 
 		if !dryRun && !confirmed {
 			parts := strings.Split(dbUrl, "/")
@@ -678,6 +671,5 @@ func init() {
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")
 	importCmd.Flags().StringSlice("locationIds", nil, "only import these location ids")
-	importCmd.Flags().Bool("debug", false, "turn on debug logging")
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
 }

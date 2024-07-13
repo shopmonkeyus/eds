@@ -2,6 +2,6 @@
 /dist/
 /eds-server
 *.creds
-/postgres-data
-/sqlserver-data
 .DS_Store
+/creds.txt
+/schema.json

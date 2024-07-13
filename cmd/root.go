@@ -1,29 +1,13 @@
 package cmd
 
 import (
-	"bufio"
-	"compress/gzip"
-	"encoding/json"
 	"fmt"
+	glog "log"
 	"os"
 
-	"github.com/nats-io/nats.go"
-	"github.com/shopmonkeyus/eds-server/internal"
-	dm "github.com/shopmonkeyus/eds-server/internal/model"
-	"github.com/shopmonkeyus/eds-server/internal/provider"
-	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 )
-
-func mustFlagBool(cmd *cobra.Command, name string, required bool) bool {
-	val, err := cmd.Flags().GetBool(name)
-	if required && err != nil {
-		fmt.Printf("error: %s\n", err)
-		os.Exit(1)
-	}
-	return val
-}
 
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	val, err := cmd.Flags().GetString(name)
@@ -38,121 +22,55 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	return val
 }
 
-type ProviderFunc func(p []internal.Provider) error
-
-func runLocalProvider(logger logger.Logger, natsProvider internal.Provider, fn ProviderFunc) {
-	providers := []internal.Provider{natsProvider}
-	ferr := fn(providers)
-	if ferr != nil {
-		for _, provider := range providers {
-			provider.Stop()
-			logger.Error("error: %s", ferr)
-			os.Exit(1)
-		}
-	}
-
-	for _, provider := range providers {
-		if err := provider.Stop(); err != nil {
-			logger.Error("error stopping provider: %s", err)
-			os.Exit(1)
-		}
-	}
+type logFileSink struct {
+	f *os.File
 }
 
-func runProviders(logger logger.Logger, urls []string, schemaModelCache *map[string]dm.Model, dryRun bool, verbose bool, importer string, fn ProviderFunc, nc *nats.Conn) {
-	opts := &provider.ProviderOpts{
-		DryRun:   dryRun,
-		Verbose:  verbose,
-		Importer: importer,
+func (s *logFileSink) Write(buf []byte) error {
+	_, err := s.f.Write(buf)
+	return err
+}
+
+func (s *logFileSink) Close() error {
+	return s.f.Close()
+}
+
+func newLogFileSync(file string) (*logFileSink, error) {
+	of, err := os.Create(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
-	providers := []internal.Provider{}
-	for _, url := range urls {
-		provider, err := provider.NewProviderForURL(logger, url, schemaModelCache, opts)
+	return &logFileSink{f: of}, nil
+}
+
+type CloseFunc func()
+
+func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
+	glog.SetFlags(0)
+	glog.SetOutput(os.Stdout)
+	sink, _ := cmd.Flags().GetString("log-file-sink")
+	silent, _ := cmd.Flags().GetBool("silent")
+	var log logger.Logger
+	if silent {
+		log = logger.NewConsoleLogger(logger.LevelError)
+	} else {
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		if verbose {
+			log = logger.NewConsoleLogger(logger.LevelTrace)
+		} else {
+			log = logger.NewConsoleLogger(logger.LevelInfo)
+		}
+	}
+	if sink != "" {
+		log.Trace("using log file sink: %s", sink)
+		logSync, err := newLogFileSync(sink)
 		if err != nil {
-			logger.Error("error creating provider: %s", err)
-			os.Exit(1)
+			log.Error("failed to open log file: %s. %s", sink, err)
+			os.Exit(2)
 		}
-		if err := provider.Start(); err != nil {
-			logger.Error("error starting provider: %s", err)
-			os.Exit(1)
-		}
-
-		providers = append(providers, provider)
+		return log.WithSink(logSync, logger.LevelTrace), func() { logSync.Close() }
 	}
-	if importer != "" {
-		//opts.Importer should be the location of a file directory, get all the files from this directory
-		files, err := util.ListDir(opts.Importer)
-		//Can potentially run on goroutines to process multiple files at once, but performance seems ok right now
-		for _, file := range files {
-			processFile(logger, file, providers, nc)
-		}
-
-		if err != nil {
-			logger.Error("error reading directory: %s", err)
-			os.Exit(1)
-		}
-		logger.Info("Imported file data instead of streaming")
-		os.Exit(0)
-	}
-
-	ferr := fn(providers)
-	if ferr != nil {
-		for _, provider := range providers {
-			provider.Stop()
-			logger.Error("error: %s", ferr)
-			os.Exit(1)
-		}
-	}
-	for _, provider := range providers {
-		if err := provider.Stop(); err != nil {
-			logger.Error("error stopping provider: %s", err)
-			os.Exit(1)
-		}
-	}
-}
-
-func processFile(logger logger.Logger, fileName string, providers []internal.Provider, nc *nats.Conn) error {
-	logger.Info("processing file: %s", fileName)
-	file, err := os.Open(fileName)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	gzipReader, err := gzip.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer gzipReader.Close()
-	tableName, err := util.GetTableNameFromPath(fileName)
-	if err != nil {
-		return err
-	}
-	logger.Info("importing table: %s", tableName)
-	scanner := bufio.NewScanner(gzipReader)
-	for scanner.Scan() {
-		data := scanner.Bytes()
-		var dataMap map[string]interface{}
-		if err := json.Unmarshal(data, &dataMap); err != nil {
-			err = fmt.Errorf("error unmarshalling data: %s", err)
-			return err
-
-		}
-
-		for _, provider := range providers {
-
-			provider.Import(dataMap, tableName, nc)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func newLogger(levels ...logger.LogLevel) logger.Logger {
-	return logger.NewConsoleLogger(levels...)
+	return log, func() {}
 }
 
 // rootCmd represents the base command when called without any subcommands
@@ -171,8 +89,8 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().String("url", "", "the connection string")
 	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
 	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
-	rootCmd.PersistentFlags().Bool("nats-provider", false, "the connection string")
+	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
+	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 }

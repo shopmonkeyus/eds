@@ -273,60 +273,67 @@ func (c *DBChangeEvent) ToSQL(schema map[string]*schema) (string, error) {
 	return sql.String(), nil
 }
 
-var server2Cmd = &cobra.Command{
-	Use:   "server2",
+var forkCmd = &cobra.Command{
+	Use:   "fork",
 	Short: "Run the server",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		log := newLogger(logger.LevelTrace)
+		log, closer := newLogger(cmd)
+		defer closer()
 
 		natsurl, _ := cmd.Flags().GetString("server")
 		dbUrl := mustFlagString(cmd, "db-url", true)
-		creds, _ := cmd.Flags().GetString("creds")
-		apiURL, _ := cmd.Flags().GetString("api-url")
-		consumerPrefix, _ := cmd.Flags().GetString("consumer-prefix")
+		creds := mustFlagString(cmd, "creds", true)
+		schemaFile := mustFlagString(cmd, "schema", true)
+		consumerSuffix, _ := cmd.Flags().GetString("consumer-suffix")
 
 		var schema map[string]*schema
 		var err error
 
-		schema, err = loadSchema(apiURL, true)
-		if err != nil {
-			log.Error("error loading schema: %s", err)
-			os.Exit(1)
+		if !util.Exists(schemaFile) {
+			log.Error("missing schema file: %s", schemaFile)
+			os.Exit(2)
 		}
+
+		// load the schema from a file into our schema map
+		of, err := os.Open(schemaFile)
+		if err != nil {
+			log.Error("error opening schema file: %s", err)
+			os.Exit(2)
+		}
+		defer of.Close()
+		dec := json.NewDecoder(of)
+		if err := dec.Decode(&schema); err != nil {
+			log.Error("error decoding schema: %s", err)
+			os.Exit(2)
+		}
+		of.Close()
 
 		var natsCredentials nats.Option
 		var companyIDs []string
 		companyName := "unknown"
 
-		if natsurl != "" {
-			natsCredentials, companyIDs, companyName, err = getNatsCreds(creds)
-			if err != nil {
-				log.Error("error: %s", err)
-				os.Exit(1)
-			}
-		} else {
-			log.Info("no credentials, running local nats")
-			companyIDs, _ = cmd.Flags().GetStringSlice("company-id")
-			if len(companyIDs) == 0 {
-				log.Error("error: no company ids provided use --company-id")
-				os.Exit(1)
-			}
+		natsCredentials, companyIDs, companyName, err = getNatsCreds(creds)
+		if err != nil {
+			log.Error("error: %s", err)
+			os.Exit(2)
 		}
+
+		// normalize the company name so we can use it in the nats client name and in the consumer name
+		companyName = strings.ToLower(strings.ReplaceAll(companyName, " ", "_"))
 
 		// Nats connection to main NATS server
 		nc, err := cnats.NewNats(log, "eds-server-"+companyName, natsurl, natsCredentials)
 		if err != nil {
 			log.Error("nats: %s", err)
-			os.Exit(1)
+			os.Exit(2)
 		}
 		defer nc.Close()
 
 		db, err := connect2DB(ctx, dbUrl)
 		if err != nil {
 			log.Error("error connecting to db: %s", err)
-			os.Exit(1)
+			os.Exit(2)
 		}
 		defer db.Close()
 
@@ -446,7 +453,7 @@ var server2Cmd = &cobra.Command{
 						}
 						select {
 						case <-ctx.Done():
-							log.Info("context done")
+							log.Debug("context done")
 							nackEverything()
 							return
 						default:
@@ -462,9 +469,9 @@ var server2Cmd = &cobra.Command{
 			}, nil
 		}
 
-		replicas := 1
+		replicas, _ := cmd.Flags().GetInt("replicas")
 
-		jslogger := log.WithPrefix("[nats-js]")
+		jslogger := log.WithPrefix("[nats]")
 		js, err := jetstream.New(nc, jetstream.WithClientTrace(&jetstream.ClientTrace{
 			RequestSent: func(subj string, payload []byte) {
 				jslogger.Trace("nats tx: %s: %s", subj, string(payload))
@@ -475,10 +482,14 @@ var server2Cmd = &cobra.Command{
 		}))
 		if err != nil {
 			log.Error("error creating jetstream client: %v", err)
-			os.Exit(1)
+			os.Exit(2)
 		}
 
-		name := fmt.Sprintf("%seds-server-%s", consumerPrefix, strings.Join(companyIDs, "-"))
+		var prefix string
+		if consumerSuffix != "" {
+			prefix = "-" + consumerSuffix
+		}
+		name := fmt.Sprintf("eds-server-%s%s", companyName, prefix)
 		var subjects []string
 		for _, companyID := range companyIDs {
 			subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
@@ -499,15 +510,15 @@ var server2Cmd = &cobra.Command{
 		consumer, err := js.CreateOrUpdateConsumer(createConsumerContext, "dbchange", config)
 		if err != nil {
 			log.Error("error getting consumer: %v", err)
-			os.Exit(1)
+			os.Exit(2)
 		}
 		cancelCreate()
 		handler, err := createHandler(log)
 		if err != nil {
 			log.Error("error creating handler: %v", err)
-			os.Exit(1)
+			os.Exit(2)
 		}
-		log.Info("starting consumer %s on %s", name, subjects)
+		log.Debug("starting consumer %s on %s", name, subjects)
 		sub, err := consumer.Consume(func(msg jetstream.Msg) {
 			log := log.With(map[string]any{
 				"msgId":   msg.Headers().Get(nats.MsgIdHdr),
@@ -516,7 +527,6 @@ var server2Cmd = &cobra.Command{
 			if m, err := msg.Metadata(); err == nil {
 				log.Trace("msg received (deliveries %d)", m.NumDelivered)
 			}
-			// TODO: pass log
 			if err := handler(ctx, msg); err != nil {
 				log.Error("error processing message: %v", err)
 				return
@@ -524,9 +534,10 @@ var server2Cmd = &cobra.Command{
 		})
 		if err != nil {
 			log.Error("error consuming: %v", err)
-			os.Exit(1)
+			os.Exit(2)
 		}
 
+		serverStarted := time.Now()
 		log.Info("server is running")
 
 		// wait for shutdown or error
@@ -544,17 +555,19 @@ var server2Cmd = &cobra.Command{
 
 		wg.Wait()
 
+		log.Trace("server was up for %v", time.Since(serverStarted))
 		log.Info("👋 Bye")
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(server2Cmd)
-	server2Cmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
-	server2Cmd.Flags().StringSlice("company-id", nil, "the company id to listen for, only useful for local testing")
-	server2Cmd.Flags().MarkHidden("company-id") // hide this flag since its only useful to shopmonkey employees
-	server2Cmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
-	server2Cmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
-	server2Cmd.Flags().String("db-url", "", "Snowflake Database connection string")
-	server2Cmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	rootCmd.AddCommand(forkCmd)
+	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
+	// NOTE: sync these with serverCmd
+	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
+	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
+	forkCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
+	forkCmd.Flags().String("db-url", "", "Snowflake Database connection string")
+	forkCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
+	forkCmd.Flags().Int("replicas", 1, "the number of consumer replicas")
 }

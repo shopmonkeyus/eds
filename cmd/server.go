@@ -1,354 +1,257 @@
 package cmd
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
-	"time"
 
-	glog "log"
-
-	"github.com/gorilla/mux"
-	jwt "github.com/nats-io/jwt/v2"
-	"github.com/nats-io/nats-server/v2/server"
-	"github.com/nats-io/nats.go"
-	"github.com/shopmonkeyus/eds-server/internal"
-	dm "github.com/shopmonkeyus/eds-server/internal/model"
-	"github.com/shopmonkeyus/eds-server/internal/provider"
 	"github.com/shopmonkeyus/eds-server/internal/util"
-	glogger "github.com/shopmonkeyus/go-common/logger"
-	snats "github.com/shopmonkeyus/go-common/nats"
-	csys "github.com/shopmonkeyus/go-common/sys"
+	"github.com/shopmonkeyus/go-common/command"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 )
+
+var Version string // set in main
+
+const maxFailures = 5
+
+type sessionStart struct {
+	Version   string `json:"version"`
+	Hostname  string `json:"hostname"`
+	IPAddress string `json:"ipAddress"`
+	MachineId string `json:"machineId"`
+	OsInfo    any    `json:"osinfo"`
+}
+
+type sessionStartResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		SessionId string `json:"sessionId"`
+	} `json:"data"`
+}
+
+type sessionEnd struct {
+	Errored bool `json:"errored"`
+}
+
+type sessionEndResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		URL string `json:"url"`
+	} `json:"data"`
+}
+
+func sendStart(logger logger.Logger, apiURL string, apiKey string) (string, error) {
+	var body sessionStart
+	ipaddress, err := util.GetLocalIP()
+	if err != nil {
+		return "", fmt.Errorf("failed to get local IP: %w", err)
+	}
+	machineid, err := util.GetMachineId()
+	if err != nil {
+		return "", fmt.Errorf("failed to get machine ID: %w", err)
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("failed to get hostname: %w", err)
+	}
+	osinfo, err := util.GetSystemInfo()
+	if err != nil {
+		return "", fmt.Errorf("failed to get system info: %w", err)
+	}
+	body.MachineId = machineid
+	body.IPAddress = ipaddress
+	body.Hostname = hostname
+	body.Version = Version
+	body.OsInfo = osinfo
+	req, err := http.NewRequest("POST", apiURL+"/v3/eds", bytes.NewBuffer([]byte(util.JSONStringify(body))))
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send session start: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		buf, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to send session start. status code=%d. %s", resp.StatusCode, string(buf))
+	}
+	var s sessionStartResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	if !s.Success {
+		return "", fmt.Errorf("failed to start session: %s", s.Message)
+	}
+	logger.Trace("session %s started successfully", s.Data.SessionId)
+	return s.Data.SessionId, nil
+}
+
+func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId string, errored bool) (string, error) {
+	var body sessionEnd
+	body.Errored = errored
+	req, err := http.NewRequest("POST", apiURL+"/v3/eds/"+sessionId, bytes.NewBuffer([]byte(util.JSONStringify(body))))
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send session end: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		buf, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to send session end. status code=%d. %s", resp.StatusCode, string(buf))
+	}
+	var s sessionEndResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	if !s.Success {
+		return "", fmt.Errorf("failed to end session: %s", s.Message)
+	}
+	logger.Trace("session %s ended successfully: %s", sessionId, s.Data.URL)
+	return s.Data.URL, nil
+}
+
+func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
+	of, err := os.Open(logFileBundle)
+	if err != nil {
+		return fmt.Errorf("failed to open log file bundle: %w", err)
+	}
+	defer of.Close()
+	req, err := http.NewRequest("PUT", url, of)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-tgz")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to upload logs: %w", err)
+	}
+	defer resp.Body.Close()
+	buf, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to upload logs. status code=%d. %s", resp.StatusCode, string(buf))
+	}
+	logger.Trace("logs uploaded successfully: %s", logFileBundle)
+	return nil
+}
+
+func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessionId string, errored bool, logfile string) {
+	logger.Info("uploading logs for session: %s", sessionId)
+	if !errored {
+		defer os.Remove(logfile)
+	}
+	url, err := sendEnd(logger, apiurl, apikey, sessionId, errored)
+	if err != nil {
+		logger.Fatal("failed to send session end: %s", err)
+	}
+	if err := uploadLogs(logger, url, logfile); err != nil {
+		logger.Fatal("failed to upload logs: %s", err)
+	}
+	logger.Trace("logs uploaded successfully for session: %s", sessionId)
+	if errored {
+		logger.Info("error log files saved to %s", logfile)
+	}
+}
+
+var serverIgnoreFlags = map[string]bool{
+	"--api-url": true,
+	"--api-key": true,
+	"--silent":  true,
+}
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run the server",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		logger, closer := newLogger(cmd)
+		closer()
 
-		hosts, _ := cmd.Flags().GetStringSlice("server")
-		creds, _ := cmd.Flags().GetString("creds")
-		importer, _ := cmd.Flags().GetString("importer")
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		verbose, _ := cmd.Flags().GetBool("verbose")
-		timestamp, _ := cmd.Flags().GetBool("timestamp")
-		onlyRunNatsProvider, _ := cmd.Flags().GetBool("nats-provider")
-		ignoreLocalNats, _ := cmd.Flags().GetBool("ignore-local-nats")
-		localNatsPort, _ := cmd.Flags().GetInt("port")
-		healthCheckPort, _ := cmd.Flags().GetInt("health-port")
-		duration, _ := cmd.Flags().GetString("consumer-start-time")
-		enableDebug, _ := cmd.Flags().GetBool("debug")
-		if !timestamp {
-			glog.SetFlags(0)
-		}
-		var logger glogger.Logger
-		if enableDebug {
-			logger = newLogger(glogger.LevelDebug)
-		} else {
-			logger = newLogger(glogger.LevelInfo)
+		prefix := mustFlagString(cmd, "consumer-prefix", false)
+		if prefix != "" {
+			logger.Fatal("consumer-prefix is deprecated, use --consumer-suffix instead")
 		}
 
-		var (
-			consumerStartTime time.Duration
-			err               error
-		)
+		apiurl := mustFlagString(cmd, "api-url", true)
+		apikey := mustFlagString(cmd, "api-key", true)
 
-		logger.Trace("consumer-start-time: %s", duration)
-		if duration != "" {
-			consumerStartTime, err = time.ParseDuration(duration)
-			if err != nil {
-				logger.Error("error: invalid duration: %s", err)
-				os.Exit(1)
+		var skipping bool
+		var _args []string
+		for _, arg := range os.Args[2:] {
+			if skipping {
+				skipping = false
+				continue
 			}
-			if consumerStartTime > time.Hour*168 {
-				logger.Error("error: invalid duration. Max value is 168h")
-				os.Exit(1)
+			if serverIgnoreFlags[arg] {
+				skipping = true
+				continue
 			}
-			logger.Trace("consumer-start-time parsed: %s", consumerStartTime)
-		}
-		logger.Trace("consumer-start-time: %s", consumerStartTime)
-
-		if len(hosts) > 0 && creds == "" && strings.Contains(hosts[0], "connect.nats.shopmonkey.pub") {
-			logger.Error("error: missing required credentials file. use --creds and specify the location of your credentials file")
-			os.Exit(1)
+			_args = append(_args, arg)
 		}
 
-		natsurl := strings.Join(hosts, ",")
-
-		var natsCredentials nats.Option
-		var companyIDs []string
-
-		companyName := "unknown"
-
-		if creds != "" {
-			if _, err := os.Stat(creds); os.IsNotExist(err) {
-				logger.Error("error: invalid credential file: %s", creds)
-				os.Exit(1)
+		// main loop
+		var failures int
+		for {
+			if failures >= maxFailures {
+				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			buf, err := os.ReadFile(creds)
+			sessionId, err := sendStart(logger, apiurl, apikey)
 			if err != nil {
-				logger.Error("error: reading credentials file: %s", err)
-				os.Exit(1)
+				logger.Fatal("failed to send session start: %s", err)
 			}
-			natsCredentials = nats.UserCredentials(creds)
-
-			natsJWT, err := jwt.ParseDecoratedJWT(buf)
-			if err != nil {
-				logger.Error("error: parsing valid JWT: %s", err)
-				os.Exit(1)
-			}
-			claim, err := jwt.DecodeUserClaims(natsJWT)
-			if err != nil {
-				logger.Error("error: decoding JWT claims: %s", err)
-				os.Exit(1)
-			}
-			allowedSubs := claim.Sub.Allow
-			for _, sub := range allowedSubs {
-				companyID := util.ExtractCompanyIdFromSubscription(sub)
-				if companyID != "" {
-					companyIDs = append(companyIDs, companyID)
+			result, err := command.Fork(command.ForkArgs{
+				Log:              logger,
+				Command:          "fork",
+				Args:             _args,
+				LogFilenameLabel: "server",
+				SaveLogs:         true,
+				WriteToStd:       true,
+				ForwardInterrupt: true,
+				LogFileSink:      true,
+			})
+			if err != nil && result == nil {
+				logger.Error("failed to fork: %s", err)
+				failures++
+			} else {
+				ec := result.ProcessState.ExitCode()
+				sendEndAndUpload(logger, apiurl, apikey, sessionId, ec != 0, result.LogFileBundle)
+				if ec == 0 {
+					break
 				}
-			}
-			if len(companyIDs) == 0 {
-				logger.Error("error: issue parsing company ID from JWT claims. Ensure the JWT has the correct permissions.")
-				os.Exit(1)
-			}
-			companyName = claim.Name
-
-		}
-		//Nats connection to main NATS server
-		nc, err := snats.NewNats(logger, "eds-server-"+companyName, natsurl, natsCredentials)
-		if err != nil {
-			logger.Error("nats: %s", err)
-			os.Exit(1)
-		}
-		defer nc.Close()
-
-		var ns *server.Server
-		var localNatsServerConnection *nats.Conn
-		var natsProvider *provider.NatsProvider
-		if !ignoreLocalNats {
-			defaultServerConfig := &server.Options{} // used for setting any defaults
-			defaultServerConfig.Port = localNatsPort
-			defaultServerConfig.MaxConn = -1
-			defaultServerConfig.JetStream = true
-			defaultServerConfig.StoreDir = "/var/lib/shopmonkey/eds-server"
-			defaultServerConfig.JetStreamDomain = "leaf"
-			//Create the store dir if it doesn't exist
-			if _, err := os.Stat(defaultServerConfig.StoreDir); os.IsNotExist(err) {
-				err = os.MkdirAll(defaultServerConfig.StoreDir, 0755)
-				if err != nil {
-					panic(err)
+				// if a "normal" exit code, just exit and remove the logs
+				if ec == 2 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
+					os.Exit(ec)
 				}
-			}
-			serverConfig := &server.Options{}
-			serverConfig, err = server.ProcessConfigFile("server.conf")
-			if err != nil {
-				serverConfig = defaultServerConfig
-			}
-			ns, err = server.NewServer(serverConfig)
-
-			if err != nil {
-				panic(err)
-			}
-
-			go ns.Start()
-			readyForConnectionCounter := 0
-			for !ns.ReadyForConnections(4 * time.Second) {
-				logger.Info("Waiting for nats server to start...")
-				readyForConnectionCounter++
-				if readyForConnectionCounter > 10 {
-					logger.Error("Local Nats server failed to start. Check to see if another instance is already running, and verify your server.conf file is configured properly. Exiting...")
-					os.Exit(1)
-				}
-			}
-
-			logger.Info("Nats server started at url: %s", ns.ClientURL())
-			//Create our own NATs server for the providers to read from
-			opts := &provider.ProviderOpts{
-				DryRun:   dryRun,
-				Verbose:  verbose,
-				Importer: importer,
-			}
-			natsProvider, err = provider.NewNatsProvider(logger, ns.ClientURL(), opts, nc)
-			if err != nil {
-				logger.Error("error creating nats provider: %s", err)
-				os.Exit(1)
-			}
-
-			//Create a local NATs server (leaf-node) for the providers to read from
-			localNatsServerConnection = natsProvider.GetNatsConn()
-			err = natsProvider.AddHealthCheck()
-			if err != nil {
-				logger.Error("error adding health check: %s", err)
-				os.Exit(1)
+				failures++
+				logger.Error("server exited with code %d", ec)
 			}
 		}
-		schemaModelVersionCache := make(map[string]dm.Model)
-
-		//If we're importing data, we'll go ahead and pre-populate the schemas for all the files in the importer directory
-		if importer != "" {
-			files, err := util.ListDir(importer)
-			if err != nil {
-				logger.Error("error reading directory: %s", err)
-				os.Exit(1)
-			}
-			for _, file := range files {
-				tableName, err := util.GetTableNameFromPath(file)
-				if err != nil {
-					logger.Error("error getting table name from path: %s", err)
-					os.Exit(1)
-				}
-				latestSchema, err := provider.GetLatestSchema(logger, nc, tableName)
-				if err != nil {
-					logger.Error("error getting latest schema: %s", err)
-					os.Exit(1)
-				}
-				schemaModelVersionCache[tableName] = latestSchema
-			}
-		}
-
-		if !ignoreLocalNats {
-			var runLocalNatsCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
-				logger.Trace("creating message processor")
-				processor, err := internal.NewMessageProcessor(internal.MessageProcessorOpts{
-					Logger:                   logger,
-					CompanyID:                companyIDs,
-					Providers:                providers,
-					NatsConnection:           nc,
-					MainNatsConnection:       nc,
-					TraceNats:                mustFlagBool(cmd, "trace-nats", false),
-					DumpMessagesDir:          mustFlagString(cmd, "dump-dir", false),
-					ConsumerPrefix:           mustFlagString(cmd, "consumer-prefix", false),
-					ConsumerLookbackDuration: consumerStartTime,
-					SchemaModelVersionCache:  &schemaModelVersionCache,
-				})
-				if err != nil {
-					return err
-				}
-				defer processor.Stop()
-
-				logger.Trace("starting message processor")
-
-				if err := processor.Start(); err != nil {
-					return fmt.Errorf("processor start: %s", err)
-				}
-				logger.Info("started message processor")
-				<-csys.CreateShutdownChannel()
-				logger.Info("stopped message processor")
-				return nil
-			}
-
-			go runLocalProvider(logger, natsProvider, runLocalNatsCallback)
-		}
-		var runProvidersCallback func([]internal.Provider) error = func(providers []internal.Provider) error {
-			logger.Trace("creating message processor")
-			messageProcessorOptions := internal.MessageProcessorOpts{
-				Logger:                  logger,
-				CompanyID:               companyIDs,
-				Providers:               providers,
-				NatsConnection:          localNatsServerConnection,
-				MainNatsConnection:      nc,
-				TraceNats:               mustFlagBool(cmd, "trace-nats", false),
-				DumpMessagesDir:         mustFlagString(cmd, "dump-dir", false),
-				ConsumerPrefix:          mustFlagString(cmd, "consumer-prefix", false),
-				SchemaModelVersionCache: &schemaModelVersionCache,
-			}
-			if ignoreLocalNats {
-				messageProcessorOptions.NatsConnection = nc
-			}
-			processor, err := internal.NewMessageProcessor(messageProcessorOptions)
-			if err != nil {
-				return err
-			}
-			defer processor.Stop()
-			if !ignoreLocalNats {
-				logger.Trace("starting message processor to read from local nats")
-			}
-			if err := processor.Start(); err != nil {
-				return fmt.Errorf("processor start: %s", err)
-			}
-			logger.Info("started message processor")
-			<-csys.CreateShutdownChannel()
-			logger.Info("stopped message processor")
-			return nil
-		}
-
-		urls := args
-
-		if len(urls) == 0 && !onlyRunNatsProvider {
-			logger.Error("error: missing required url argument")
-			os.Exit(1)
-		}
-		if !ignoreLocalNats {
-			defer natsProvider.Stop()
-			if err := natsProvider.Start(); err != nil {
-				logger.Error("error starting nats provider: %s", err)
-				os.Exit(1)
-			}
-			logger.Info("started nats provider")
-		}
-		rtr := mux.NewRouter()
-		port := healthCheckPort
-		srv := &http.Server{
-			Addr:           fmt.Sprintf(":%d", port),
-			Handler:        rtr,
-			ReadTimeout:    30 * time.Second,
-			WriteTimeout:   30 * time.Second,
-			IdleTimeout:    15 * time.Minute,
-			MaxHeaderBytes: 1 << 20,
-		}
-		srv.SetKeepAlivesEnabled(true)
-
-		// health check route
-		rtr.HandleFunc("/status/health", func(w http.ResponseWriter, req *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logger.Error("error starting server: %s", err)
-				os.Exit(1)
-			}
-		}()
-
-		runProviders(logger, urls, &schemaModelVersionCache, dryRun, verbose, importer, runProvidersCallback, nc)
-		if !ignoreLocalNats {
-			<-csys.CreateShutdownChannel()
-		}
-		logger.Info("stopped nats provider")
-
-		sctx, scancel := context.WithTimeout(ctx, time.Second*15)
-		defer scancel()
-		srv.Shutdown(sctx)
-		wg.Wait()
-		logger.Info("👋 Bye")
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
-	serverCmd.Flags().Bool("trace-nats", false, "turn on lower level nats tracing")
-	serverCmd.Flags().String("dump-dir", "", "write each incoming message to this directory")
-	serverCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make db changes")
-	serverCmd.Flags().StringSlice("server", []string{"nats://connect.nats.shopmonkey.pub"}, "the nats server url")
+	// NOTE: sync these with forkCmd
+	serverCmd.Flags().String("consumer-prefix", "", "deprecated - use --consumer-suffix instead")
+	serverCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	serverCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
-	serverCmd.Flags().String("consumer-prefix", "", "a consumer group prefix to add to the name")
-	serverCmd.Flags().Bool("timestamp", false, "Add timestamps to logging")
-	serverCmd.Flags().String("importer", "", "migrate data from your shopmonkey instance to your external database")
-	serverCmd.Flags().Bool("ignore-local-nats", false, "ignore the local NATS server and have your providers read from the main NATS server")
-	serverCmd.Flags().Int("port", 4223, "the port to run the local NATS server on")
-	serverCmd.Flags().Int("health-port", 8080, "the port to run the health check server on")
-	serverCmd.Flags().String("consumer-start-time", "", "A duration string with unit suffix. Example: 1h45m. Max value is 168h")
-	serverCmd.Flags().Bool("debug", false, "enable debug mode")
+	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
+	serverCmd.Flags().String("db-url", "", "database connection string")
+	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
+	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
+	serverCmd.Flags().Int("replicas", 1, "the number of consumer replicas")
 }
