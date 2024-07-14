@@ -119,7 +119,11 @@ func (e *exportJobResponse) String() string {
 			failed++
 		}
 	}
-	return fmt.Sprintf("%d/%d", completed, len(e.Tables))
+	var percent float64
+	if completed > 0 {
+		percent = 100 * float64(completed) / float64(len(e.Tables))
+	}
+	return fmt.Sprintf("%d/%d (%.2f%%)", completed, len(e.Tables), percent)
 }
 
 func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {
@@ -154,9 +158,11 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, jobID string) (exportJobResponse, error) {
 	var lastPrinted time.Time
 	for {
+		var showProgress bool
 		if lastPrinted.IsZero() || time.Since(lastPrinted) > time.Minute {
 			logger.Info("Checking for Export Status (" + jobID + ")")
 			lastPrinted = time.Now()
+			showProgress = true
 		}
 		job, err := checkExportJob(ctx, apiURL, apiKey, jobID)
 		if err != nil {
@@ -169,6 +175,9 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 			return *job, nil
 		}
 		logger.Debug("Waiting for Export to Complete: %s", job.String())
+		if showProgress {
+			logger.Info("Export Progress: %s", job.String())
+		}
 		select {
 		case <-ctx.Done():
 			return exportJobResponse{}, nil
@@ -277,7 +286,7 @@ var importCmd = &cobra.Command{
 	Short: "import data from your Shopmonkey instance to your system",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		confirmed, _ := cmd.Flags().GetBool("confirm")
+		noconfirmed, _ := cmd.Flags().GetBool("no-confirm")
 		providerUrl := mustFlagString(cmd, "url", true)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		parallel := mustFlagInt(cmd, "parallel", false)
@@ -290,7 +299,7 @@ var importCmd = &cobra.Command{
 		defer closer()
 		logger = logger.WithPrefix("[import]")
 
-		if !dryRun && !confirmed {
+		if !dryRun && !noconfirmed {
 
 			u, err := url.Parse(providerUrl)
 			if err != nil {
@@ -302,7 +311,7 @@ var importCmd = &cobra.Command{
 			if u.Path != "" {
 				name = name + ":" + u.Path[1:]
 			}
-
+			var confirmed bool
 			form := huh.NewForm(
 				huh.NewGroup(
 					huh.NewNote().
@@ -446,7 +455,7 @@ func init() {
 	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
 	importCmd.Flags().String("job-id", "", "resume an existing job")
-	importCmd.Flags().Bool("confirm", false, "skip the confirmation prompt")
+	importCmd.Flags().Bool("no-confirm", false, "skip the confirmation prompt")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")
 	importCmd.Flags().StringSlice("locationIds", nil, "only import these location ids")

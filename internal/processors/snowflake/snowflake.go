@@ -90,7 +90,7 @@ func (p *snowflakeProcessor) MaxBatchSize() int {
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
 func (p *snowflakeProcessor) Process(event internal.DBChangeEvent) (bool, error) {
-	p.logger.Trace("processing event: %s", event)
+	p.logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql, err := toSQL(event, p.schema)

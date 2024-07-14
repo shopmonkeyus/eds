@@ -263,7 +263,9 @@ var serverCmd = &cobra.Command{
 				failures++
 			} else {
 				ec := result.ProcessState.ExitCode()
-				sendEndAndUpload(logger, apiurl, apikey, sessionId, ec != 0, result.LogFileBundle)
+				if ec != 2 {
+					sendEndAndUpload(logger, apiurl, apikey, sessionId, ec != 0, result.LogFileBundle)
+				}
 				if ec == 0 {
 					break
 				}

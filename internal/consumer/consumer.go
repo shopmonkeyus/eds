@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	emptyBufferPauseTime = time.Millisecond * 50 // time to wait when the buffer is empty to prevent CPU spinning
-	minPendingLatency    = time.Second           // minimum accumulation period before flushing
-	maxPendingLatency    = time.Second * 30      // maximum accumulation period before flushing
+	emptyBufferPauseTime           = time.Millisecond * 50 // time to wait when the buffer is empty to prevent CPU spinning
+	minPendingLatency              = time.Second           // minimum accumulation period before flushing
+	maxPendingLatency              = time.Second * 30      // maximum accumulation period before flushing
+	traceLogNatsProcessDetail bool = false                 // turn on trace logging for nats processing
 )
 
 // ConsumerConfig is the configuration for the consumer.
@@ -161,7 +162,7 @@ func (c *Consumer) bufferer() {
 				"subject": msg.Subject(),
 			})
 			if m, err := msg.Metadata(); err == nil {
-				log.Trace("msg received (deliveries: %d)", m.NumDelivered)
+				log.Trace("msg received - deliveries=%d,consumer=%d,stream=%d,pending=%d", m.NumDelivered, m.Sequence.Consumer, m.Sequence.Stream, len(c.pending))
 			}
 			c.pending = append(c.pending, msg)
 			buf := msg.Data()
@@ -177,7 +178,17 @@ func (c *Consumer) bufferer() {
 				c.handleError(err)
 				return
 			}
-			if flush || len(c.pending) >= c.processor.MaxBatchSize() {
+			maxsize := c.processor.MaxBatchSize()
+			if maxsize <= 0 {
+				maxsize = c.max
+			}
+			if traceLogNatsProcessDetail {
+				log.Trace("process returned. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
+			}
+			if flush || len(c.pending) >= maxsize {
+				if traceLogNatsProcessDetail {
+					log.Trace("flush 1 called. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
+				}
 				if c.flush() {
 					return
 				}
@@ -191,6 +202,9 @@ func (c *Consumer) bufferer() {
 				continue // if we have a large number, just keep going to try and catchup
 			}
 			if len(c.pending) >= c.max || time.Since(*c.pendingStarted) >= maxPendingLatency {
+				if traceLogNatsProcessDetail {
+					log.Trace("flush 2 called. flush=%v,pending=%d,max=%d,started=%v", flush, len(c.pending), maxsize, time.Since(*c.pendingStarted))
+				}
 				if c.flush() {
 					return
 				}
@@ -199,6 +213,9 @@ func (c *Consumer) bufferer() {
 		default:
 			count := len(c.pending)
 			if count > 0 && count < c.max && time.Since(*c.pendingStarted) >= minPendingLatency {
+				if traceLogNatsProcessDetail {
+					c.logger.Trace("flush 3 called.count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
+				}
 				if c.flush() {
 					return
 				}

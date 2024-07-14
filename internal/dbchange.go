@@ -17,5 +17,5 @@ type DBChangeEvent struct {
 }
 
 func (c *DBChangeEvent) String() string {
-	return "DBChangeEvent[" + c.Operation + " " + c.Table + " " + c.ID + "]"
+	return "DBChangeEvent[op=" + c.Operation + ",table=" + c.Table + ",id=" + c.ID + "]"
 }
