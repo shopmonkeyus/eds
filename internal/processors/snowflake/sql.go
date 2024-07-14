@@ -201,10 +201,10 @@ func getConnectionStringFromURL(urlString string) (string, error) {
 	return str.String(), nil
 }
 
-func propTypeToSQLType(propType string, format string) string {
-	switch propType {
+func propTypeToSQLType(property internal.SchemaProperty) string {
+	switch property.Type {
 	case "string":
-		if format == "date-time" {
+		if property.Format == "date-time" {
 			return "TIMESTAMP_NTZ"
 		}
 		return "STRING"
@@ -217,6 +217,9 @@ func propTypeToSQLType(propType string, format string) string {
 	case "object":
 		return "STRING"
 	case "array":
+		if property.Items != nil && property.Items.Enum != nil {
+			return "STRING" // this is an enum but we want to represent it as a string
+		}
 		return "VARIANT"
 	default:
 		return "STRING"
@@ -242,7 +245,7 @@ func createSQL(s *internal.Schema) string {
 		sql.WriteString("\t")
 		sql.WriteString(util.QuoteIdentifier(name))
 		sql.WriteString(" ")
-		sql.WriteString(propTypeToSQLType(prop.Type, prop.Format))
+		sql.WriteString(propTypeToSQLType(prop))
 		if util.SliceContains(s.Required, name) && !prop.Nullable {
 			sql.WriteString(" NOT NULL")
 		}

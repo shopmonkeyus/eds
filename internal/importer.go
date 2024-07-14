@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -61,7 +62,11 @@ func NewImporter(ctx context.Context, logger logger.Logger, urlString string, re
 	}
 	importer := importerRegistry[u.Scheme]
 	if importer == nil {
-		return nil, fmt.Errorf("no importer registered for protocol %s", u.Scheme)
+		importers := []string{}
+		for k := range importerRegistry {
+			importers = append(importers, k)
+		}
+		return nil, fmt.Errorf("no importer registered for protocol %s. the following are supported: %s", u.Scheme, strings.Join(importers, ", "))
 	}
 	return importer, nil
 }

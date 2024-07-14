@@ -10,7 +10,8 @@ import (
 )
 
 type FileRegistry struct {
-	schema internal.SchemaMap
+	schema  internal.SchemaMap
+	objects tableToObjectNameMap
 }
 
 var _ internal.SchemaRegistry = (*FileRegistry)(nil)
@@ -47,6 +48,6 @@ func NewFileRegistry(schemaFile string) (internal.SchemaRegistry, error) {
 		return nil, fmt.Errorf("error decoding schema file: %w", err)
 	}
 	of.Close()
-	registry.schema = sortTable(registry.schema)
+	registry.schema, registry.objects = sortTable(registry.schema)
 	return &registry, nil
 }

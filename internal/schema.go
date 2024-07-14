@@ -1,18 +1,29 @@
 package internal
 
+type ItemsType struct {
+	Type   string   `json:"type"`
+	Enum   []string `json:"enum,omitempty"`
+	Format string   `json:"format,omitempty"`
+}
+
 // SchemaProperty is the property metaedata of a schema.
 type SchemaProperty struct {
-	Type     string `json:"type"`
-	Format   string `json:"format"`
-	Nullable bool   `json:"nullable"`
+	Type                 string     `json:"type"`
+	Format               string     `json:"format,omitempty"`
+	Nullable             bool       `json:"nullable,omitempty"`
+	Items                *ItemsType `json:"items,omitempty"`
+	AdditionalProperties *bool      `json:"additionalProperties,omitempty"`
+	Comment              *string    `json:"$comment,omitempty"`
+	Deprecated           *bool      `json:"deprecated,omitempty"`
 }
 
 // Schema is the schema metadata for a table.
 type Schema struct {
-	Properties  map[string]SchemaProperty `json:"properties"`
-	Required    []string                  `json:"required"`
-	PrimaryKeys []string                  `json:"primaryKeys"`
-	Table       string                    `json:"table"`
+	Properties   map[string]SchemaProperty `json:"properties"`
+	Required     []string                  `json:"required"`
+	PrimaryKeys  []string                  `json:"primaryKeys"`
+	Table        string                    `json:"table"`
+	ModelVersion string                    `json:"modelVersion"`
 
 	Columns []string `json:"-"`
 }

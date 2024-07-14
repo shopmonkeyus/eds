@@ -214,10 +214,10 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 	}
 }
 
-func propTypeToSQLType(propType string, format string) string {
-	switch propType {
+func propTypeToSQLType(property internal.SchemaProperty) string {
+	switch property.Type {
 	case "string":
-		if format == "date-time" {
+		if property.Format == "date-time" {
 			return "TIMESTAMP WITH TIME ZONE"
 		}
 		return "TEXT"
@@ -230,6 +230,9 @@ func propTypeToSQLType(propType string, format string) string {
 	case "object":
 		return "JSONB"
 	case "array":
+		if property.Items != nil && property.Items.Enum != nil {
+			return "VARCHAR(64)" // this is an enum but we want to represent it as a string
+		}
 		return "JSONB"
 	default:
 		return "TEXT"
@@ -258,7 +261,7 @@ func createSQL(s *internal.Schema) string {
 		sql.WriteString("\t")
 		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
-		sql.WriteString(propTypeToSQLType(prop.Type, prop.Format))
+		sql.WriteString(propTypeToSQLType(prop))
 		if util.SliceContains(s.Required, name) && !prop.Nullable {
 			sql.WriteString(" NOT NULL")
 		}
