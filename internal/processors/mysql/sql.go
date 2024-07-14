@@ -1,141 +1,30 @@
-package postgresql
+package mysql
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"net/url"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/lib/pq"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 )
-
-const magicEscape = "$_H_$"
-
-var safeCharacters = regexp.MustCompile(`^["/.,;:$%/@!#$%^&*(){}\[\]|\\<>?~a-zA-Z0-9_\- ]+$`)
-
-var badCharacters = regexp.MustCompile(`\x00`) // in v1 we have the null character that show up in messages
-
-func quoteString(str string) string {
-	if len(str) != 0 && badCharacters.MatchString(str) {
-		str = badCharacters.ReplaceAllString(str, "")
-	}
-	if len(str) == 0 || safeCharacters.MatchString(str) {
-		return `'` + str + `'`
-	}
-	return magicEscape + str + magicEscape
-}
-
-func quoteBytes(buf []byte) string {
-	return `'\x` + hex.EncodeToString(buf) + "'"
-}
-
-func quoteValue(arg any) (str string) {
-	switch arg := arg.(type) {
-	case nil:
-		str = "null"
-	case int:
-		str = strconv.FormatInt(int64(arg), 10)
-	case int8:
-		str = strconv.FormatInt(int64(arg), 10)
-	case int16:
-		str = strconv.FormatInt(int64(arg), 10)
-	case int32:
-		str = strconv.FormatInt(int64(arg), 10)
-	case *int32:
-		if arg == nil {
-			str = "null"
-		} else {
-			str = strconv.FormatInt(int64(*arg), 10)
-		}
-	case int64:
-		str = strconv.FormatInt(arg, 10)
-	case *int64:
-		if arg == nil {
-			str = "null"
-		} else {
-			str = strconv.FormatInt(*arg, 10)
-		}
-	case float32:
-		str = strconv.FormatFloat(float64(arg), 'f', -1, 32)
-	case float64:
-		str = strconv.FormatFloat(arg, 'f', -1, 64)
-	case *float64:
-		if arg == nil {
-			str = "null"
-		} else {
-			str = strconv.FormatFloat(*arg, 'f', -1, 64)
-		}
-	case bool:
-		str = strconv.FormatBool(arg)
-	case *bool:
-		if arg == nil {
-			str = "null"
-		} else {
-			str = strconv.FormatBool(*arg)
-		}
-	case []byte:
-		str = quoteBytes(arg)
-	case *string:
-		if arg == nil {
-			str = "null"
-		} else {
-			str = quoteString(*arg)
-		}
-	case string:
-		str = quoteString(arg)
-	case *time.Time:
-		if arg == nil {
-			str = "null"
-		} else {
-			str = (*arg).Truncate(time.Microsecond).Format("'2006-01-02 15:04:05.999999999Z07:00:00'")
-		}
-	case time.Time:
-		str = arg.Truncate(time.Microsecond).Format("'2006-01-02 15:04:05.999999999Z07:00:00'")
-	case []string:
-		var ns []string
-		for _, thes := range arg {
-			ns = append(ns, pq.QuoteLiteral(thes))
-		}
-		str = "ARRAY[" + strings.Join(ns, ",") + "]"
-	default:
-		value := reflect.ValueOf(arg)
-		if value.Kind() == reflect.Ptr {
-			if value.IsNil() {
-				str = "null"
-			} else {
-				if value.Elem().Kind() == reflect.Struct {
-					str = quoteString(util.JSONStringify(arg))
-				} else {
-					str = quoteString(fmt.Sprintf("%v", value.Elem().Interface()))
-				}
-			}
-		} else {
-			str = quoteString(util.JSONStringify(arg))
-		}
-	}
-	return str
-}
 
 var needsQuote = regexp.MustCompile(`[A-Z0-9_\s]`)
 var keywords = regexp.MustCompile(`(?i)\b(USER|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|GROUP BY|ORDER BY|HAVING|AND|OR|CREATE|DROP|ALTER|TABLE|INDEX|ON|INTO|VALUES|SET|AS|DISTINCT|TYPE|DEFAULT|ORDER|GROUP|LIMIT|SUM|TOTAL|START|END|BEGIN|COMMIT|ROLLBACK|PRIMARY|AUTHORIZATION)\b`)
 
 func quoteIdentifier(val string) string {
 	if needsQuote.MatchString(val) || keywords.MatchString(val) {
-		return pq.QuoteIdentifier(val)
+		return "`" + val + "`"
 	}
 	return val
 }
 
 func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string) string {
 	var sql strings.Builder
-	sql.WriteString("INSERT INTO ")
+	sql.WriteString("REPLACE INTO ")
 	sql.WriteString(quoteIdentifier(table))
 	var columns []string
 	for _, name := range model.Columns {
@@ -179,14 +68,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		}
 	}
 	sql.WriteString(strings.Join(insertVals, ","))
-	sql.WriteString(") ON CONFLICT (id) DO ")
-	if len(updateValues) == 0 {
-		sql.WriteString("NOTHING")
-	} else {
-		sql.WriteString("UPDATE SET ")
-		sql.WriteString(strings.Join(updateValues, ","))
-	}
-	sql.WriteString(";\n")
+	sql.WriteString(");\n")
 	return sql.String()
 }
 
@@ -214,11 +96,14 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 	}
 }
 
-func propTypeToSQLType(propType string, format string) string {
+func propTypeToSQLType(propType string, format string, isPrimaryKey bool) string {
 	switch propType {
 	case "string":
+		if isPrimaryKey {
+			return "VARCHAR(64)"
+		}
 		if format == "date-time" {
-			return "TIMESTAMP WITH TIME ZONE"
+			return "TIMESTAMP"
 		}
 		return "TEXT"
 	case "integer":
@@ -228,9 +113,9 @@ func propTypeToSQLType(propType string, format string) string {
 	case "boolean":
 		return "BOOLEAN"
 	case "object":
-		return "JSONB"
+		return "JSON"
 	case "array":
-		return "JSONB"
+		return "JSON"
 	default:
 		return "TEXT"
 	}
@@ -258,7 +143,7 @@ func createSQL(s *internal.Schema) string {
 		sql.WriteString("\t")
 		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
-		sql.WriteString(propTypeToSQLType(prop.Type, prop.Format))
+		sql.WriteString(propTypeToSQLType(prop.Type, prop.Format, util.SliceContains(s.PrimaryKeys, name)))
 		if util.SliceContains(s.Required, name) && !prop.Nullable {
 			sql.WriteString(" NOT NULL")
 		}
@@ -274,6 +159,28 @@ func createSQL(s *internal.Schema) string {
 		}
 		sql.WriteString(")")
 	}
-	sql.WriteString("\n);\n")
+	sql.WriteString("\n) CHARACTER SET=utf8mb4;\n")
 	return sql.String()
+}
+
+func parseURLToDSN(urlstr string) (string, error) {
+	//username:password@protocol(address)/dbname?param=value
+	u, err := url.Parse(urlstr)
+	if err != nil {
+		return "", fmt.Errorf("error parsing url: %w", err)
+	}
+	vals := u.Query()
+	vals.Set("multiStatements", "true")
+	var dsn strings.Builder
+	if u.User != nil {
+		dsn.WriteString(u.User.String())
+		dsn.WriteString("@")
+	}
+	dsn.WriteString("tcp(")
+	dsn.WriteString(u.Host)
+	dsn.WriteString(")")
+	dsn.WriteString(u.Path)
+	dsn.WriteString("?")
+	dsn.WriteString(vals.Encode())
+	return dsn.String(), nil
 }

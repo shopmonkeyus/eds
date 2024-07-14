@@ -11,8 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -110,10 +108,8 @@ func (e *exportJobResponse) GetProgress() float64 {
 }
 
 func (e *exportJobResponse) String() string {
-	var tablesAndStatus []string
 	var pending, completed, failed int
-	for table, data := range e.Tables {
-		tablesAndStatus = append(tablesAndStatus, fmt.Sprintf("%s: %s", table, data.Status))
+	for _, data := range e.Tables {
 		switch data.Status {
 		case "Pending":
 			pending++
@@ -123,8 +119,7 @@ func (e *exportJobResponse) String() string {
 			failed++
 		}
 	}
-	slices.Sort(tablesAndStatus)
-	return fmt.Sprintf("%s\n %d/%d", strings.Join(tablesAndStatus, "\n"), completed, len(e.Tables))
+	return fmt.Sprintf("%d/%d", completed, len(e.Tables))
 }
 
 func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {

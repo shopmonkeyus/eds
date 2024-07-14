@@ -12,6 +12,23 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - 22181:2181
+  mysql:
+    image: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: eds
+      MYSQL_USER: eds
+      MYSQL_PASSWORD: eds
+      MYSQL_DATABASE: eds
+    ports:
+      - 13306:3306
+  postgres:
+    image: postgres
+    environment:
+      POSTGRES_USER: eds
+      POSTGRES_PASSWORD: eds
+      POSTGRES_DB: eds
+    ports:
+      - 15432:5432
   kafka:
     image: confluentinc/cp-kafka:7.4.4
     depends_on:
