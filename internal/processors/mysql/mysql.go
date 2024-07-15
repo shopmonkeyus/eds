@@ -33,7 +33,7 @@ var _ internal.ProcessorLifecycle = (*mysqlProcessor)(nil)
 var _ internal.Importer = (*mysqlProcessor)(nil)
 var _ internal.ProcessorHelp = (*mysqlProcessor)(nil)
 
-func (p *mysqlProcessor) connectToDB(urlstr string) (*sql.DB, error) {
+func (p *mysqlProcessor) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
 	dsn, err := parseURLToDSN(urlstr)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing url: %w", err)
@@ -42,7 +42,7 @@ func (p *mysqlProcessor) connectToDB(urlstr string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
@@ -53,7 +53,7 @@ func (p *mysqlProcessor) connectToDB(urlstr string) (*sql.DB, error) {
 
 // Start the processor. This is called once at the beginning of the processor's lifecycle.
 func (p *mysqlProcessor) Start(config internal.ProcessorConfig) error {
-	db, err := p.connectToDB(config.URL)
+	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func (p *mysqlProcessor) Flush() error {
 
 // Import is called to import data from the source.
 func (p *mysqlProcessor) Import(config internal.ImporterConfig) error {
-	db, err := p.connectToDB(config.URL)
+	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}

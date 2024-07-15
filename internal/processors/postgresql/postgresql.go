@@ -32,12 +32,12 @@ var _ internal.ProcessorLifecycle = (*postgresqlProcessor)(nil)
 var _ internal.Importer = (*postgresqlProcessor)(nil)
 var _ internal.ProcessorHelp = (*postgresqlProcessor)(nil)
 
-func (p *postgresqlProcessor) connectToDB(url string) (*sql.DB, error) {
+func (p *postgresqlProcessor) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", url)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
@@ -48,7 +48,7 @@ func (p *postgresqlProcessor) connectToDB(url string) (*sql.DB, error) {
 
 // Start the processor. This is called once at the beginning of the processor's lifecycle.
 func (p *postgresqlProcessor) Start(config internal.ProcessorConfig) error {
-	db, err := p.connectToDB(config.URL)
+	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (p *postgresqlProcessor) Flush() error {
 
 // Import is called to import data from the source.
 func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
-	db, err := p.connectToDB(config.URL)
+	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
