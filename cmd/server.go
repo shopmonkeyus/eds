@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,12 +31,15 @@ type sessionStart struct {
 	OsInfo    any    `json:"osinfo"`
 }
 
+type edsSession struct {
+	SessionId  string `json:"sessionId"`
+	Credential string `json:"credential"`
+}
+
 type sessionStartResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
-		SessionId string `json:"sessionId"`
-	} `json:"data"`
+	Success bool       `json:"success"`
+	Message string     `json:"message"`
+	Data    edsSession `json:"data"`
 }
 
 type sessionEnd struct {
@@ -50,23 +54,34 @@ type sessionEndResponse struct {
 	} `json:"data"`
 }
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string) (string, error) {
+func writeCredsToFile(data string, filename string) error {
+	buf, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return fmt.Errorf("failed to decode base64: %w", err)
+	}
+	if err := os.WriteFile(filename, buf, 0600); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+	return nil
+}
+
+func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
-		return "", fmt.Errorf("failed to get local IP: %w", err)
+		return nil, fmt.Errorf("failed to get local IP: %w", err)
 	}
 	machineid, err := util.GetMachineId()
 	if err != nil {
-		return "", fmt.Errorf("failed to get machine ID: %w", err)
+		return nil, fmt.Errorf("failed to get machine ID: %w", err)
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
-		return "", fmt.Errorf("failed to get hostname: %w", err)
+		return nil, fmt.Errorf("failed to get hostname: %w", err)
 	}
 	osinfo, err := util.GetSystemInfo()
 	if err != nil {
-		return "", fmt.Errorf("failed to get system info: %w", err)
+		return nil, fmt.Errorf("failed to get system info: %w", err)
 	}
 	body.MachineId = machineid
 	body.IPAddress = ipaddress
@@ -75,28 +90,28 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string) (string, erro
 	body.OsInfo = osinfo
 	req, err := http.NewRequest("POST", apiURL+"/v3/eds", bytes.NewBuffer([]byte(util.JSONStringify(body))))
 	if err != nil {
-		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to send session start: %w", err)
+		return nil, fmt.Errorf("failed to send session start: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to send session start. status code=%d. %s", resp.StatusCode, string(buf))
+		return nil, fmt.Errorf("failed to send session start. status code=%d. %s", resp.StatusCode, string(buf))
 	}
-	var s sessionStartResponse
-	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+	var sessionResp sessionStartResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sessionResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-	if !s.Success {
-		return "", fmt.Errorf("failed to start session: %s", s.Message)
+	if !sessionResp.Success {
+		return nil, fmt.Errorf("failed to start session: %s", sessionResp.Message)
 	}
-	logger.Trace("session %s started successfully", s.Data.SessionId)
-	return s.Data.SessionId, nil
+	logger.Trace("session %s started successfully", sessionResp.Data.SessionId)
+	return &sessionResp.Data, nil
 }
 
 func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId string, errored bool) (string, error) {
@@ -214,6 +229,7 @@ var serverCmd = &cobra.Command{
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
+		credsFile := mustFlagString(cmd, "creds", false)
 
 		var skipping bool
 		var _args []string
@@ -244,14 +260,25 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			sessionId, err := sendStart(logger, apiurl, apikey)
+			session, err := sendStart(logger, apiurl, apikey)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
+			if credsFile == "" {
+				// write credential to file
+				credsFile = filepath.Join(os.TempDir(), fmt.Sprintf("eds-%s.creds", session.SessionId))
+				if err := writeCredsToFile(session.Credential, credsFile); err != nil {
+					logger.Fatal("failed to write creds to file: %s", err)
+				}
+				logger.Trace("creds written to %s", credsFile)
+			} else {
+				logger.Trace("using creds file: %s", credsFile)
+			}
+			args := append(_args, "--creds", credsFile)
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
 				Command:          "fork",
-				Args:             _args,
+				Args:             args,
 				LogFilenameLabel: "server",
 				SaveLogs:         true,
 				WriteToStd:       true,
@@ -264,7 +291,7 @@ var serverCmd = &cobra.Command{
 			} else {
 				ec := result.ProcessState.ExitCode()
 				if ec != 2 {
-					sendEndAndUpload(logger, apiurl, apikey, sessionId, ec != 0, result.LogFileBundle)
+					sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, result.LogFileBundle)
 				}
 				if ec == 0 {
 					break
@@ -354,7 +381,7 @@ func init() {
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
-	serverCmd.Flags().Int("replicas", 1, "the number of consumer replicas")
+	serverCmd.Flags().Int("replicas", -1, "the number of consumer replicas")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	serverCmd.Flags().Int("health-port", 8080, "the port to listen for health checks")
