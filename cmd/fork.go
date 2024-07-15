@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -50,9 +51,21 @@ var forkCmd = &cobra.Command{
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
-		replicas := mustFlagInt(cmd, "replicas", true)
+		replicas := mustFlagInt(cmd, "replicas", false)
 		healthPort := mustFlagInt(cmd, "health-port", false)
 		serverStarted := time.Now()
+
+		// dynamically set based on nats server if not set
+		if replicas <= 0 {
+			if strings.Contains(natsurl, "localhost") || strings.Contains(natsurl, "127.0.0.1") {
+				replicas = 1
+			} else {
+				replicas = 3
+			}
+		} else if replicas > 3 {
+			logger.Error("replicas must be between 1-3")
+			os.Exit(2)
+		}
 
 		registry, err := registry.NewFileRegistry(schemaFile)
 		if err != nil {
@@ -110,7 +123,7 @@ func init() {
 	forkCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "Snowflake Database connection string")
 	forkCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
-	forkCmd.Flags().Int("replicas", 1, "the number of consumer replicas")
+	forkCmd.Flags().Int("replicas", -1, "the number of consumer replicas")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
