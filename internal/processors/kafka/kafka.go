@@ -19,7 +19,7 @@ type messageBalancer struct {
 
 func (b *messageBalancer) Balance(msg gokafka.Message, partitions ...int) int {
 	if len(partitions) == 1 {
-		return 0
+		return partitions[0]
 	}
 	for _, header := range msg.Headers {
 		if header.Key == edsPartitionKeyHeader {
