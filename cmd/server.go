@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -32,8 +34,8 @@ type sessionStart struct {
 }
 
 type edsSession struct {
-	SessionId  string `json:"sessionId"`
-	Credential string `json:"credential"`
+	SessionId  string  `json:"sessionId"`
+	Credential *string `json:"credential"`
 }
 
 type sessionStartResponse struct {
@@ -51,6 +53,14 @@ type sessionEndResponse struct {
 	Message string `json:"message"`
 	Data    struct {
 		URL string `json:"url"`
+	} `json:"data"`
+}
+
+type sessionRenewResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Credential *string `json:"credential"`
 	} `json:"data"`
 }
 
@@ -143,6 +153,33 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 	return s.Data.URL, nil
 }
 
+func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
+	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send renew end: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		buf, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to send session end. status code=%d. %s", resp.StatusCode, string(buf))
+	}
+	var s sessionRenewResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if !s.Success {
+		return nil, fmt.Errorf("failed to renew session: %s", s.Message)
+	}
+	logger.Trace("session %s renew successfully: %s", sessionId)
+	return s.Data.Credential, nil
+}
+
 func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
 	of, err := os.Open(logFileBundle)
 	if err != nil {
@@ -227,8 +264,6 @@ var serverCmd = &cobra.Command{
 			logger.Fatal("consumer-prefix is deprecated, use --consumer-suffix instead")
 		}
 
-		// FIXME: we need to re-issue nats credential at a minimum of once per week since thats how long expiry is
-
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
 		var credsFile string
@@ -258,6 +293,37 @@ var serverCmd = &cobra.Command{
 		runHealthCheckServer(logger, healthPort, fwdPort)
 		_args = append(_args, "--health-port", fmt.Sprintf("%d", fwdPort))
 
+		var currentProcess *os.Process
+		var sessionId string
+
+		processCallback := func(p *os.Process) {
+			currentProcess = p
+		}
+
+		go func() {
+			ticker := time.NewTicker(time.Hour * 24 * 6)
+			defer ticker.Stop()
+			for {
+				<-ticker.C
+				creds, err := sendRenew(logger, apiurl, apikey, sessionId)
+				if err != nil {
+					logger.Fatal("failed to renew session: %s", err)
+				}
+				if creds != nil {
+					if err := writeCredsToFile(*creds, credsFile); err != nil {
+						logger.Fatal("failed to write creds to file: %s", err)
+					}
+					if currentProcess != nil {
+						currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
+					} else {
+						logger.Fatal("no child process to signal on credentials renew")
+					}
+				} else {
+					logger.Trace("no new credentials to renew")
+				}
+			}
+		}()
+
 		// main loop
 		var failures int
 		for {
@@ -268,10 +334,11 @@ var serverCmd = &cobra.Command{
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
-			if credsFile == "" {
+			sessionId = session.SessionId
+			if credsFile == "" && session.Credential != nil {
 				// write credential to file
 				credsFile = filepath.Join(os.TempDir(), fmt.Sprintf("eds-%s.creds", session.SessionId))
-				if err := writeCredsToFile(session.Credential, credsFile); err != nil {
+				if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
 					logger.Fatal("failed to write creds to file: %s", err)
 				}
 				logger.Trace("creds written to %s", credsFile)
@@ -288,7 +355,9 @@ var serverCmd = &cobra.Command{
 				WriteToStd:       true,
 				ForwardInterrupt: true,
 				LogFileSink:      true,
+				ProcessCallback:  processCallback,
 			})
+			currentProcess = nil
 			if err != nil && result == nil {
 				logger.Error("failed to fork: %s", err)
 				failures++

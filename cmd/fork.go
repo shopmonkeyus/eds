@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -57,7 +59,7 @@ var forkCmd = &cobra.Command{
 
 		// dynamically set based on nats server if not set
 		if replicas <= 0 {
-			if strings.Contains(natsurl, "localhost") || strings.Contains(natsurl, "127.0.0.1") {
+			if util.IsLocalhost(natsurl) {
 				replicas = 1
 			} else {
 				replicas = 3
@@ -81,23 +83,43 @@ var forkCmd = &cobra.Command{
 
 		defer processor.Stop()
 
-		consumer, err := consumer.NewConsumer(consumer.ConsumerConfig{
-			Context:          ctx,
-			Logger:           logger,
-			URL:              natsurl,
-			Credentials:      creds,
-			Suffix:           consumerSuffix,
-			MaxAckPending:    maxAckPending,
-			MaxPendingBuffer: maxPendingBuffer,
-			Replicas:         replicas,
-			Processor:        processor,
-		})
-		if err != nil {
-			logger.Error("error creating consumer: %s", err)
-			os.Exit(2)
-		}
-
 		runHealthCheckServerFork(logger, healthPort)
+
+		// create a channel to listen for SIGHUP to restart the consumer
+		restart := make(chan os.Signal, 1)
+		signal.Notify(restart, syscall.SIGHUP)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			var completed bool
+			for !completed {
+				consumer, err := consumer.NewConsumer(consumer.ConsumerConfig{
+					Context:          ctx,
+					Logger:           logger,
+					URL:              natsurl,
+					Credentials:      creds,
+					Suffix:           consumerSuffix,
+					MaxAckPending:    maxAckPending,
+					MaxPendingBuffer: maxPendingBuffer,
+					Replicas:         replicas,
+					Processor:        processor,
+				})
+				if err != nil {
+					logger.Error("error creating consumer: %s", err)
+					os.Exit(2)
+				}
+				select {
+				case <-ctx.Done():
+					completed = true
+				case <-restart:
+					logger.Debug("restarting consumer on SIGHUP")
+				}
+				consumer.Stop()
+			}
+		}()
 
 		logger.Info("server is running")
 
@@ -106,8 +128,8 @@ var forkCmd = &cobra.Command{
 
 		logger.Debug("server is stopping")
 
-		consumer.Stop()
 		processor.Stop()
+		wg.Done()
 
 		logger.Trace("server was up for %v", time.Since(serverStarted))
 		logger.Info("👋 Bye")
