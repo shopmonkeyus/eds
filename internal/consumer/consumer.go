@@ -307,15 +307,16 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	}
 
 	jsConfig := jetstream.ConsumerConfig{
-		Durable:         name,
-		MaxAckPending:   config.MaxAckPending,
-		MaxDeliver:      1_000,
-		AckWait:         time.Minute * 5,
-		Replicas:        replicas,
-		DeliverPolicy:   jetstream.DeliverNewPolicy,
-		MaxRequestBatch: config.MaxPendingBuffer,
-		FilterSubjects:  subjects,
-		AckPolicy:       jetstream.AckExplicitPolicy,
+		Durable:           name,
+		MaxAckPending:     config.MaxAckPending,
+		MaxDeliver:        1_000,
+		AckWait:           time.Minute * 5,
+		Replicas:          replicas,
+		DeliverPolicy:     jetstream.DeliverNewPolicy,
+		MaxRequestBatch:   config.MaxPendingBuffer,
+		FilterSubjects:    subjects,
+		AckPolicy:         jetstream.AckExplicitPolicy,
+		InactiveThreshold: time.Hour * 24 * 7,
 	}
 	createConsumerContext, cancelCreate := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
 	defer cancelCreate()
