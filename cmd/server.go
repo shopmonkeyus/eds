@@ -227,9 +227,13 @@ var serverCmd = &cobra.Command{
 			logger.Fatal("consumer-prefix is deprecated, use --consumer-suffix instead")
 		}
 
+		// FIXME: we need to re-issue nats credential at a minimum of once per week since thats how long expiry is
+
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
-		credsFile := mustFlagString(cmd, "creds", false)
+		var credsFile string
+
+		defer os.Remove(credsFile) // make sure we remove the temporary credential
 
 		var skipping bool
 		var _args []string
@@ -375,7 +379,6 @@ func init() {
 	// NOTE: sync these with forkCmd
 	serverCmd.Flags().String("consumer-prefix", "", "deprecated - use --consumer-suffix instead")
 	serverCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
-	serverCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().String("url", "", "provider connection string")
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
