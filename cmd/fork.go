@@ -35,6 +35,23 @@ func runHealthCheckServerFork(logger logger.Logger, port int) {
 	}()
 }
 
+func getReplicas(logger logger.Logger, cmd *cobra.Command, natsurl string) int {
+	replicas := mustFlagInt(cmd, "replicas", false)
+
+	// dynamically set based on nats server if not set
+	if replicas <= 0 {
+		if util.IsLocalhost(natsurl) {
+			return 1
+		}
+		return 3
+	}
+	if replicas > 3 {
+		logger.Error("replicas must be between 1-3")
+		os.Exit(2)
+	}
+	return replicas
+}
+
 var forkCmd = &cobra.Command{
 	Use:   "fork",
 	Short: "Run the server",
@@ -53,21 +70,10 @@ var forkCmd = &cobra.Command{
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
-		replicas := mustFlagInt(cmd, "replicas", false)
 		healthPort := mustFlagInt(cmd, "health-port", false)
 		serverStarted := time.Now()
 
-		// dynamically set based on nats server if not set
-		if replicas <= 0 {
-			if util.IsLocalhost(natsurl) {
-				replicas = 1
-			} else {
-				replicas = 3
-			}
-		} else if replicas > 3 {
-			logger.Error("replicas must be between 1-3")
-			os.Exit(2)
-		}
+		replicas := getReplicas(logger, cmd, natsurl)
 
 		registry, err := registry.NewFileRegistry(schemaFile)
 		if err != nil {
@@ -117,7 +123,9 @@ var forkCmd = &cobra.Command{
 				case <-restart:
 					logger.Debug("restarting consumer on SIGHUP")
 				}
-				consumer.Stop()
+				if err := consumer.Stop(); err != nil {
+					logger.Error("error stopping consumer: %s", err)
+				}
 			}
 		}()
 
@@ -129,7 +137,8 @@ var forkCmd = &cobra.Command{
 		logger.Debug("server is stopping")
 
 		processor.Stop()
-		wg.Done()
+		cancel()
+		wg.Wait()
 
 		logger.Trace("server was up for %v", time.Since(serverStarted))
 		logger.Info("👋 Bye")
@@ -144,7 +153,7 @@ func init() {
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "Snowflake Database connection string")
-	forkCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
+	forkCmd.Flags().String("schema", "schema.json", "the Shopmonkey schema file")
 	forkCmd.Flags().Int("replicas", -1, "the number of consumer replicas")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")

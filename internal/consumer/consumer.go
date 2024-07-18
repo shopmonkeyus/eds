@@ -240,30 +240,87 @@ func (c *Consumer) process(msg jetstream.Msg) {
 	c.buffer <- msg
 }
 
-// NewConsumer creates a new nats consumer
-func NewConsumer(config ConsumerConfig) (*Consumer, error) {
+type heartbeat struct {
+	SessionId string `json:"sessionId" msgpack:"sessionId"`
+}
 
+func (c *Consumer) heartbeat(subject string, payload []byte) error {
+	msg := nats.NewMsg(subject)
+	msgId := util.Hash(time.Now().UnixNano())
+	msg.Header.Set(nats.MsgIdHdr, msgId)
+	msg.Data = payload
+	if err := c.conn.PublishMsg(msg); err != nil {
+		return err
+	}
+	c.logger.Trace("heartbeat sent %s", msgId)
+	return nil
+}
+
+// sendHeartbeats sends a heartbeat every minute
+func (c *Consumer) sendHeartbeats(sessionId string) {
+	// payload never changes, so we can just create it once
+	heartbeatSubject := fmt.Sprintf("eds.heartbeat.%s", sessionId)
+	heartbeatPayload := []byte(util.JSONStringify(heartbeat{SessionId: sessionId}))
+	// first heartbeat
+	if err := c.heartbeat(heartbeatSubject, heartbeatPayload); err != nil {
+		c.logger.Error("error sending heartbeat: %s", err)
+	}
+	// we dont need the WG here since this doesnt need to gracefully complete
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			c.logger.Debug("context done, stopping heartbeat")
+			return
+		case <-ticker.C:
+			if err := c.heartbeat(heartbeatSubject, heartbeatPayload); err != nil {
+				c.logger.Error("error sending heartbeat: %s", err)
+			}
+		}
+	}
+}
+
+type CredentialInfo struct {
+	companyIDs  []string
+	companyName string
+	sessionID   string
+}
+
+func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Conn, *CredentialInfo, error) {
 	var natsCredentials nats.Option
-	var companyName string
-	var companyIDs []string
-	var err error
+	var info *CredentialInfo
 
-	if util.IsLocalhost(config.URL) {
-		companyName = "dev"
-		companyIDs = []string{"*"}
+	if util.IsLocalhost(url) {
+		info = &CredentialInfo{
+			companyIDs:  []string{"*"},
+			companyName: "dev",
+		}
+		logger.Debug("using localhost nats server")
 	} else {
-		natsCredentials, companyIDs, companyName, err = getNatsCreds(config.Credentials)
+		var err error
+		natsCredentials, info, err = getNatsCreds(creds)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// normalize the company name so we can use it in the nats client name and in the consumer name
-		companyName = strings.ToLower(strings.ReplaceAll(companyName, " ", "_"))
+		info.companyName = strings.ToLower(strings.ReplaceAll(info.companyName, " ", "_"))
 	}
 
 	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(config.Logger, "eds-server-"+companyName, config.URL, natsCredentials)
+	nc, err := cnats.NewNats(logger, "eds-server-"+info.companyName, url, natsCredentials)
 	if err != nil {
-		return nil, fmt.Errorf("error creating nats connection: %w", err)
+		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
+	}
+
+	return nc, info, nil
+}
+
+// NewConsumer creates a new nats consumer
+func NewConsumer(config ConsumerConfig) (*Consumer, error) {
+	nc, info, err := NewNatsConnection(config.Logger, config.URL, config.Credentials)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(config.Context)
@@ -278,14 +335,18 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.pending = make([]jetstream.Msg, 0)
 
 	consumer.logger = config.Logger.WithPrefix("[nats]")
-	js, err := jetstream.New(nc, jetstream.WithClientTrace(&jetstream.ClientTrace{
-		RequestSent: func(subj string, payload []byte) {
-			consumer.logger.Trace("nats tx: %s: %s", subj, string(payload))
-		},
-		ResponseReceived: func(subj string, payload []byte, hdr nats.Header) {
-			consumer.logger.Trace("nats rx: %s: %s", subj, string(payload))
-		},
-	}))
+	js, err := jetstream.New(nc,
+		jetstream.WithClientTrace(
+			&jetstream.ClientTrace{
+				RequestSent: func(subj string, payload []byte) {
+					consumer.logger.Trace("nats tx: %s: %s", subj, string(payload))
+				},
+				ResponseReceived: func(subj string, payload []byte, hdr nats.Header) {
+					consumer.logger.Trace("nats rx: %s: %s", subj, string(payload))
+				},
+			},
+		),
+	)
 	if err != nil {
 		nc.Close()
 		return nil, fmt.Errorf("error creating jetstream connection: %w", err)
@@ -295,9 +356,9 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if config.Suffix != "" {
 		prefix = "-" + config.Suffix
 	}
-	name := fmt.Sprintf("eds-server-%s%s", companyName, prefix)
+	name := fmt.Sprintf("eds-server-%s%s", info.companyName, prefix)
 	var subjects []string
-	for _, companyID := range companyIDs {
+	for _, companyID := range info.companyIDs {
 		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
 		subjects = append(subjects, subject)
 	}
@@ -333,12 +394,15 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	sub, err := c.Consume(consumer.process)
 	if err != nil {
 		nc.Close()
-		return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
+		return nil, fmt.Errorf("error starting jetstream consumer: %w", err)
 	}
 	consumer.subscriber = sub
 
 	// start the background processor
 	go consumer.bufferer()
+
+	// start the heartbeat
+	go consumer.sendHeartbeats(info.sessionID)
 
 	consumer.logger.Debug("started")
 	return &consumer, nil

@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -242,6 +244,58 @@ func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
 	}()
 }
 
+type notificationConsumer struct {
+	nc      *nats.Conn
+	sub     *nats.Subscription
+	logger  logger.Logger
+	natsurl string
+
+	Notifications <-chan string
+}
+
+func (c *notificationConsumer) Start(sessionId string, credsFile string) error {
+	var err error
+	c.nc, _, err = consumer.NewNatsConnection(c.logger, c.natsurl, credsFile)
+	if err != nil {
+		return fmt.Errorf("failed to create nats connection: %w", err)
+	}
+	c.sub, err = c.nc.Subscribe(fmt.Sprintf("eds.notify.%s.>", sessionId), c.callback)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to eds.notify: %w", err)
+	}
+	return nil
+}
+
+func (c *notificationConsumer) callback(m *nats.Msg) {
+	c.logger.Trace("received message: %s", string(m.Data))
+}
+
+func (c *notificationConsumer) Stop() {
+	if c.sub != nil {
+		if err := c.sub.Unsubscribe(); err != nil {
+			c.logger.Error("failed to unsubscribe from nats: %s", err)
+		}
+		c.sub = nil
+	}
+	if c.nc != nil {
+		c.nc.Close()
+		c.nc = nil
+	}
+}
+
+func (c *notificationConsumer) Restart(sessionId string, credsFile string) error {
+	c.Stop()
+	return c.Start(sessionId, credsFile)
+}
+
+func newNotificationConsumer(logger logger.Logger, natsurl string) *notificationConsumer {
+	return &notificationConsumer{
+		logger:        logger,
+		natsurl:       natsurl,
+		Notifications: make(chan string),
+	}
+}
+
 var serverIgnoreFlags = map[string]bool{
 	"--api-url":     true,
 	"--api-key":     true,
@@ -259,8 +313,7 @@ var serverCmd = &cobra.Command{
 
 		logger = logger.WithPrefix("[server]")
 
-		prefix := mustFlagString(cmd, "consumer-prefix", false)
-		if prefix != "" {
+		if prefix := mustFlagString(cmd, "consumer-prefix", false); prefix != "" {
 			logger.Fatal("consumer-prefix is deprecated, use --consumer-suffix instead")
 		}
 
@@ -300,26 +353,33 @@ var serverCmd = &cobra.Command{
 			currentProcess = p
 		}
 
+		natsurl := mustFlagString(cmd, "server", true)
+		notificationConsumer := newNotificationConsumer(logger, natsurl)
+
 		go func() {
 			ticker := time.NewTicker(time.Hour * 24 * 6)
 			defer ticker.Stop()
 			for {
-				<-ticker.C
-				creds, err := sendRenew(logger, apiurl, apikey, sessionId)
-				if err != nil {
-					logger.Fatal("failed to renew session: %s", err)
-				}
-				if creds != nil {
-					if err := writeCredsToFile(*creds, credsFile); err != nil {
-						logger.Fatal("failed to write creds to file: %s", err)
+				select {
+				case <-ticker.C:
+					creds, err := sendRenew(logger, apiurl, apikey, sessionId)
+					if err != nil {
+						logger.Fatal("failed to renew session: %s", err)
 					}
-					if currentProcess != nil {
-						currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
+					if creds != nil {
+						if err := writeCredsToFile(*creds, credsFile); err != nil {
+							logger.Fatal("failed to write creds to file: %s", err)
+						}
+						if currentProcess != nil {
+							currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
+						} else {
+							logger.Fatal("no child process to signal on credentials renew")
+						}
 					} else {
-						logger.Fatal("no child process to signal on credentials renew")
+						logger.Trace("no new credentials to renew")
 					}
-				} else {
-					logger.Trace("no new credentials to renew")
+				case action := <-notificationConsumer.Notifications:
+					logger.Info("received notification: %s", action)
 				}
 			}
 		}()
@@ -334,6 +394,7 @@ var serverCmd = &cobra.Command{
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
+			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
 			if credsFile == "" && session.Credential != nil {
 				// write credential to file
@@ -344,6 +405,9 @@ var serverCmd = &cobra.Command{
 				logger.Trace("creds written to %s", credsFile)
 			} else {
 				logger.Trace("using creds file: %s", credsFile)
+			}
+			if err := notificationConsumer.Start(sessionId, credsFile); err != nil {
+				logger.Fatal("failed to start notification consumer: %s", err)
 			}
 			args := append(_args, "--creds", credsFile)
 			result, err := command.Fork(command.ForkArgs{
@@ -358,6 +422,7 @@ var serverCmd = &cobra.Command{
 				ProcessCallback:  processCallback,
 			})
 			currentProcess = nil
+			notificationConsumer.Stop()
 			if err != nil && result == nil {
 				logger.Error("failed to fork: %s", err)
 				failures++
