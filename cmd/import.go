@@ -254,6 +254,11 @@ func downloadFile(log logger.Logger, dir string, fullURL string) error {
 		return fmt.Errorf("error fetching data: %s", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		buf, _ := io.ReadAll(resp.Body)
+		log.Trace("error fetching data: %s, (url: %s)\n%s", resp.Status, fullURL, buf)
+		return fmt.Errorf("error fetching data: %s", resp.Status)
+	}
 	filename := filepath.Join(dir, baseFileName)
 	file, err := os.Create(filename)
 	if err != nil {
@@ -467,6 +472,7 @@ var importCmd = &cobra.Command{
 		if err != nil {
 			logger.Fatal("error creating temp dir: %s", err)
 		}
+		logger.Trace("temp dir created: %s", dir)
 		success := true
 		defer func() {
 			if success {
