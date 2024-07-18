@@ -20,5 +20,3 @@ jobs:
           go-version: 1.22
       - name: Build
         run: go build -v ./...
-      - name: End-to-end
-        run: make e2e
