@@ -243,33 +243,34 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 	}
 }
 
-func downloadFile(log logger.Logger, dir string, fullURL string) error {
+func downloadFile(log logger.Logger, dir string, fullURL string) (int64, error) {
 	parsedURL, err := url.Parse(fullURL)
 	if err != nil {
-		return fmt.Errorf("error parsing url: %s", err)
+		return 0, fmt.Errorf("error parsing url: %s", err)
 	}
 	baseFileName := filepath.Base(parsedURL.Path)
 	resp, err := http.Get(fullURL)
 	if err != nil {
-		return fmt.Errorf("error fetching data: %s", err)
+		return 0, fmt.Errorf("error fetching data: %s", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
 		log.Trace("error fetching data: %s, (url: %s)\n%s", resp.Status, fullURL, buf)
-		return fmt.Errorf("error fetching data: %s", resp.Status)
+		return 0, fmt.Errorf("error fetching data: %s", resp.Status)
 	}
 	filename := filepath.Join(dir, baseFileName)
 	file, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("error creating file: %s", err)
+		return 0, fmt.Errorf("error creating file: %s", err)
 	}
 	defer file.Close()
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		return fmt.Errorf("error writing file: %s", err)
+	bytes, err := io.Copy(file, resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("error writing file: %s", err)
 	}
-	log.Debug("downloaded file %s", filename)
-	return nil
+	log.Debug("downloaded file %s (%d bytes)", filename, bytes)
+	return bytes, nil
 }
 
 func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string) ([]string, error) {
@@ -296,6 +297,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	total := float64(len(downloads))
 
 	var completed int32
+	var downloadBytes int64
 
 	// start the download workers
 	for i := 0; i < concurrency; i++ {
@@ -303,10 +305,12 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 		go func() {
 			defer downloadWG.Done()
 			for url := range downloadChan {
-				if err := downloadFile(log, dir, url); err != nil {
+				size, err := downloadFile(log, dir, url)
+				if err != nil {
 					errors <- fmt.Errorf("error downloading file: %s", err)
 					return
 				}
+				atomic.AddInt64(&downloadBytes, size)
 				val := atomic.AddInt32(&completed, 1)
 				log.Debug("download completed: %d/%d (%.2f%%)", val, int(total), 100*(float64(val)/total))
 			}
@@ -329,7 +333,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	default:
 	}
 
-	log.Info("Downloaded %d files in %v", len(downloads), time.Since(started))
+	log.Info("Downloaded %d files (%d bytes) in %v", len(downloads), downloadBytes, time.Since(started))
 
 	return tablesWithData, nil
 }
@@ -467,16 +471,20 @@ var importCmd = &cobra.Command{
 			return
 		}
 
+		noCleanup, _ := cmd.Flags().GetBool("no-cleanup")
+
 		// download the files
-		dir, err := os.MkdirTemp("", "eds-import")
+		dir, err := os.MkdirTemp("", "eds-import-"+jobID+"-*")
 		if err != nil {
 			logger.Fatal("error creating temp dir: %s", err)
 		}
 		logger.Trace("temp dir created: %s", dir)
 		success := true
 		defer func() {
-			if success {
+			if success && !noCleanup {
 				os.RemoveAll(dir)
+			} else {
+				logger.Info("downloaded files saved to: %s", dir)
 			}
 		}()
 
@@ -524,4 +532,5 @@ func init() {
 	importCmd.Flags().StringSlice("locationIds", nil, "only import these location ids")
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
 	importCmd.Flags().String("schema", "schema.json", "the schema file to output")
+	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
 }

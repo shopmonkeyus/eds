@@ -13,6 +13,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	sf "github.com/snowflakedb/gosnowflake"
+	"golang.org/x/sync/semaphore"
 )
 
 type snowflakeProcessor struct {
@@ -140,6 +141,7 @@ func (p *snowflakeProcessor) Import(config internal.ImporterConfig) error {
 
 	logger := config.Logger.WithPrefix("[snowflake]")
 	executeSQL := util.SQLExecuter(config.Context, logger, db, config.DryRun)
+	logger.Info("loading data into database")
 
 	// create all the tables
 	for _, table := range config.Tables {
@@ -154,7 +156,7 @@ func (p *snowflakeProcessor) Import(config internal.ImporterConfig) error {
 	// create a stage
 	stageName := "eds_import_" + config.JobID
 	logger.Debug("creating stage %s", stageName)
-	if err := executeSQL("CREATE TEMP STAGE " + stageName); err != nil {
+	if err := executeSQL("CREATE STAGE " + stageName); err != nil {
 		return fmt.Errorf("error creating stage: %s", err)
 	}
 	logger.Debug("stage %s created", stageName)
@@ -177,14 +179,21 @@ func (p *snowflakeProcessor) Import(config internal.ImporterConfig) error {
 
 	// import the data
 	var wg sync.WaitGroup
-	errorChannel := make(chan error, len(p.schema))
+	errorChannel := make(chan error, len(config.Tables))
 
-	for table := range p.schema {
+	var sem = semaphore.NewWeighted(int64(4))
+
+	for _, table := range config.Tables {
 		wg.Add(1)
 		go func(table string) {
-			defer wg.Done()
+			defer func() {
+				sem.Release(1)
+				wg.Done()
+			}()
+			sem.Acquire(config.Context, 1)
 			if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP') PATTERN='.*-%s-.*'`, util.QuoteIdentifier(table), stageName, table)); err != nil {
-				errorChannel <- fmt.Errorf("error importing data: %s", err)
+				logger.Trace("error importing data: %s", err)
+				errorChannel <- fmt.Errorf("error importing %s data: %s", table, err)
 			}
 		}(table)
 	}
@@ -204,6 +213,11 @@ done:
 		}
 	}
 	close(errorChannel)
+
+	if err := executeSQL("DROP STAGE " + stageName); err != nil {
+		return fmt.Errorf("error dropping stage: %s", err)
+	}
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
