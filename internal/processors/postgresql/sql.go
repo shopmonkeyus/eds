@@ -291,5 +291,10 @@ func getConnectionStringFromURL(urlstr string) (string, error) {
 	if u.Port() == "" {
 		u.Host = u.Host + ":5432"
 	}
+	if !u.Query().Has("application_name") {
+		q := u.Query()
+		q.Set("application_name", "eds-server")
+		u.RawQuery = q.Encode()
+	}
 	return u.String(), nil
 }

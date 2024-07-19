@@ -36,8 +36,11 @@ func TestDBChanges(t *testing.T) {
 func TestDBConnectionString(t *testing.T) {
 	val, err := getConnectionStringFromURL("postgres://localhost")
 	assert.NoError(t, err)
-	assert.Equal(t, "postgresql://localhost:5432", val)
+	assert.Equal(t, "postgresql://localhost:5432?application_name=eds-server", val)
 	val, err = getConnectionStringFromURL("postgres://localhost:15432")
 	assert.NoError(t, err)
-	assert.Equal(t, "postgresql://localhost:15432", val)
+	assert.Equal(t, "postgresql://localhost:15432?application_name=eds-server", val)
+	val, err = getConnectionStringFromURL("postgres://localhost:15432?application_name=foo")
+	assert.NoError(t, err)
+	assert.Equal(t, "postgresql://localhost:15432?application_name=foo", val)
 }
