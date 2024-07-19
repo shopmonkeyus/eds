@@ -33,7 +33,11 @@ var _ internal.Importer = (*postgresqlProcessor)(nil)
 var _ internal.ProcessorHelp = (*postgresqlProcessor)(nil)
 
 func (p *postgresqlProcessor) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
-	db, err := sql.Open("postgres", url)
+	urlstr, err := getConnectionStringFromURL(url)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("postgres", urlstr)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}

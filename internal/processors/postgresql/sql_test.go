@@ -32,3 +32,12 @@ func TestDBChanges(t *testing.T) {
 	t.Log(sql)
 	assert.Equal(t, "DELETE FROM \"order\" WHERE id='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';\n", sql)
 }
+
+func TestDBConnectionString(t *testing.T) {
+	val, err := getConnectionStringFromURL("postgres://localhost")
+	assert.NoError(t, err)
+	assert.Equal(t, "postgresql://localhost:5432", val)
+	val, err = getConnectionStringFromURL("postgres://localhost:15432")
+	assert.NoError(t, err)
+	assert.Equal(t, "postgresql://localhost:15432", val)
+}

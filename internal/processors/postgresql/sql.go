@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"reflect"
 	"regexp"
 	"sort"
@@ -279,4 +280,16 @@ func createSQL(s *internal.Schema) string {
 	}
 	sql.WriteString("\n);\n")
 	return sql.String()
+}
+
+func getConnectionStringFromURL(urlstr string) (string, error) {
+	u, err := url.Parse(urlstr)
+	if err != nil {
+		return "", fmt.Errorf("error parsing postgres db url: %w", err)
+	}
+	u.Scheme = "postgresql"
+	if u.Port() == "" {
+		u.Host = u.Host + ":5432"
+	}
+	return u.String(), nil
 }
