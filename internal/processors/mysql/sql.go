@@ -35,13 +35,14 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	sql.WriteString(") VALUES (")
 	var insertVals []string
 	var updateValues []string
+	jsonb := util.ToMapOfJSONColumns(model)
 	if operation == "UPDATE" {
 		for _, name := range diff {
-			if !util.SliceContains(model.Columns, name) {
+			if !util.SliceContains(model.Columns, name) || name == "id" {
 				continue
 			}
 			if val, ok := o[name]; ok {
-				v := quoteValue(val)
+				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
 				updateValues = append(updateValues, "NULL")
@@ -49,7 +50,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		}
 		for _, name := range model.Columns {
 			if val, ok := o[name]; ok {
-				v := quoteValue(val)
+				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
 				insertVals = append(insertVals, v)
 			} else {
 				insertVals = append(insertVals, "NULL")
@@ -58,8 +59,10 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	} else {
 		for _, name := range model.Columns {
 			if val, ok := o[name]; ok {
-				v := quoteValue(val)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				if name != "id" {
+					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+				}
 				insertVals = append(insertVals, v)
 			} else {
 				updateValues = append(updateValues, "NULL")
@@ -107,7 +110,7 @@ func propTypeToSQLType(property internal.SchemaProperty, isPrimaryKey bool) stri
 		}
 		return "TEXT"
 	case "integer":
-		return "INTEGER"
+		return "BIGINT"
 	case "number":
 		return "FLOAT"
 	case "boolean":

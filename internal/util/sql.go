@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -34,4 +35,24 @@ func SQLExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool
 		}
 		return nil
 	}
+}
+
+// ToJSONStringVal returns a JSON string value checking for empty string and converting it to '{}'
+func ToJSONStringVal(name string, val string, jsonb map[string]bool) string {
+	if jsonb[name] && (val == "''" || val == "") {
+		return "'{}'"
+	}
+	return val
+}
+
+// ToMapOfJSONColumns returns a map of column names that are of type 'object'
+func ToMapOfJSONColumns(model *internal.Schema) map[string]bool {
+	jsonb := make(map[string]bool)
+	for _, name := range model.Columns {
+		property := model.Properties[name]
+		if property.Type == "object" {
+			jsonb[name] = true
+		}
+	}
+	return jsonb
 }

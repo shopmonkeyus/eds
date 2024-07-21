@@ -18,11 +18,13 @@ func TestQuoteValue(t *testing.T) {
 	assert.Equal(t, "1", quoteValue(true))
 	assert.Equal(t, "0", quoteValue(false))
 	assert.Equal(t, "NULL", quoteValue(nil))
-	assert.Equal(t, `'{"a":"b"}'`, quoteValue(map[string]any{"a": "b"}))
+	assert.Equal(t, `'{\"a\":\"b\"}'`, quoteValue(map[string]any{"a": "b"}))
+	assert.Equal(t, `'[{\"a\":\"b\"}]'`, quoteValue([]interface{}{map[string]any{"a": "b"}}))
 	tv := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
 	assert.Equal(t, `'2021-01-01 00:00:00'`, quoteValue(tv))
 	assert.Equal(t, `'2021-01-01 00:00:00'`, quoteValue(&tv))
 	assert.Equal(t, `'2024-07-09 18:28:03.69708'`, quoteValue("2024-07-09T18:28:03.69708Z"))
+	assert.Equal(t, `'2024-07-09 18:28:03'`, quoteValue("2024-07-09T18:28:03Z"))
 }
 
 func TestDBChanges(t *testing.T) {

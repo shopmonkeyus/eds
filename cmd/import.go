@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/registry"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	csys "github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
@@ -360,6 +361,8 @@ var importCmd = &cobra.Command{
 		apiKey := mustFlagString(cmd, "api-key", true)
 		jobID := mustFlagString(cmd, "job-id", false)
 		schemaFile := mustFlagString(cmd, "schema", false)
+		single, _ := cmd.Flags().GetBool("single")
+		dir := mustFlagString(cmd, "dir", false)
 
 		logger, closer := newLogger(cmd)
 		defer closer()
@@ -448,55 +451,103 @@ var importCmd = &cobra.Command{
 			logger.Fatal("error creating importer: %s", err)
 		}
 
-		if jobID == "" {
-			logger.Info("Requesting Export...")
-			jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
-				Tables:      only,
-				CompanyIDs:  companyIds,
-				LocationIDs: locationIds,
-			})
-			if err != nil {
-				logger.Fatal("error creating export job: %s", err)
-			}
-			logger.Trace("created job: %s", jobID)
-		}
-
-		logger.Info("Waiting for Export to Complete...")
-		job, err := pollUntilComplete(ctx, logger, apiURL, apiKey, jobID)
-		if err != nil && !isCancelled(ctx) {
-			logger.Fatal("error polling job: %s", err)
-		}
-
-		if isCancelled(ctx) {
-			return
-		}
-
 		noCleanup, _ := cmd.Flags().GetBool("no-cleanup")
+		var tables []string
 
-		// download the files
-		dir, err := os.MkdirTemp("", "eds-import-"+jobID+"-*")
-		if err != nil {
-			logger.Fatal("error creating temp dir: %s", err)
+		// if we pass in a directory, dont delete it
+		if dir != "" {
+			noCleanup = true
 		}
-		logger.Trace("temp dir created: %s", dir)
-		success := true
+
+		var success bool
 		defer func() {
+			logger.Trace("exit success: %v", success)
 			if success && !noCleanup {
 				os.RemoveAll(dir)
 			} else {
 				logger.Info("downloaded files saved to: %s", dir)
 			}
+			if !success {
+				os.Exit(1)
+			}
 		}()
 
-		logger.Info("Downloading export data...")
-		tables, err := bulkDownloadData(logger, job.Tables, dir)
-		if err != nil {
-			success = false
-			logger.Fatal("error downloading files: %s", err)
+		if dir == "" {
+			if jobID == "" {
+				logger.Info("Requesting Export...")
+				jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
+					Tables:      only,
+					CompanyIDs:  companyIds,
+					LocationIDs: locationIds,
+				})
+				if err != nil {
+					logger.Error("error creating export job: %s", err)
+					return
+				}
+				logger.Trace("created job: %s", jobID)
+			}
+
+			logger.Info("Waiting for Export to Complete...")
+			job, err := pollUntilComplete(ctx, logger, apiURL, apiKey, jobID)
+			if err != nil && !isCancelled(ctx) {
+				logger.Error("error polling job: %s", err)
+				return
+			}
+
+			if isCancelled(ctx) {
+				return
+			}
+
+			// download the files
+			dir, err = os.MkdirTemp("", "eds-import-"+jobID+"-*")
+			if err != nil {
+				logger.Error("error creating temp dir: %s", err)
+				return
+			}
+			logger.Trace("temp dir created: %s", dir)
+
+			logger.Info("Downloading export data...")
+			tables, err = bulkDownloadData(logger, job.Tables, dir)
+			if err != nil {
+				logger.Error("error downloading files: %s", err)
+				return
+			}
+
+			if isCancelled(ctx) {
+				return
+			}
+			to, err := os.Create(filepath.Join(dir, "tables.json"))
+			if err != nil {
+				logger.Error("couldn't open temp tables file: %s", err)
+				return
+			}
+			enc := json.NewEncoder(to)
+			enc.Encode(tables)
+			to.Close()
+		} else {
+			fp := filepath.Join(dir, "tables.json")
+			to, err := os.Open(fp)
+			if err != nil {
+				logger.Error("couldn't open temp tables file at %s: %s", fp, err)
+				return
+			}
+			dec := json.NewDecoder(to)
+			tables = make([]string, 0)
+			if err := dec.Decode(&tables); err != nil {
+				logger.Error("error decoding tables: %s", err)
+				return
+			}
+			logger.Debug("reloading tables (%s) from %s", strings.Join(tables, ","), dir)
 		}
 
-		if isCancelled(ctx) {
-			return
+		if len(only) > 0 {
+			_tables := make([]string, 0)
+			for _, table := range tables {
+				if util.SliceContains(only, table) {
+					_tables = append(_tables, table)
+				}
+			}
+			tables = _tables
 		}
 
 		logger.Info("Importing data...")
@@ -510,11 +561,12 @@ var importCmd = &cobra.Command{
 			DataDir:        dir,
 			DryRun:         dryRun,
 			Tables:         tables,
+			Single:         single,
 		}); err != nil {
-			success = false
-			logger.Fatal("error running import: %s", err)
+			logger.Error("error running import: %s", err)
+			return
 		}
-
+		success = true
 		logger.Info("👋 Loaded %d tables in %v", len(tables), time.Since(started))
 	},
 }
@@ -533,4 +585,6 @@ func init() {
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
 	importCmd.Flags().String("schema", "schema.json", "the schema file to output")
 	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
+	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
+	importCmd.Flags().Bool("single", false, "run one insert at a time instead of batching")
 }

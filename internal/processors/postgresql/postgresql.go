@@ -14,7 +14,7 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-const maxBytesSizeInsert = 1_000_000
+const maxBytesSizeInsert = 5_000_000
 
 type postgresqlProcessor struct {
 	ctx       context.Context
@@ -126,6 +126,7 @@ func (p *postgresqlProcessor) Flush() error {
 			}
 		}()
 		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
+			p.logger.Trace("offending sql: %s", p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -183,6 +184,9 @@ func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
 		filename := filepath.Base(file)
 		parts := strings.Split(filename, "-")
 		table := parts[5]
+		if !util.SliceContains(config.Tables, table) {
+			continue
+		}
 		data := schema[table]
 		if data == nil {
 			return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, filename)
@@ -206,8 +210,9 @@ func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
 			pending.WriteString(sql)
 			count++
 			size += len(sql)
-			if size >= maxBytesSizeInsert {
+			if size >= maxBytesSizeInsert || config.Single {
 				if err := executeSQL(pending.String()); err != nil {
+					logger.Trace("offending sql: %s", pending.String())
 					return fmt.Errorf("unable to execute %s sql: %w", table, err)
 				}
 				pending.Reset()
@@ -216,6 +221,7 @@ func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
 		}
 		if size > 0 {
 			if err := executeSQL(pending.String()); err != nil {
+				logger.Trace("offending sql: %s", pending.String())
 				return fmt.Errorf("unable to execute %s sql: %w", table, err)
 			}
 		}

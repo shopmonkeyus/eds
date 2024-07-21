@@ -38,6 +38,9 @@ type ImporterConfig struct {
 
 	// Tables is the list of tables to import.
 	Tables []string
+
+	// Single is true if only a single row should be imported at a time vs batching.
+	Single bool
 }
 
 // Importer is the interface that must be implemented by all importer implementations

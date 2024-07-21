@@ -100,10 +100,11 @@ func escapeStringBackslash(buf []byte, v string) []byte {
 	return escapeBytesBackslash(buf, slice(v))
 }
 
-var looksLikeJSONTimestamp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{1,}Z$`)
+var looksLikeJSONTimestamp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(.\d{1,})?Z$`)
 
 func quoteValue(arg any) string {
 	var buf []byte
+	// fmt.Println(arg, reflect.TypeOf(arg))
 	switch v := arg.(type) {
 	case nil:
 		return "NULL"
@@ -167,6 +168,10 @@ func quoteValue(arg any) string {
 			if err != nil {
 				panic(fmt.Errorf("error parsing: %v. %w", v, err))
 			}
+			if tv.Year() < 1970 {
+				// mysql timestamp range is '1970-01-01 00:00:01.000000' UTC to '2038-01-19 03:14:07.499999'
+				tv = time.Date(1970, 1, 1, 0, 0, 1, 0, time.UTC)
+			}
 			buf = append(buf, '\'')
 			buf = tv.AppendFormat(buf, "2006-01-02 15:04:05.999999")
 			buf = append(buf, '\'')
@@ -199,12 +204,12 @@ func quoteValue(arg any) string {
 	case map[string]interface{}:
 		jv, _ := json.Marshal(v)
 		buf = append(buf, '\'')
-		buf = append(buf, jv...)
+		buf = escapeBytesBackslash(buf, jv)
 		buf = append(buf, '\'')
 	case []interface{}:
 		jv, _ := json.Marshal(v)
 		buf = append(buf, '\'')
-		buf = append(buf, jv...)
+		buf = escapeBytesBackslash(buf, jv)
 		buf = append(buf, '\'')
 	default:
 		// slow path based on reflection
