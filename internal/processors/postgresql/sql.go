@@ -105,6 +105,16 @@ func quoteValue(arg any) (str string) {
 			ns = append(ns, pq.QuoteLiteral(thes))
 		}
 		str = "ARRAY[" + strings.Join(ns, ",") + "]"
+	case []interface{}:
+		if len(arg) == 0 {
+			str = "null"
+		} else {
+			var ns []string
+			for _, thes := range arg {
+				ns = append(ns, quoteValue(thes))
+			}
+			str = "ARRAY[" + strings.Join(ns, ",") + "]"
+		}
 	default:
 		value := reflect.ValueOf(arg)
 		if value.Kind() == reflect.Ptr {
@@ -122,6 +132,25 @@ func quoteValue(arg any) (str string) {
 		}
 	}
 	return str
+}
+
+func appendArraytype(val string, dataType string) string {
+	switch dataType {
+	case "date-time":
+		return val + "::TIMESTAMP[]"
+	case "string":
+		return val + "::TEXT[]"
+	case "integer":
+		return val + "::INTEGER[]"
+	case "number":
+		return val + "::FLOAT[]"
+	case "boolean":
+		return val + "::BOOLEAN[]"
+	case "object":
+		return val + "::JSONB[]"
+	default:
+		return val + "::TEXT[]"
+	}
 }
 
 var needsQuote = regexp.MustCompile(`[A-Z0-9_\s]`)
@@ -163,6 +192,19 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		for _, name := range model.Columns {
 			if val, ok := o[name]; ok {
 				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				if model.Properties[name].Type == "array" && model.Properties[name].Items.Type != "enum" {
+					dataType := model.Properties[name].Items.Format
+					v = appendArraytype(v, dataType)
+				}
+				if model.Properties[name].Type == "object" {
+					if model.Properties[name].AdditionalProperties != nil && *model.Properties[name].AdditionalProperties {
+						v += "::JSONB"
+					} else {
+						v = "ARRAY[" + v + "]"
+						v += "::JSONB[]"
+					}
+				}
+
 				insertVals = append(insertVals, v)
 			} else {
 				insertVals = append(insertVals, "NULL")
@@ -220,6 +262,7 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 
 func propTypeToSQLType(property internal.SchemaProperty) string {
 	switch property.Type {
+
 	case "string":
 		if property.Format == "date-time" {
 			return "TIMESTAMP WITH TIME ZONE"
