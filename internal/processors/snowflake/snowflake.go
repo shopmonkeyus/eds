@@ -34,9 +34,7 @@ var _ internal.Importer = (*snowflakeProcessor)(nil)
 var _ internal.ProcessorSessionHandler = (*snowflakeProcessor)(nil)
 
 func (p *snowflakeProcessor) SetSessionID(sessionID string) {
-	if sessionID == "" {
-		p.ctx = p.config.Context
-	} else {
+	if sessionID != "" {
 		p.ctx = sf.WithRequestID(p.config.Context, sf.ParseUUID(sessionID))
 	}
 }
@@ -61,6 +59,7 @@ func (p *snowflakeProcessor) connectToDB(ctx context.Context, url string) (*sql.
 // Start the processor. This is called once at the beginning of the processor's lifecycle.
 func (p *snowflakeProcessor) Start(config internal.ProcessorConfig) error {
 	p.config = config
+	p.ctx = config.Context
 	p.logger = config.Logger.WithPrefix("[snowflake]")
 	schema, err := p.config.SchemaRegistry.GetLatestSchema()
 	if err != nil {
@@ -87,6 +86,7 @@ func (p *snowflakeProcessor) Stop() error {
 			p.logger.Debug("closing db")
 			p.db.Close()
 			p.db = nil
+			p.count = 0
 			p.logger.Debug("closed db")
 		}
 	})
@@ -118,18 +118,24 @@ func (p *snowflakeProcessor) Process(event internal.DBChangeEvent) (bool, error)
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
 func (p *snowflakeProcessor) Flush() error {
-	p.logger.Debug("flush")
+	p.logger.Debug("flush: %v", p.count)
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if p.count > 0 {
-		execCTX, err := sf.WithMultiStatement(p.ctx, p.count)
+		execCTX, err := sf.WithMultiStatement(p.ctx, p.count) // for the transaction below
 		if err != nil {
 			return fmt.Errorf("error creating exec context: %w", err)
 		}
-		q := p.pending.String()
-		if _, err := p.db.ExecContext(execCTX, q); err != nil {
-			p.logger.Trace("error executing %s: %s", q, err)
-			return fmt.Errorf("error executing sql: %w", err)
+		tx, err := p.db.BeginTx(p.ctx, nil)
+		if err != nil {
+			return fmt.Errorf("unable to start transaction: %w", err)
+		}
+		if _, err := tx.ExecContext(execCTX, p.pending.String()); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("unable to run query: %s transaction: %w", p.pending.String(), err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("unable to commit transaction: %w", err)
 		}
 	}
 	p.pending.Reset()
