@@ -120,6 +120,14 @@ var forkCmd = &cobra.Command{
 				select {
 				case <-ctx.Done():
 					completed = true
+				case err := <-consumer.Error():
+					logger.Error("error from consumer: %s", err)
+					if err := consumer.Stop(); err != nil {
+						logger.Error("error stopping consumer: %s", err)
+					}
+					processor.Stop()
+					cancel()
+					os.Exit(1)
 				case <-restart:
 					logger.Debug("restarting consumer on SIGHUP")
 				}

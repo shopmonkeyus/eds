@@ -256,4 +256,5 @@ func init() {
 	var processor postgresqlProcessor
 	internal.RegisterProcessor("postgres", &processor)
 	internal.RegisterImporter("postgres", &processor)
+	internal.RegisterImporter("postgresql", &processor)
 }

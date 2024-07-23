@@ -70,6 +70,7 @@ type Consumer struct {
 	once           sync.Once
 	lock           sync.Mutex
 	stopping       bool
+	subError       chan error
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -122,6 +123,7 @@ func (c *Consumer) nackEverything() {
 func (c *Consumer) handleError(err error) {
 	c.logger.Error("error: %s", err)
 	c.nackEverything()
+	c.subError <- err
 }
 
 func (c *Consumer) flush() bool {
@@ -142,6 +144,10 @@ func (c *Consumer) flush() bool {
 	c.pending = nil
 	c.pendingStarted = nil
 	return c.stopping
+}
+
+func (c *Consumer) Error() <-chan error {
+	return c.subError
 }
 
 func (c *Consumer) bufferer() {
@@ -334,8 +340,8 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.processor = config.Processor
 	consumer.buffer = make(chan jetstream.Msg, config.MaxAckPending)
 	consumer.pending = make([]jetstream.Msg, 0)
+	consumer.subError = make(chan error, 10)
 
-	fmt.Println("INFO")
 	if p, ok := config.Processor.(internal.ProcessorSessionHandler); ok {
 		p.SetSessionID(info.sessionID)
 	}

@@ -179,7 +179,7 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 	}
 	var retryCount int
 	started := time.Now()
-	for time.Since(started) < time.Minute {
+	for time.Since(started) < time.Minute*5 {
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			if shouldRetryError(err) {
