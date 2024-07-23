@@ -82,6 +82,7 @@ func (p *snowflakeProcessor) Stop() error {
 		p.logger.Debug("waiting on waitgroup")
 		p.waitGroup.Wait()
 		p.logger.Debug("completed waitgroup")
+		p.Flush() // make sure we flush
 		if p.db != nil {
 			p.logger.Debug("closing db")
 			p.db.Close()
