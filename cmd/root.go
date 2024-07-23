@@ -65,7 +65,10 @@ func newLogFileSync(file string) (*logFileSink, error) {
 type CloseFunc func()
 
 func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
-	glog.SetFlags(0)
+	ts, _ := cmd.Flags().GetBool("timestamp")
+	if !ts {
+		glog.SetFlags(0)
+	}
 	glog.SetOutput(os.Stdout)
 	sink, _ := cmd.Flags().GetString("log-file-sink")
 	silent, _ := cmd.Flags().GetBool("silent")
@@ -110,6 +113,7 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
 	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
+	rootCmd.PersistentFlags().Bool("timestamp", false, "turn on timestamps in logs")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 }
