@@ -198,6 +198,10 @@ func getConnectionStringFromURL(urlString string) (string, error) {
 		str.WriteString("/")
 	}
 	str.WriteString(u.Path)
+	v := u.Query()
+	v.Set("client_session_keep_alive", "true")
+	str.WriteString("?")
+	str.WriteString(v.Encode())
 	return str.String(), nil
 }
 

@@ -30,3 +30,9 @@ func TestDBChanges(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "DELETE FROM \"order\" WHERE \"id\"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';\n", sql)
 }
+
+func TestConnectionString(t *testing.T) {
+	url, err := getConnectionStringFromURL("snowflake://user:password@account/db?foo=bar")
+	assert.NoError(t, err)
+	assert.Equal(t, "user:password@account/db?client_session_keep_alive=true&foo=bar", url)
+}
