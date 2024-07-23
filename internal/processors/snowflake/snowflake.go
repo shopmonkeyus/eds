@@ -25,11 +25,21 @@ type snowflakeProcessor struct {
 	schema    internal.SchemaMap
 	waitGroup sync.WaitGroup
 	once      sync.Once
+	ctx       context.Context
 }
 
 var _ internal.Processor = (*snowflakeProcessor)(nil)
 var _ internal.ProcessorLifecycle = (*snowflakeProcessor)(nil)
 var _ internal.Importer = (*snowflakeProcessor)(nil)
+var _ internal.ProcessorSessionHandler = (*snowflakeProcessor)(nil)
+
+func (p *snowflakeProcessor) SetSessionID(sessionID string) {
+	if sessionID == "" {
+		p.ctx = p.config.Context
+	} else {
+		p.ctx = sf.WithRequestID(p.config.Context, sf.ParseUUID(sessionID))
+	}
+}
 
 func (p *snowflakeProcessor) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
 	url, err := getConnectionStringFromURL(url)
@@ -112,7 +122,7 @@ func (p *snowflakeProcessor) Flush() error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if p.count > 0 {
-		execCTX, err := sf.WithMultiStatement(p.config.Context, p.count)
+		execCTX, err := sf.WithMultiStatement(p.ctx, p.count)
 		if err != nil {
 			return fmt.Errorf("error creating exec context: %w", err)
 		}

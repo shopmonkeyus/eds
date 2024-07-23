@@ -24,6 +24,11 @@ type ProcessorConfig struct {
 	SchemaRegistry SchemaRegistry
 }
 
+// ProcessorSessionHandler is for processors that want to receive the session id
+type ProcessorSessionHandler interface {
+	SetSessionID(sessionID string)
+}
+
 // ProcessorLifecycle is the interface that must be implemented by all processor implementations.
 type ProcessorLifecycle interface {
 

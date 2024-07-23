@@ -295,6 +295,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 		info = &CredentialInfo{
 			companyIDs:  []string{"*"},
 			companyName: "dev",
+			sessionID:   "6ba7b812-9dad-11d1-80b4-00c04fd430c8", // dummy
 		}
 		logger.Debug("using localhost nats server")
 	} else {
@@ -333,6 +334,11 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.processor = config.Processor
 	consumer.buffer = make(chan jetstream.Msg, config.MaxAckPending)
 	consumer.pending = make([]jetstream.Msg, 0)
+
+	fmt.Println("INFO")
+	if p, ok := config.Processor.(internal.ProcessorSessionHandler); ok {
+		p.SetSessionID(info.sessionID)
+	}
 
 	consumer.logger = config.Logger.WithPrefix("[nats]")
 	js, err := jetstream.New(nc,
