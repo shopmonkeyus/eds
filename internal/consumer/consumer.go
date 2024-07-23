@@ -291,7 +291,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	var natsCredentials nats.Option
 	var info *CredentialInfo
 
-	if util.IsLocalhost(url) {
+	if util.IsLocalhost(url) || creds == "" {
 		info = &CredentialInfo{
 			companyIDs:  []string{"*"},
 			companyName: "dev",

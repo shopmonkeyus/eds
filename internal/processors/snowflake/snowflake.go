@@ -98,6 +98,7 @@ func (p *snowflakeProcessor) Process(event internal.DBChangeEvent) (bool, error)
 	if err != nil {
 		return false, err
 	}
+	p.logger.Trace("sql: %s", sql)
 	if _, err := p.pending.WriteString(sql); err != nil {
 		return false, fmt.Errorf("error writing sql to pending buffer: %w", err)
 	}
