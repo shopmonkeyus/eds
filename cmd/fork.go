@@ -64,8 +64,8 @@ var forkCmd = &cobra.Command{
 			os.Exit(2)
 		}
 
-		exportTableData, err := loadTablesJSON(tablesFile)
-		if err != nil {
+		var exportTableTimestamps map[string]*time.Time
+		if exportTableData, err := loadTablesJSON(tablesFile); err != nil {
 			if cmd.Flags().Changed("tables") {
 				logger.Error("provided tables file %s not found!", tablesFile)
 				os.Exit(2)
@@ -76,6 +76,11 @@ var forkCmd = &cobra.Command{
 			} else {
 				logger.Error("error loading tables: %s", err)
 				os.Exit(2)
+			}
+		} else {
+			exportTableTimestamps = make(map[string]*time.Time)
+			for _, data := range exportTableData {
+				exportTableTimestamps[data.Table] = &data.Timestamp
 			}
 		}
 
@@ -101,15 +106,15 @@ var forkCmd = &cobra.Command{
 			var completed bool
 			for !completed {
 				consumer, err := consumer.NewConsumer(consumer.ConsumerConfig{
-					Context:          ctx,
-					Logger:           logger,
-					URL:              natsurl,
-					Credentials:      creds,
-					Suffix:           consumerSuffix,
-					MaxAckPending:    maxAckPending,
-					MaxPendingBuffer: maxPendingBuffer,
-					Processor:        processor,
-					ExportTableData:  exportTableData,
+					Context:               ctx,
+					Logger:                logger,
+					URL:                   natsurl,
+					Credentials:           creds,
+					Suffix:                consumerSuffix,
+					MaxAckPending:         maxAckPending,
+					MaxPendingBuffer:      maxPendingBuffer,
+					Processor:             processor,
+					ExportTableTimestamps: exportTableTimestamps,
 				})
 				if err != nil {
 					logger.Error("error creating consumer: %s", err)

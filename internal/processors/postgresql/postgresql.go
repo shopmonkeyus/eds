@@ -175,12 +175,11 @@ func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
 	// NOTE: these files should automatically be sorted by the filesystem
 	// so we need to do them in order and not in parallel
 	for _, file := range files {
-		info, ok := util.ParseCRDBExportFile(file)
+		table, _, ok := util.ParseCRDBExportFile(file)
 		if !ok {
 			logger.Debug("skipping file: %s", file)
 			continue
 		}
-		table := info.Table
 		if !util.SliceContains(config.Tables, table) {
 			continue
 		}

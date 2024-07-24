@@ -271,29 +271,40 @@ func downloadFile(log logger.Logger, dir string, parsedURL *url.URL) (int64, err
 	return bytes, nil
 }
 
-func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string) (map[string]*util.ExportFileInformation, error) {
+type TableExportInfo struct {
+	Table     string
+	Timestamp time.Time
+}
+
+func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string) ([]TableExportInfo, error) {
 	var downloads []*url.URL
 	started := time.Now()
-	tables := make(map[string]*util.ExportFileInformation)
+	var tables []TableExportInfo
 	for table, tableData := range data {
 		if len(tableData.URLs) == 0 {
 			log.Debug("no data for table %s", table)
+			continue
 		}
+		var finalTimestamp time.Time
+
 		for _, fullURL := range tableData.URLs {
 			parsedURL, err := url.Parse(fullURL)
 			if err != nil {
 				return nil, fmt.Errorf("error parsing url: %s", err)
 			}
-			info, ok := util.ParseCRDBExportFile(parsedURL.Path)
+			_, timestamp, ok := util.ParseCRDBExportFile(parsedURL.Path)
 			if !ok {
 				return nil, fmt.Errorf("unrecognized file path: %s", filepath.Base(parsedURL.Path))
 			}
-			existing := tables[table]
-			if existing == nil || existing.Less(info) {
-				tables[table] = info
+			if timestamp.After(finalTimestamp) {
+				finalTimestamp = timestamp
 			}
 			downloads = append(downloads, parsedURL)
 		}
+		tables = append(tables, TableExportInfo{
+			Table:     table,
+			Timestamp: finalTimestamp,
+		})
 	}
 	if len(downloads) == 0 {
 		log.Debug("no files to download")
@@ -395,21 +406,21 @@ func createEDSSession(ctx context.Context, logger logger.Logger, serverURL strin
 	return nil
 }
 
-func keys[T any](m map[string]T) []string {
-	var keys []string
-	for k := range m {
-		keys = append(keys, k)
+func tableNames(tableData []TableExportInfo) []string {
+	var tables []string
+	for _, table := range tableData {
+		tables = append(tables, table.Table)
 	}
-	return keys
+	return tables
 }
 
-func loadTablesJSON(fp string) (map[string]*util.ExportFileInformation, error) {
+func loadTablesJSON(fp string) ([]TableExportInfo, error) {
 	to, err := os.Open(fp)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't open temp tables file at %s: %w", fp, err)
 	}
 	dec := json.NewDecoder(to)
-	tables := make(map[string]*util.ExportFileInformation)
+	tables := make([]TableExportInfo, 0)
 	if err := dec.Decode(&tables); err != nil {
 		return nil, fmt.Errorf("error decoding tables: %w", err)
 	}
@@ -534,7 +545,7 @@ var importCmd = &cobra.Command{
 		}
 
 		noCleanup, _ := cmd.Flags().GetBool("no-cleanup")
-		var tableData map[string]*util.ExportFileInformation
+		var tables []string
 
 		// if we pass in a directory, dont delete it
 		if dir != "" {
@@ -599,7 +610,7 @@ var importCmd = &cobra.Command{
 			logger.Trace("temp dir created: %s", dir)
 
 			logger.Info("Downloading export data...")
-			tableData, err = bulkDownloadData(logger, job.Tables, dir)
+			tableData, err := bulkDownloadData(logger, job.Tables, dir)
 			if err != nil {
 				logger.Error("error downloading files: %s", err)
 				return
@@ -619,24 +630,27 @@ var importCmd = &cobra.Command{
 				return
 			}
 			to.Close()
+			tables = tableNames(tableData)
 		} else {
 			fp := filepath.Join(dir, "tables.json")
-			tableData, err = loadTablesJSON(fp)
+			tableData, err := loadTablesJSON(fp)
 			if err != nil {
 				logger.Error("error loading tables: %s", err)
 				return
 			}
-			logger.Debug("reloading tables (%s) from %s", strings.Join(keys(tableData), ","), dir)
+			tables = tableNames(tableData)
+			logger.Debug("reloading tables (%s) from %s", strings.Join(tables, ","), dir)
 		}
 
 		if len(only) > 0 {
-			for _, onlyTable := range only {
-				if _, ok := tableData[onlyTable]; !ok {
-					delete(tableData, onlyTable)
+			var filtered []string
+			for _, table := range tables {
+				if util.SliceContains(only, table) {
+					filtered = append(filtered, table)
 				}
 			}
+			tables = filtered
 		}
-		tables := keys(tableData)
 		logger.Info("Importing data to tables %s", strings.Join(tables, ", "))
 		if err := importer.Import(internal.ImporterConfig{
 			Context:        ctx,
@@ -654,7 +668,7 @@ var importCmd = &cobra.Command{
 			return
 		}
 		success = true
-		logger.Info("👋 Loaded %d tables in %v", len(tableData), time.Since(started))
+		logger.Info("👋 Loaded %d tables in %v", len(tables), time.Since(started))
 	},
 }
 

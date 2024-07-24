@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -51,7 +50,7 @@ type ConsumerConfig struct {
 	Processor internal.Processor
 
 	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
-	ExportTableData map[string]*util.ExportFileInformation
+	ExportTableTimestamps map[string]*time.Time
 }
 
 type Consumer struct {
@@ -72,7 +71,7 @@ type Consumer struct {
 	stopping        bool
 	subError        chan error
 	sessionID       string
-	tableTimestamps map[string]*big.Int
+	tableTimestamps map[string]*time.Time
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -150,22 +149,16 @@ func (c *Consumer) flush() bool {
 	c.pendingStarted = nil
 	return c.stopping
 }
-func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) (bool, error) {
+func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) bool {
 	if c.tableTimestamps == nil {
-		return false, nil
+		return false
 	}
-	eventTimestamp, err := util.ParseMVCCTimestamp(evt.MVCCTimestamp)
-	if err != nil {
-		return false, fmt.Errorf("error parsing mvcc timestamp: %w", err)
-	}
+	eventTimestamp := time.UnixMilli(evt.Timestamp)
 	// check if we have a timestamp for this table and only process if its newer
-	if tableTimestamp, ok := c.tableTimestamps[evt.Table]; ok {
-		if util.BigIntIsLess(eventTimestamp, tableTimestamp) {
-			c.logger.Info("skipping event for table %s, timestamp %s (%s) is less than %s", evt.Table, evt.MVCCTimestamp, eventTimestamp.String(), tableTimestamp.String())
-			return true, nil
-		}
+	if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
+		return eventTimestamp.Before(*tableTimestamp)
 	}
-	return false, nil
+	return false
 }
 
 func (c *Consumer) Error() <-chan error {
@@ -201,12 +194,8 @@ func (c *Consumer) bufferer() {
 				c.handleError(err)
 				return
 			}
-			skip, err := c.shouldSkip(&evt)
-			if err != nil {
-				c.handleError(err)
-				return
-			}
-			if skip {
+			if c.shouldSkip(&evt) {
+				log.Trace("skipping event due to timestamp %d", evt.Timestamp)
 				if err := msg.Ack(); err != nil {
 					// not much we can do here, just log it
 					log.Error("error acking skipped msg: %s", err)
@@ -407,17 +396,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
-	if config.ExportTableData != nil {
-		consumer.tableTimestamps = make(map[string]*big.Int)
-		for table, data := range config.ExportTableData {
-			// TODO: move this into the unmarshaller
-			ts, err := util.ParseBigIntTimestamp(data.Timestamp)
-			if err != nil {
-				return nil, fmt.Errorf("error parsing timestamp: %w", err)
-			}
-			consumer.tableTimestamps[table] = ts
-		}
-	}
+	consumer.tableTimestamps = config.ExportTableTimestamps
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
 
 	if config.Processor != nil {
