@@ -26,6 +26,7 @@ type snowflakeProcessor struct {
 	waitGroup sync.WaitGroup
 	once      sync.Once
 	ctx       context.Context
+	sessionID string
 }
 
 var _ internal.Processor = (*snowflakeProcessor)(nil)
@@ -35,6 +36,7 @@ var _ internal.ProcessorSessionHandler = (*snowflakeProcessor)(nil)
 
 func (p *snowflakeProcessor) SetSessionID(sessionID string) {
 	if sessionID != "" {
+		p.sessionID = sessionID
 		p.ctx = sf.WithRequestID(p.config.Context, sf.ParseUUID(sessionID))
 	}
 }
@@ -48,8 +50,7 @@ func (p *snowflakeProcessor) connectToDB(ctx context.Context, url string) (*sql.
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
-	row := db.QueryRowContext(ctx, "SELECT 1")
-	if err := row.Err(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("unable to ping db: %w", err)
 	}
@@ -117,13 +118,17 @@ func (p *snowflakeProcessor) Process(event internal.DBChangeEvent) (bool, error)
 	return false, nil
 }
 
+var queryCount int64
+
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
 func (p *snowflakeProcessor) Flush() error {
 	p.logger.Debug("flush: %v", p.count)
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if p.count > 0 {
-		execCTX, err := sf.WithMultiStatement(p.ctx, p.count) // for the transaction below
+		queryCount++
+		ctx := sf.WithQueryTag(context.Background(), fmt.Sprintf("eds-%s/%d", p.sessionID, queryCount))
+		execCTX, err := sf.WithMultiStatement(ctx, p.count) // for the transaction below
 		if err != nil {
 			return fmt.Errorf("error creating exec context: %w", err)
 		}

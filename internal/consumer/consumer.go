@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -301,7 +302,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 		info = &CredentialInfo{
 			companyIDs:  []string{"*"},
 			companyName: "dev",
-			sessionID:   "6ba7b812-9dad-11d1-80b4-00c04fd430c8", // dummy
+			sessionID:   uuid.NewString(),
 		}
 		logger.Debug("using localhost nats server")
 	} else {
