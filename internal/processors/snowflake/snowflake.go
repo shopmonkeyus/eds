@@ -127,16 +127,8 @@ func (p *snowflakeProcessor) Flush() error {
 		if err != nil {
 			return fmt.Errorf("error creating exec context: %w", err)
 		}
-		tx, err := p.db.BeginTx(p.ctx, nil)
-		if err != nil {
-			return fmt.Errorf("unable to start transaction: %w", err)
-		}
-		if _, err := tx.ExecContext(execCTX, p.pending.String()); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("unable to run query: %s transaction: %w", p.pending.String(), err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("unable to commit transaction: %w", err)
+		if _, err := p.db.ExecContext(execCTX, p.pending.String()); err != nil {
+			return fmt.Errorf("unable to run query: %s: %w", p.pending.String(), err)
 		}
 	}
 	p.pending.Reset()
