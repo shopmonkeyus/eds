@@ -1,18 +1,12 @@
-.PHONY: all build e2e lint localstack
+.PHONY: all build lint release
 
-all: e2e
+all: build
 
 build:
 	@go build -v -o /dev/null
 
+release:
+	@goreleaser release --snapshot --clean
+
 lint:
 	@go fmt ./...
-
-e2e:
-	@go run -tags e2e . e2e
-
-e2e_verbose:
-	@go run -tags e2e . e2e --verbose
-
-localstack:
-	@./hack/localstack
