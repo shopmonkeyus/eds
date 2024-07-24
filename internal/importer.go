@@ -51,10 +51,16 @@ type Importer interface {
 }
 
 var importerRegistry = map[string]Importer{}
+var importerAliasRegistry = map[string]string{}
 
 // Register registers a importer for a given protocol.
 func RegisterImporter(protocol string, importer Importer) {
 	importerRegistry[protocol] = importer
+	if p, ok := importer.(ProcessorAlias); ok {
+		for _, alias := range p.Aliases() {
+			importerAliasRegistry[alias] = protocol
+		}
+	}
 }
 
 // NewImporter creates a new importer for the given URL.
@@ -65,11 +71,17 @@ func NewImporter(ctx context.Context, logger logger.Logger, urlString string, re
 	}
 	importer := importerRegistry[u.Scheme]
 	if importer == nil {
-		importers := []string{}
-		for k := range importerRegistry {
-			importers = append(importers, k)
+		protocol := importerAliasRegistry[u.Scheme]
+		if protocol != "" {
+			importer = importerRegistry[protocol]
 		}
-		return nil, fmt.Errorf("no importer registered for protocol %s. the following are supported: %s", u.Scheme, strings.Join(importers, ", "))
+		if importer == nil {
+			importers := []string{}
+			for k := range importerRegistry {
+				importers = append(importers, k)
+			}
+			return nil, fmt.Errorf("no importer registered for protocol %s. the following are supported: %s", u.Scheme, strings.Join(importers, ", "))
+		}
 	}
 	return importer, nil
 }

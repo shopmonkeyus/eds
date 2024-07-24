@@ -252,9 +252,12 @@ func (p *postgresqlProcessor) Help() string {
 	return help.String()
 }
 
+func (p *postgresqlProcessor) Aliases() []string {
+	return []string{"postgresql"}
+}
+
 func init() {
 	var processor postgresqlProcessor
 	internal.RegisterProcessor("postgres", &processor)
 	internal.RegisterImporter("postgres", &processor)
-	internal.RegisterImporter("postgresql", &processor)
 }

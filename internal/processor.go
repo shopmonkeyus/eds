@@ -54,6 +54,12 @@ type Processor interface {
 	Flush() error
 }
 
+// ProcessorAlias is an interface that Processors implement for specifying additional protocol schemes for URLs that the processor can handle.
+type ProcessorAlias interface {
+	// Aliases returns a list of additional protocol schemes that the processor can handle (from the main protocol that was registered).
+	Aliases() []string
+}
+
 // ProcessorHelp is an interface that Processors implement for controlling the help system.
 type ProcessorHelp interface {
 
@@ -76,6 +82,7 @@ type ProcessorMetadata struct {
 }
 
 var processorRegistry = map[string]Processor{}
+var processorAliasRegistry = map[string]string{}
 
 // GetProcessorMetadata returns the metadata for all the registered processors.
 func GetProcessorMetadata() []ProcessorMetadata {
@@ -97,6 +104,11 @@ func GetProcessorMetadata() []ProcessorMetadata {
 // Register registers a processor for a given protocol.
 func RegisterProcessor(protocol string, processor Processor) {
 	processorRegistry[protocol] = processor
+	if p, ok := processor.(ProcessorAlias); ok {
+		for _, alias := range p.Aliases() {
+			processorAliasRegistry[alias] = protocol
+		}
+	}
 }
 
 // NewProcessor creates a new processor for the given URL.
@@ -107,7 +119,13 @@ func NewProcessor(ctx context.Context, logger logger.Logger, urlString string, r
 	}
 	processor := processorRegistry[u.Scheme]
 	if processor == nil {
-		return nil, fmt.Errorf("no processor registered for protocol %s", u.Scheme)
+		protocol := processorAliasRegistry[u.Scheme]
+		if protocol != "" {
+			processor = processorRegistry[protocol]
+		}
+		if processor == nil {
+			return nil, fmt.Errorf("no processor registered for protocol %s", u.Scheme)
+		}
 	}
 
 	// start the processor if it implements the ProcessorLifecycle interface

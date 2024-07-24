@@ -106,15 +106,7 @@ func quoteValue(arg any) (str string) {
 		}
 		str = "ARRAY[" + strings.Join(ns, ",") + "]"
 	case []interface{}:
-		if len(arg) == 0 {
-			str = "null"
-		} else {
-			var ns []string
-			for _, thes := range arg {
-				ns = append(ns, quoteValue(thes))
-			}
-			str = "ARRAY[" + strings.Join(ns, ",") + "]"
-		}
+		str = quoteString(util.JSONStringify(arg))
 	default:
 		value := reflect.ValueOf(arg)
 		if value.Kind() == reflect.Ptr {
