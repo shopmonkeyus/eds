@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"time"
 
 	"strings"
 )
@@ -82,4 +84,28 @@ func ListDir(dir string) ([]string, error) {
 		}
 	}
 	return res, nil
+}
+
+// https://www.cockroachlabs.com/docs/v24.1/create-changefeed#general-file-format
+// /[date]/[timestamp]-[uniquer]-[topic]-[schema-id]
+var crdbExportFileRegex = regexp.MustCompile(`^(\d{33})-\w+-[\w-]+-([a-z0-9_]+)-(\w+)\.ndjson\.gz`)
+
+// YYYYMMDDHHMMSSNNNNNNNNNLLLLLLLLLL
+func parsePreciseDate(dateStr string) (time.Time, error) {
+	format := "20060102150405.999999999"
+	trimmed := dateStr[:14] + "." + dateStr[14:23]
+	return time.Parse(format, trimmed)
+}
+
+func ParseCRDBExportFile(file string) (string, time.Time, bool) {
+	filename := filepath.Base(file)
+	if !crdbExportFileRegex.MatchString(filename) {
+		return "", time.Time{}, false
+	}
+	matches := crdbExportFileRegex.FindStringSubmatch(filename)
+	ts, err := parsePreciseDate(matches[1])
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	return matches[2], ts, true
 }

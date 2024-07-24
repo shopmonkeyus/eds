@@ -518,7 +518,7 @@ func init() {
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
-	serverCmd.Flags().Int("replicas", -1, "the number of consumer replicas")
+	serverCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	serverCmd.Flags().Int("health-port", 8080, "the port to listen for health checks")

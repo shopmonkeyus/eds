@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/registry"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
-	csys "github.com/shopmonkeyus/go-common/sys"
+	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 )
 
@@ -35,23 +36,6 @@ func runHealthCheckServerFork(logger logger.Logger, port int) {
 	}()
 }
 
-func getReplicas(logger logger.Logger, cmd *cobra.Command, natsurl string) int {
-	replicas := mustFlagInt(cmd, "replicas", false)
-
-	// dynamically set based on nats server if not set
-	if replicas <= 0 {
-		if util.IsLocalhost(natsurl) {
-			return 1
-		}
-		return 3
-	}
-	if replicas > 3 {
-		logger.Error("replicas must be between 1-3")
-		os.Exit(2)
-	}
-	return replicas
-}
-
 var forkCmd = &cobra.Command{
 	Use:   "fork",
 	Short: "Run the server",
@@ -67,18 +51,37 @@ var forkCmd = &cobra.Command{
 		url := mustFlagString(cmd, "url", true)
 		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
 		schemaFile := mustFlagString(cmd, "schema", true)
+		tablesFile := mustFlagString(cmd, "tables", true)
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
 		healthPort := mustFlagInt(cmd, "health-port", false)
 		serverStarted := time.Now()
 
-		replicas := getReplicas(logger, cmd, natsurl)
-
 		registry, err := registry.NewFileRegistry(schemaFile)
 		if err != nil {
 			logger.Error("error creating registry: %s", err)
 			os.Exit(2)
+		}
+
+		var exportTableTimestamps map[string]*time.Time
+		if exportTableData, err := loadTablesJSON(tablesFile); err != nil {
+			if cmd.Flags().Changed("tables") {
+				logger.Error("provided tables file %s not found!", tablesFile)
+				os.Exit(2)
+			}
+			if errors.Is(err, os.ErrNotExist) {
+				logger.Info("tables file %s not found", tablesFile)
+				// this is okay
+			} else {
+				logger.Error("error loading tables: %s", err)
+				os.Exit(2)
+			}
+		} else {
+			exportTableTimestamps = make(map[string]*time.Time)
+			for _, data := range exportTableData {
+				exportTableTimestamps[data.Table] = &data.Timestamp
+			}
 		}
 
 		processor, err := internal.NewProcessor(ctx, logger, url, registry)
@@ -103,15 +106,15 @@ var forkCmd = &cobra.Command{
 			var completed bool
 			for !completed {
 				consumer, err := consumer.NewConsumer(consumer.ConsumerConfig{
-					Context:          ctx,
-					Logger:           logger,
-					URL:              natsurl,
-					Credentials:      creds,
-					Suffix:           consumerSuffix,
-					MaxAckPending:    maxAckPending,
-					MaxPendingBuffer: maxPendingBuffer,
-					Replicas:         replicas,
-					Processor:        processor,
+					Context:               ctx,
+					Logger:                logger,
+					URL:                   natsurl,
+					Credentials:           creds,
+					Suffix:                consumerSuffix,
+					MaxAckPending:         maxAckPending,
+					MaxPendingBuffer:      maxPendingBuffer,
+					Processor:             processor,
+					ExportTableTimestamps: exportTableTimestamps,
 				})
 				if err != nil {
 					logger.Error("error creating consumer: %s", err)
@@ -140,7 +143,7 @@ var forkCmd = &cobra.Command{
 		logger.Info("server is running")
 
 		// wait for shutdown or error
-		<-csys.CreateShutdownChannel()
+		<-sys.CreateShutdownChannel()
 
 		logger.Debug("server is stopping")
 
@@ -162,7 +165,7 @@ func init() {
 	forkCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "Snowflake Database connection string")
 	forkCmd.Flags().String("schema", "schema.json", "the Shopmonkey schema file")
-	forkCmd.Flags().Int("replicas", -1, "the number of consumer replicas")
+	forkCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
