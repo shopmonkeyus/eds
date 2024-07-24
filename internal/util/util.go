@@ -3,9 +3,11 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"strings"
 )
@@ -82,4 +84,48 @@ func ListDir(dir string) ([]string, error) {
 		}
 	}
 	return res, nil
+}
+
+type ExportFileInformation struct {
+	Table     string `json:"table"`
+	Timestamp string `json:"timestamp"`
+}
+
+func ParseMVCCTimestamp(timestamp string) (*big.Int, error) {
+	// remove decimal
+	ts := strings.ReplaceAll(timestamp, ".", "")
+	return ParseBigIntTimestamp(ts)
+}
+
+func ParseBigIntTimestamp(timestamp string) (*big.Int, error) {
+	i, ok := big.NewInt(int64(0)).SetString(timestamp, 10)
+	if !ok {
+		return nil, fmt.Errorf("unable to parse timestamp %s", timestamp)
+	}
+	return i, nil
+}
+
+// BigIntIsLess returns true if a is less than b
+func BigIntIsLess(a, b *big.Int) bool {
+	return a.Cmp(b) < 0
+}
+
+func (e *ExportFileInformation) Less(other *ExportFileInformation) bool {
+	return strings.Compare(e.Timestamp, other.Timestamp) < 0
+}
+
+// https://www.cockroachlabs.com/docs/v24.1/create-changefeed#general-file-format
+// /[date]/[timestamp]-[uniquer]-[topic]-[schema-id]
+var crdbExportFileRegex = regexp.MustCompile(`^(\d+)-\w+-[\w-]+-([a-z0-9_]+)-(\w+)\.ndjson\.gz`)
+
+func ParseCRDBExportFile(file string) (*ExportFileInformation, bool) {
+	filename := filepath.Base(file)
+	if !crdbExportFileRegex.MatchString(filename) {
+		return nil, false
+	}
+	matches := crdbExportFileRegex.FindStringSubmatch(filename)
+	return &ExportFileInformation{
+		Table:     matches[2],
+		Timestamp: matches[1],
+	}, true
 }

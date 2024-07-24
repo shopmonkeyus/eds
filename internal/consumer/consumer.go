@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"math/big"
 	"sync"
 	"time"
 
@@ -47,30 +47,32 @@ type ConsumerConfig struct {
 	// MaxPendingBuffer is the maximum number of messages that can be buffered before the consumer starts dropping messages.
 	MaxPendingBuffer int
 
-	// Replicas are the number of replicas for the consumer.
-	Replicas int
-
 	// Processor is the processor for the consumer.
 	Processor internal.Processor
+
+	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
+	ExportTableData map[string]*util.ExportFileInformation
 }
 
 type Consumer struct {
-	ctx            context.Context
-	cancel         context.CancelFunc
-	max            int
-	processor      internal.Processor
-	conn           *nats.Conn
-	jsconn         jetstream.Consumer
-	logger         logger.Logger
-	subscriber     jetstream.ConsumeContext
-	buffer         chan jetstream.Msg
-	pending        []jetstream.Msg
-	pendingStarted *time.Time
-	waitGroup      sync.WaitGroup
-	once           sync.Once
-	lock           sync.Mutex
-	stopping       bool
-	subError       chan error
+	ctx             context.Context
+	cancel          context.CancelFunc
+	max             int
+	processor       internal.Processor
+	conn            *nats.Conn
+	jsconn          jetstream.Consumer
+	logger          logger.Logger
+	subscriber      jetstream.ConsumeContext
+	buffer          chan jetstream.Msg
+	pending         []jetstream.Msg
+	pendingStarted  *time.Time
+	waitGroup       sync.WaitGroup
+	once            sync.Once
+	lock            sync.Mutex
+	stopping        bool
+	subError        chan error
+	sessionID       string
+	tableTimestamps map[string]*big.Int
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -128,6 +130,9 @@ func (c *Consumer) handleError(err error) {
 
 func (c *Consumer) flush() bool {
 	c.logger.Trace("flush")
+	if c.processor == nil {
+		return c.stopping
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if err := c.processor.Flush(); err != nil {
@@ -144,6 +149,23 @@ func (c *Consumer) flush() bool {
 	c.pending = nil
 	c.pendingStarted = nil
 	return c.stopping
+}
+func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) (bool, error) {
+	if c.tableTimestamps == nil {
+		return false, nil
+	}
+	eventTimestamp, err := util.ParseMVCCTimestamp(evt.MVCCTimestamp)
+	if err != nil {
+		return false, fmt.Errorf("error parsing mvcc timestamp: %w", err)
+	}
+	// check if we have a timestamp for this table and only process if its newer
+	if tableTimestamp, ok := c.tableTimestamps[evt.Table]; ok {
+		if util.BigIntIsLess(eventTimestamp, tableTimestamp) {
+			c.logger.Info("skipping event for table %s, timestamp %s (%s) is less than %s", evt.Table, evt.MVCCTimestamp, eventTimestamp.String(), tableTimestamp.String())
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (c *Consumer) Error() <-chan error {
@@ -178,6 +200,25 @@ func (c *Consumer) bufferer() {
 				log.Error("error unmarshalling: %s (seq:%d): %s", string(buf), md.Sequence.Consumer, err)
 				c.handleError(err)
 				return
+			}
+			skip, err := c.shouldSkip(&evt)
+			if err != nil {
+				c.handleError(err)
+				return
+			}
+			if skip {
+				if err := msg.Ack(); err != nil {
+					// not much we can do here, just log it
+					log.Error("error acking skipped msg: %s", err)
+				}
+				// remove from pending
+				for i, m := range c.pending {
+					if m == msg {
+						c.pending = append(c.pending[:i], c.pending[i+1:]...)
+						break
+					}
+				}
+				continue
 			}
 			flush, err := c.processor.Process(evt)
 			if err != nil {
@@ -263,10 +304,10 @@ func (c *Consumer) heartbeat(subject string, payload []byte) error {
 }
 
 // sendHeartbeats sends a heartbeat every minute
-func (c *Consumer) sendHeartbeats(sessionId string) {
+func (c *Consumer) sendHeartbeats() {
 	// payload never changes, so we can just create it once
-	heartbeatSubject := fmt.Sprintf("eds.heartbeat.%s", sessionId)
-	heartbeatPayload := []byte(util.JSONStringify(heartbeat{SessionId: sessionId}))
+	heartbeatSubject := fmt.Sprintf("eds.heartbeat.%s", c.sessionID)
+	heartbeatPayload := []byte(util.JSONStringify(heartbeat{SessionId: c.sessionID}))
 	// first heartbeat
 	if err := c.heartbeat(heartbeatSubject, heartbeatPayload); err != nil {
 		c.logger.Error("error sending heartbeat: %s", err)
@@ -287,10 +328,14 @@ func (c *Consumer) sendHeartbeats(sessionId string) {
 	}
 }
 
+func (c *Consumer) Name() string {
+	return c.jsconn.CachedInfo().Config.Durable
+}
+
 type CredentialInfo struct {
-	companyIDs  []string
-	companyName string
-	sessionID   string
+	companyIDs []string
+	companyID  string
+	sessionID  string
 }
 
 func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Conn, *CredentialInfo, error) {
@@ -299,9 +344,9 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 
 	if util.IsLocalhost(url) || creds == "" {
 		info = &CredentialInfo{
-			companyIDs:  []string{"*"},
-			companyName: "dev",
-			sessionID:   "6ba7b812-9dad-11d1-80b4-00c04fd430c8", // dummy
+			companyIDs: []string{"*"},
+			companyID:  "dev",
+			sessionID:  "6ba7b812-9dad-11d1-80b4-00c04fd430c8", // dummy
 		}
 		logger.Debug("using localhost nats server")
 	} else {
@@ -310,12 +355,10 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 		if err != nil {
 			return nil, nil, err
 		}
-		// normalize the company name so we can use it in the nats client name and in the consumer name
-		info.companyName = strings.ToLower(strings.ReplaceAll(info.companyName, " ", "_"))
 	}
 
 	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-server-"+info.companyName, url, natsCredentials)
+	nc, err := cnats.NewNats(logger, "eds-server-"+info.companyID, url, natsCredentials)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
 	}
@@ -323,8 +366,30 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	return nc, info, nil
 }
 
-// NewConsumer creates a new nats consumer
-func NewConsumer(config ConsumerConfig) (*Consumer, error) {
+func (c *Consumer) Start() error {
+	if c.subscriber != nil {
+		return fmt.Errorf("consumer already started")
+	}
+	// start consuming messages
+	sub, err := c.jsconn.Consume(c.process)
+	if err != nil {
+		c.conn.Close()
+		return fmt.Errorf("error starting jetstream consumer: %w", err)
+	}
+	c.subscriber = sub
+
+	// start the background processor
+	go c.bufferer()
+
+	// start the heartbeat
+	go c.sendHeartbeats()
+
+	c.logger.Debug("started")
+	return nil
+}
+
+// CreateConsumer creates a new nats consumer, but does not start it.
+func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	nc, info, err := NewNatsConnection(config.Logger, config.URL, config.Credentials)
 	if err != nil {
 		return nil, err
@@ -341,20 +406,37 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.buffer = make(chan jetstream.Msg, config.MaxAckPending)
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
+	consumer.sessionID = info.sessionID
+	if config.ExportTableData != nil {
+		consumer.tableTimestamps = make(map[string]*big.Int)
+		for table, data := range config.ExportTableData {
+			// TODO: move this into the unmarshaller
+			ts, err := util.ParseBigIntTimestamp(data.Timestamp)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing timestamp: %w", err)
+			}
+			consumer.tableTimestamps[table] = ts
+		}
+	}
+	consumer.logger = config.Logger.WithPrefix("[consumer]")
 
-	if p, ok := config.Processor.(internal.ProcessorSessionHandler); ok {
-		p.SetSessionID(info.sessionID)
+	if config.Processor != nil {
+		if p, ok := config.Processor.(internal.ProcessorSessionHandler); ok {
+			p.SetSessionID(consumer.sessionID)
+		}
+	} else {
+		config.Logger.Debug("no processor set")
 	}
 
-	consumer.logger = config.Logger.WithPrefix("[nats]")
+	natsLogger := config.Logger.WithPrefix("[nats]")
 	js, err := jetstream.New(nc,
 		jetstream.WithClientTrace(
 			&jetstream.ClientTrace{
 				RequestSent: func(subj string, payload []byte) {
-					consumer.logger.Trace("nats tx: %s: %s", subj, string(payload))
+					natsLogger.Trace("nats tx: %s: %s", subj, string(payload))
 				},
 				ResponseReceived: func(subj string, payload []byte, hdr nats.Header) {
-					consumer.logger.Trace("nats rx: %s: %s", subj, string(payload))
+					natsLogger.Trace("nats rx: %s: %s", subj, string(payload))
 				},
 			},
 		),
@@ -364,19 +446,17 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("error creating jetstream connection: %w", err)
 	}
 
+	consumer.logger.Info("using info from credentials, name: %s companies: %s, session %s", info.companyID, info.companyIDs, info.sessionID)
+
 	var prefix string
 	if config.Suffix != "" {
 		prefix = "-" + config.Suffix
 	}
-	name := fmt.Sprintf("eds-server-%s%s", info.companyName, prefix)
+	name := fmt.Sprintf("eds-server-%s%s", info.companyID, prefix)
 	var subjects []string
 	for _, companyID := range info.companyIDs {
 		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
 		subjects = append(subjects, subject)
-	}
-	replicas := 1
-	if config.Replicas > 1 {
-		replicas = config.Replicas
 	}
 
 	jsConfig := jetstream.ConsumerConfig{
@@ -384,7 +464,6 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 		MaxAckPending:     config.MaxAckPending,
 		MaxDeliver:        1_000,
 		AckWait:           time.Minute * 5,
-		Replicas:          replicas,
 		DeliverPolicy:     jetstream.DeliverNewPolicy,
 		MaxRequestBatch:   config.MaxPendingBuffer,
 		FilterSubjects:    subjects,
@@ -402,20 +481,17 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	consumer.jsconn = c
 
-	// start consuming messages
-	sub, err := c.Consume(consumer.process)
-	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("error starting jetstream consumer: %w", err)
-	}
-	consumer.subscriber = sub
-
-	// start the background processor
-	go consumer.bufferer()
-
-	// start the heartbeat
-	go consumer.sendHeartbeats(info.sessionID)
-
-	consumer.logger.Debug("started")
 	return &consumer, nil
+}
+
+// NewConsumer creates and starts a new nats consumer
+func NewConsumer(config ConsumerConfig) (*Consumer, error) {
+	consumer, err := CreateConsumer(config)
+	if err != nil {
+		return nil, err
+	}
+	if err := consumer.Start(); err != nil {
+		return nil, err
+	}
+	return consumer, nil
 }

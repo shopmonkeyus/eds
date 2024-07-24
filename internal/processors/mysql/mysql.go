@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -177,20 +176,18 @@ func (p *mysqlProcessor) Import(config internal.ImporterConfig) error {
 	// NOTE: these files should automatically be sorted by the filesystem
 	// so we need to do them in order and not in parallel
 	for _, file := range files {
-		if !strings.HasSuffix(file, ".ndjson.gz") {
+		info, ok := util.ParseCRDBExportFile(file)
+		if !ok {
+			logger.Debug("skipping file: %s", file)
 			continue
 		}
-		// [0]                               [1]             [2][3] [4]      [5] [6]
-		// 202407131650522808024600000000000-c7274317e9a4a9cb-1-651-00000000-user-2.ndjson.gz
-		filename := filepath.Base(file)
-		parts := strings.Split(filename, "-")
-		table := parts[5]
+		table := info.Table
 		if !util.SliceContains(config.Tables, table) {
 			continue
 		}
 		data := schema[table]
 		if data == nil {
-			return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, filename)
+			return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, file)
 		}
 		logger.Debug("processing file: %s, table: %s", file, table)
 		dec, err := util.NewNDJSONDecoder(file)

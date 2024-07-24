@@ -19,10 +19,11 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/registry"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
-	csys "github.com/shopmonkeyus/go-common/sys"
+	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 )
 
@@ -244,20 +245,16 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 	}
 }
 
-func downloadFile(log logger.Logger, dir string, fullURL string) (int64, error) {
-	parsedURL, err := url.Parse(fullURL)
-	if err != nil {
-		return 0, fmt.Errorf("error parsing url: %s", err)
-	}
+func downloadFile(log logger.Logger, dir string, parsedURL *url.URL) (int64, error) {
 	baseFileName := filepath.Base(parsedURL.Path)
-	resp, err := http.Get(fullURL)
+	resp, err := http.Get(parsedURL.String())
 	if err != nil {
 		return 0, fmt.Errorf("error fetching data: %s", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
-		log.Trace("error fetching data: %s, (url: %s)\n%s", resp.Status, fullURL, buf)
+		log.Trace("error fetching data: %s, (url: %s)\n%s", resp.Status, parsedURL.String(), buf)
 		return 0, fmt.Errorf("error fetching data: %s", resp.Status)
 	}
 	filename := filepath.Join(dir, baseFileName)
@@ -274,17 +271,29 @@ func downloadFile(log logger.Logger, dir string, fullURL string) (int64, error) 
 	return bytes, nil
 }
 
-func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string) ([]string, error) {
-	var downloads []string
-	var tablesWithData []string
+func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string) (map[string]*util.ExportFileInformation, error) {
+	var downloads []*url.URL
 	started := time.Now()
+	tables := make(map[string]*util.ExportFileInformation)
 	for table, tableData := range data {
-		if len(tableData.URLs) > 0 {
-			tablesWithData = append(tablesWithData, table)
-		} else {
+		if len(tableData.URLs) == 0 {
 			log.Debug("no data for table %s", table)
 		}
-		downloads = append(downloads, tableData.URLs...)
+		for _, fullURL := range tableData.URLs {
+			parsedURL, err := url.Parse(fullURL)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing url: %s", err)
+			}
+			info, ok := util.ParseCRDBExportFile(parsedURL.Path)
+			if !ok {
+				return nil, fmt.Errorf("unrecognized file path: %s", filepath.Base(parsedURL.Path))
+			}
+			existing := tables[table]
+			if existing == nil || existing.Less(info) {
+				tables[table] = info
+			}
+			downloads = append(downloads, parsedURL)
+		}
 	}
 	if len(downloads) == 0 {
 		log.Debug("no files to download")
@@ -292,7 +301,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	}
 
 	concurrency := 10
-	downloadChan := make(chan string, len(downloads))
+	downloadChan := make(chan *url.URL, len(downloads))
 	var downloadWG sync.WaitGroup
 	errors := make(chan error, concurrency)
 	total := float64(len(downloads))
@@ -319,8 +328,8 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	}
 
 	// send the downloads
-	for _, packet := range downloads {
-		downloadChan <- packet
+	for _, downloadURL := range downloads {
+		downloadChan <- downloadURL
 	}
 	close(downloadChan)
 
@@ -336,7 +345,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 
 	log.Info("Downloaded %d files (%d bytes) in %v", len(downloads), downloadBytes, time.Since(started))
 
-	return tablesWithData, nil
+	return tables, nil
 }
 
 func isCancelled(ctx context.Context) bool {
@@ -348,12 +357,71 @@ func isCancelled(ctx context.Context) bool {
 	}
 }
 
+func createEDSSession(ctx context.Context, logger logger.Logger, serverURL string, apiURL string, apiKey string, suffix string) error {
+	logger.Info("Creating EDS Checkpoint...")
+	// TODO: just get the cred instead of starting a session?
+	session, err := sendStart(logger, apiURL, apiKey)
+	if err != nil {
+		return fmt.Errorf("error creating EDS session: %s", err)
+	}
+	logger.Trace("EDS session created: %s", session.SessionId)
+	if session.Credential == nil {
+		return fmt.Errorf("no credential found in session")
+	}
+	credsFile := filepath.Join(os.TempDir(), fmt.Sprintf("eds-%s.creds", session.SessionId))
+	if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
+		logger.Fatal("failed to write creds to file: %s", err)
+	}
+	logger.Trace("credential saved to: %s", credsFile)
+	defer os.Remove(credsFile)
+	consumerContext, cancel := context.WithCancel(ctx)
+	defer cancel() // cancel the consumer context to close the nats connections etc
+	con, err := consumer.CreateConsumer(consumer.ConsumerConfig{
+		Logger:      logger,
+		Context:     consumerContext,
+		URL:         serverURL,
+		Credentials: credsFile,
+		Suffix:      suffix,
+	})
+	if err != nil {
+		return fmt.Errorf("error creating consumer: %s", err)
+	}
+	logger.Trace("consumer created: %s", con.Name())
+	// stop the session
+	if _, err := sendEnd(logger, apiURL, apiKey, session.SessionId, false); err != nil {
+		return fmt.Errorf("error ending session: %s", err)
+	}
+	logger.Trace("EDS session ended: %s", session.SessionId)
+	return nil
+}
+
+func keys[T any](m map[string]T) []string {
+	var keys []string
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func loadTablesJSON(fp string) (map[string]*util.ExportFileInformation, error) {
+	to, err := os.Open(fp)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't open temp tables file at %s: %w", fp, err)
+	}
+	dec := json.NewDecoder(to)
+	tables := make(map[string]*util.ExportFileInformation)
+	if err := dec.Decode(&tables); err != nil {
+		return nil, fmt.Errorf("error decoding tables: %w", err)
+	}
+	return tables, nil
+}
+
 var importCmd = &cobra.Command{
 	Use:   "import",
 	Short: "import data from your Shopmonkey instance to your system",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		noconfirmed, _ := cmd.Flags().GetBool("no-confirm")
+		noconfirm, _ := cmd.Flags().GetBool("no-confirm")
 		providerUrl := mustFlagString(cmd, "url", true)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		parallel := mustFlagInt(cmd, "parallel", false)
@@ -368,7 +436,7 @@ var importCmd = &cobra.Command{
 		defer closer()
 		logger = logger.WithPrefix("[import]")
 
-		if !dryRun && !noconfirmed {
+		if !dryRun && !noconfirm {
 
 			u, err := url.Parse(providerUrl)
 			if err != nil {
@@ -419,11 +487,25 @@ var importCmd = &cobra.Command{
 			select {
 			case <-ctx.Done():
 				return
-			case <-csys.CreateShutdownChannel():
+			case <-sys.CreateShutdownChannel():
 				cancel()
 				return
 			}
 		}()
+
+		// create eds session
+		noEDSSession, _ := cmd.Flags().GetBool("no-eds-session")
+		if !noEDSSession {
+			serverURL := mustFlagString(cmd, "server", true)
+			suffix := mustFlagString(cmd, "consumer-suffix", false)
+			if err := createEDSSession(ctx, logger, serverURL, apiURL, apiKey, suffix); err != nil {
+				logger.Error("error creating EDS session: %s", err)
+				logger.Info("If you do not intend to run EDS server after the import then you may use --no-eds-session to skip this")
+				os.Exit(1)
+			}
+		} else {
+			logger.Warn("Skipping EDS session, this may cause data loss if you run EDS after the import")
+		}
 
 		only, _ := cmd.Flags().GetStringSlice("only")
 		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
@@ -452,7 +534,7 @@ var importCmd = &cobra.Command{
 		}
 
 		noCleanup, _ := cmd.Flags().GetBool("no-cleanup")
-		var tables []string
+		var tableData map[string]*util.ExportFileInformation
 
 		// if we pass in a directory, dont delete it
 		if dir != "" {
@@ -462,9 +544,19 @@ var importCmd = &cobra.Command{
 		var success bool
 		defer func() {
 			logger.Trace("exit success: %v", success)
-			if success && !noCleanup {
-				os.RemoveAll(dir)
-			} else {
+			var filesRemoved bool
+			if success {
+				if _, err := sys.CopyFile(filepath.Join(dir, "tables.json"), "tables.json"); err != nil {
+					logger.Error("error copying tables.json: %s", err)
+				} else {
+					logger.Info("tables.json saved to: %s", "tables.json")
+				}
+				if !noCleanup {
+					os.RemoveAll(dir)
+					filesRemoved = true
+				}
+			}
+			if !filesRemoved {
 				logger.Info("downloaded files saved to: %s", dir)
 			}
 			if !success {
@@ -507,7 +599,7 @@ var importCmd = &cobra.Command{
 			logger.Trace("temp dir created: %s", dir)
 
 			logger.Info("Downloading export data...")
-			tables, err = bulkDownloadData(logger, job.Tables, dir)
+			tableData, err = bulkDownloadData(logger, job.Tables, dir)
 			if err != nil {
 				logger.Error("error downloading files: %s", err)
 				return
@@ -522,35 +614,30 @@ var importCmd = &cobra.Command{
 				return
 			}
 			enc := json.NewEncoder(to)
-			enc.Encode(tables)
+			if err := enc.Encode(tableData); err != nil {
+				logger.Error("error encoding tables: %s", err)
+				return
+			}
 			to.Close()
 		} else {
 			fp := filepath.Join(dir, "tables.json")
-			to, err := os.Open(fp)
+			tableData, err = loadTablesJSON(fp)
 			if err != nil {
-				logger.Error("couldn't open temp tables file at %s: %s", fp, err)
+				logger.Error("error loading tables: %s", err)
 				return
 			}
-			dec := json.NewDecoder(to)
-			tables = make([]string, 0)
-			if err := dec.Decode(&tables); err != nil {
-				logger.Error("error decoding tables: %s", err)
-				return
-			}
-			logger.Debug("reloading tables (%s) from %s", strings.Join(tables, ","), dir)
+			logger.Debug("reloading tables (%s) from %s", strings.Join(keys(tableData), ","), dir)
 		}
 
 		if len(only) > 0 {
-			_tables := make([]string, 0)
-			for _, table := range tables {
-				if util.SliceContains(only, table) {
-					_tables = append(_tables, table)
+			for _, onlyTable := range only {
+				if _, ok := tableData[onlyTable]; !ok {
+					delete(tableData, onlyTable)
 				}
 			}
-			tables = _tables
 		}
-
-		logger.Info("Importing data...")
+		tables := keys(tableData)
+		logger.Info("Importing data to tables %s", strings.Join(tables, ", "))
 		if err := importer.Import(internal.ImporterConfig{
 			Context:        ctx,
 			URL:            providerUrl,
@@ -567,7 +654,7 @@ var importCmd = &cobra.Command{
 			return
 		}
 		success = true
-		logger.Info("👋 Loaded %d tables in %v", len(tables), time.Since(started))
+		logger.Info("👋 Loaded %d tables in %v", len(tableData), time.Since(started))
 	},
 }
 
@@ -579,6 +666,9 @@ func init() {
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
 	importCmd.Flags().String("job-id", "", "resume an existing job")
 	importCmd.Flags().Bool("no-confirm", false, "skip the confirmation prompt")
+	importCmd.Flags().Bool("no-eds-session", false, "skip creating an EDS session")
+	importCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
+	importCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")
 	importCmd.Flags().StringSlice("locationIds", nil, "only import these location ids")

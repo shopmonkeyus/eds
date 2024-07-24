@@ -64,13 +64,13 @@ func getNatsCreds(creds string) (nats.Option, *CredentialInfo, error) {
 	if len(companyIDs) == 0 {
 		return nil, nil, errors.New("issue parsing company ID from JWT claims. Ensure the JWT has the correct permissions")
 	}
-	companyName := claim.Name
-	if companyName == "" {
+	companyID := claim.Name
+	if companyID == "" {
 		return nil, nil, errors.New("missing company name in credential")
 	}
 	return natsCredentials, &CredentialInfo{
-		companyIDs:  companyIDs,
-		companyName: companyName,
-		sessionID:   sessionID,
+		companyIDs: companyIDs,
+		companyID:  companyID,
+		sessionID:  sessionID,
 	}, nil
 }
