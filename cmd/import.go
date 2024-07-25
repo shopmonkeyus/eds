@@ -90,10 +90,7 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 		if err != nil {
 			return "", fmt.Errorf("error creating request: %s", err)
 		}
-		req.Header = http.Header{
-			"Authorization": {"Bearer " + apiKey},
-			"Content-Type":  {"application/json"},
-		}
+		setHTTPHeader(req, apiKey)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			if shouldRetryError(err) {
@@ -174,10 +171,7 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 		}
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
-	req.Header = http.Header{
-		"Authorization": {"Bearer " + apiKey},
-		"Accept":        {"application/json"},
-	}
+	setHTTPHeader(req, apiKey)
 	var retryCount int
 	started := time.Now()
 	for time.Since(started) < time.Minute*5 {
@@ -231,6 +225,7 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 			return exportJobResponse{}, nil // cancelled
 		}
 		if job.Completed {
+			logger.Info("Export Progress: %s", job.String())
 			return *job, nil
 		}
 		logger.Debug("Waiting for Export to Complete: %s", job.String())
@@ -324,6 +319,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	for i := 0; i < concurrency; i++ {
 		downloadWG.Add(1)
 		go func() {
+			defer util.RecoverPanic(log)
 			defer downloadWG.Done()
 			for url := range downloadChan {
 				size, err := downloadFile(log, dir, url)
@@ -429,7 +425,7 @@ func loadTablesJSON(fp string) ([]TableExportInfo, error) {
 
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "import data from your Shopmonkey instance to your system",
+	Short: "Import data from your Shopmonkey instance to your system",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		noconfirm, _ := cmd.Flags().GetBool("no-confirm")
@@ -495,6 +491,7 @@ var importCmd = &cobra.Command{
 		defer cancel()
 
 		go func() {
+			defer util.RecoverPanic(logger)
 			select {
 			case <-ctx.Done():
 				return

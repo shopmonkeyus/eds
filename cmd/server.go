@@ -104,8 +104,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession,
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setHTTPHeader(req, apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
@@ -133,8 +132,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setHTTPHeader(req, apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send session end: %w", err)
@@ -160,8 +158,7 @@ func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId str
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setHTTPHeader(req, apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send renew end: %w", err)
@@ -192,6 +189,7 @@ func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
+	setHTTPHeader(req, "")
 	req.Header.Set("Content-Type", "application/x-tgz")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -238,6 +236,7 @@ func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
 		w.WriteHeader(resp.StatusCode)
 	})
 	go func() {
+		defer util.RecoverPanic(logger)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("failed to start health check server: %s", err)
 		}
@@ -313,9 +312,7 @@ var serverCmd = &cobra.Command{
 
 		logger = logger.WithPrefix("[server]")
 
-		if prefix := mustFlagString(cmd, "consumer-prefix", false); prefix != "" {
-			logger.Fatal("consumer-prefix is deprecated, use --consumer-suffix instead")
-		}
+		defer util.RecoverPanic(logger)
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
@@ -357,6 +354,7 @@ var serverCmd = &cobra.Command{
 		notificationConsumer := newNotificationConsumer(logger, natsurl)
 
 		go func() {
+			defer util.RecoverPanic(logger)
 			ticker := time.NewTicker(time.Hour * 24 * 6)
 			defer ticker.Stop()
 			for {
@@ -428,14 +426,14 @@ var serverCmd = &cobra.Command{
 				failures++
 			} else {
 				ec := result.ProcessState.ExitCode()
-				if ec != 2 {
+				if ec != 3 {
 					sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, result.LogFileBundle)
 				}
 				if ec == 0 {
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
-				if ec == 2 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
+				if ec == 3 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
 					os.Exit(ec)
 				}
 				failures++
@@ -511,8 +509,7 @@ func init() {
 	serverCmd.AddCommand(serverHelpCmd)
 
 	// NOTE: sync these with forkCmd
-	serverCmd.Flags().String("consumer-prefix", "", "deprecated - use --consumer-suffix instead")
-	serverCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
+	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().String("url", "", "provider connection string")
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
@@ -521,5 +518,5 @@ func init() {
 	serverCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
-	serverCmd.Flags().Int("health-port", 8080, "the port to listen for health checks")
+	serverCmd.Flags().Int("health-port", getOSInt("PORT", 8080), "the port to listen for health checks")
 }

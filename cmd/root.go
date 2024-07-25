@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	glog "log"
+	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
@@ -19,11 +21,11 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	val, err := cmd.Flags().GetString(name)
 	if err != nil {
 		fmt.Printf("error: %s\n", err)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	if required && val == "" {
 		fmt.Printf("error: required flag --%s missing\n", name)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	return val
 }
@@ -32,13 +34,25 @@ func mustFlagInt(cmd *cobra.Command, name string, required bool) int {
 	val, err := cmd.Flags().GetInt(name)
 	if err != nil {
 		fmt.Printf("error: %s\n", err)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	if required && val <= 0 {
 		fmt.Printf("error: required flag --%s missing\n", name)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	return val
+}
+
+func getOSInt(name string, def int) int {
+	val, ok := os.LookupEnv(name)
+	if !ok {
+		return def
+	}
+	i, err := strconv.Atoi(val)
+	if err != nil {
+		return def
+	}
+	return i
 }
 
 type logFileSink struct {
@@ -88,17 +102,27 @@ func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
 		logSync, err := newLogFileSync(sink)
 		if err != nil {
 			log.Error("failed to open log file: %s. %s", sink, err)
-			os.Exit(2)
+			os.Exit(3)
 		}
 		return log.WithSink(logSync, logger.LevelTrace), func() { logSync.Close() }
 	}
 	return log, func() {}
 }
 
+func setHTTPHeader(req *http.Request, apiKey string) {
+	req.Header = http.Header{
+		"Content-Type": {"application/json"},
+		"User-Agent":   {"Shopmonkey EDS Server/" + Version},
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+}
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:  "eds-server",
-	Long: "Shopmonkey Enterprise Data Streaming server \nFor detailed information, see: https://shopmonkey.dev/eds \nand https://github.com/shopmonkeyus/eds-server/blob/main/README.md ",
+	Long: "Shopmonkey Enterprise Data Streaming server (EDS) \nFor detailed information, see: https://shopmonkey.dev/eds \nand https://github.com/shopmonkeyus/eds-server",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
