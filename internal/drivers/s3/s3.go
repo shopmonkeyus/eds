@@ -47,20 +47,20 @@ func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, 
 	return lt.next.RoundTrip(req)
 }
 
-type s3Processor struct {
-	config internal.ProcessorConfig
+type s3Driver struct {
+	config internal.DriverConfig
 	logger logger.Logger
 	bucket string
 	prefix string
 	s3     *awss3.Client
 }
 
-var _ internal.Processor = (*s3Processor)(nil)
-var _ internal.ProcessorLifecycle = (*s3Processor)(nil)
-var _ internal.ProcessorHelp = (*s3Processor)(nil)
+var _ internal.Driver = (*s3Driver)(nil)
+var _ internal.DriverLifecycle = (*s3Driver)(nil)
+var _ internal.DriverHelp = (*s3Driver)(nil)
 
-// Start the processor. This is called once at the beginning of the processor's lifecycle.
-func (p *s3Processor) Start(pc internal.ProcessorConfig) error {
+// Start the driver. This is called once at the beginning of the driver's lifecycle.
+func (p *s3Driver) Start(pc internal.DriverConfig) error {
 	p.config = pc
 	p.logger = pc.Logger.WithPrefix("[s3]")
 
@@ -149,19 +149,19 @@ func (p *s3Processor) Start(pc internal.ProcessorConfig) error {
 	return nil
 }
 
-// Stop the processor. This is called once at the end of the processor's lifecycle.
-func (p *s3Processor) Stop() error {
+// Stop the driver. This is called once at the end of the driver's lifecycle.
+func (p *s3Driver) Stop() error {
 	return nil
 }
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
 // Return -1 to indicate that there is no limit.
-func (p *s3Processor) MaxBatchSize() int {
+func (p *s3Driver) MaxBatchSize() int {
 	return 1
 }
 
-// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
-func (p *s3Processor) Process(event internal.DBChangeEvent) (bool, error) {
+// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
+func (p *s3Driver) Process(event internal.DBChangeEvent) (bool, error) {
 	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
 	buf := []byte(util.JSONStringify(event))
 	_, err := p.s3.PutObject(p.config.Context, &awss3.PutObjectInput{
@@ -178,23 +178,23 @@ func (p *s3Processor) Process(event internal.DBChangeEvent) (bool, error) {
 	return false, nil
 }
 
-// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
-func (p *s3Processor) Flush() error {
+// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
+func (p *s3Driver) Flush() error {
 	return nil
 }
 
-// Description is the description of the processor.
-func (p *s3Processor) Description() string {
+// Description is the description of the driver.
+func (p *s3Driver) Description() string {
 	return "Supports streaming EDS messages to a AWS S3 compatible destination."
 }
 
-// ExampleURL should return an example URL for configuring the processor.
-func (p *s3Processor) ExampleURL() string {
+// ExampleURL should return an example URL for configuring the driver.
+func (p *s3Driver) ExampleURL() string {
 	return "s3://bucket/folder"
 }
 
-// Help should return a detailed help documentation for the processor.
-func (p *s3Processor) Help() string {
+// Help should return a detailed help documentation for the driver.
+func (p *s3Driver) Help() string {
 	var help strings.Builder
 	help.WriteString(util.GenerateHelpSection("AWS", "If using AWS, no special configuration is required and you can use the standard AWS environment variables to configure the access key, secret and region.\n"))
 	help.WriteString("\n")
@@ -205,5 +205,5 @@ func (p *s3Processor) Help() string {
 }
 
 func init() {
-	internal.RegisterProcessor("s3", &s3Processor{})
+	internal.RegisterDriver("s3", &s3Driver{})
 }

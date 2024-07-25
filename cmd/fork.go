@@ -87,13 +87,13 @@ var forkCmd = &cobra.Command{
 			}
 		}
 
-		processor, err := internal.NewProcessor(ctx, logger, url, registry)
+		driver, err := internal.NewDriver(ctx, logger, url, registry)
 		if err != nil {
-			logger.Error("error creating processor: %s", err)
+			logger.Error("error creating driver: %s", err)
 			os.Exit(3)
 		}
 
-		defer processor.Stop()
+		defer driver.Stop()
 
 		runHealthCheckServerFork(logger, healthPort)
 
@@ -117,7 +117,7 @@ var forkCmd = &cobra.Command{
 					Suffix:                consumerSuffix,
 					MaxAckPending:         maxAckPending,
 					MaxPendingBuffer:      maxPendingBuffer,
-					Processor:             processor,
+					Driver:                driver,
 					ExportTableTimestamps: exportTableTimestamps,
 				})
 				if err != nil {
@@ -132,7 +132,7 @@ var forkCmd = &cobra.Command{
 					if err := consumer.Stop(); err != nil {
 						logger.Error("error stopping consumer: %s", err)
 					}
-					processor.Stop()
+					driver.Stop()
 					cancel()
 					os.Exit(1)
 				case <-restart:
@@ -151,7 +151,7 @@ var forkCmd = &cobra.Command{
 
 		logger.Debug("server is stopping")
 
-		processor.Stop()
+		driver.Stop()
 		cancel()
 		wg.Wait()
 

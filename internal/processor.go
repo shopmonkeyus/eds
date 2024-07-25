@@ -8,72 +8,72 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-// ProcessorConfig is the configuration for a processor.
-type ProcessorConfig struct {
+// DriverConfig is the configuration for a driver.
+type DriverConfig struct {
 
-	// Context for the processor.
+	// Context for the driver.
 	Context context.Context
 
-	// URL for the processor.
+	// URL for the driver.
 	URL string
 
 	// Logger to use for logging.
 	Logger logger.Logger
 
-	// SchemaRegistry is the schema registry to use for the processor.
+	// SchemaRegistry is the schema registry to use for the driver.
 	SchemaRegistry SchemaRegistry
 }
 
-// ProcessorSessionHandler is for processors that want to receive the session id
-type ProcessorSessionHandler interface {
+// DriverSessionHandler is for drivers that want to receive the session id
+type DriverSessionHandler interface {
 	SetSessionID(sessionID string)
 }
 
-// ProcessorLifecycle is the interface that must be implemented by all processor implementations.
-type ProcessorLifecycle interface {
+// DriverLifecycle is the interface that must be implemented by all driver implementations.
+type DriverLifecycle interface {
 
-	// Start the processor. This is called once at the beginning of the processor's lifecycle.
-	Start(config ProcessorConfig) error
+	// Start the driver. This is called once at the beginning of the driver's lifecycle.
+	Start(config DriverConfig) error
 }
 
-// Processor is the interface that must be implemented by all processor implementations.q
+// Driver is the interface that must be implemented by all driver implementations.q
 // that implement handling data change events.
-type Processor interface {
+type Driver interface {
 
-	// Stop the processor. This is called once at the end of the processor's lifecycle.
+	// Stop the driver. This is called once at the end of the driver's lifecycle.
 	Stop() error
 
 	// MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
 	// Return -1 to indicate that there is no limit.
 	MaxBatchSize() int
 
-	// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
+	// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
 	Process(event DBChangeEvent) (bool, error)
 
-	// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
+	// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 	Flush() error
 }
 
-// ProcessorAlias is an interface that Processors implement for specifying additional protocol schemes for URLs that the processor can handle.
-type ProcessorAlias interface {
-	// Aliases returns a list of additional protocol schemes that the processor can handle (from the main protocol that was registered).
+// DriverAlias is an interface that Drivers implement for specifying additional protocol schemes for URLs that the driver can handle.
+type DriverAlias interface {
+	// Aliases returns a list of additional protocol schemes that the driver can handle (from the main protocol that was registered).
 	Aliases() []string
 }
 
-// ProcessorHelp is an interface that Processors implement for controlling the help system.
-type ProcessorHelp interface {
+// DriverHelp is an interface that Drivers implement for controlling the help system.
+type DriverHelp interface {
 
-	// Description is the description of the processor.
+	// Description is the description of the driver.
 	Description() string
 
-	// ExampleURL should return an example URL for configuring the processor.
+	// ExampleURL should return an example URL for configuring the driver.
 	ExampleURL() string
 
-	// Help should return a detailed help documentation for the processor.
+	// Help should return a detailed help documentation for the driver.
 	Help() string
 }
 
-type ProcessorMetadata struct {
+type DriverMetadata struct {
 	Name           string
 	Description    string
 	ExampleURL     string
@@ -81,15 +81,15 @@ type ProcessorMetadata struct {
 	SupportsImport bool
 }
 
-var processorRegistry = map[string]Processor{}
-var processorAliasRegistry = map[string]string{}
+var driverRegistry = map[string]Driver{}
+var driverAliasRegistry = map[string]string{}
 
-// GetProcessorMetadata returns the metadata for all the registered processors.
-func GetProcessorMetadata() []ProcessorMetadata {
-	var res []ProcessorMetadata
-	for name, processor := range processorRegistry {
-		if help, ok := processor.(ProcessorHelp); ok {
-			res = append(res, ProcessorMetadata{
+// GetDriverMetadata returns the metadata for all the registered drivers.
+func GetDriverMetadata() []DriverMetadata {
+	var res []DriverMetadata
+	for name, driver := range driverRegistry {
+		if help, ok := driver.(DriverHelp); ok {
+			res = append(res, DriverMetadata{
 				Name:           name,
 				Description:    help.Description(),
 				ExampleURL:     help.ExampleURL(),
@@ -101,36 +101,36 @@ func GetProcessorMetadata() []ProcessorMetadata {
 	return res
 }
 
-// Register registers a processor for a given protocol.
-func RegisterProcessor(protocol string, processor Processor) {
-	processorRegistry[protocol] = processor
-	if p, ok := processor.(ProcessorAlias); ok {
+// Register registers a driver for a given protocol.
+func RegisterDriver(protocol string, driver Driver) {
+	driverRegistry[protocol] = driver
+	if p, ok := driver.(DriverAlias); ok {
 		for _, alias := range p.Aliases() {
-			processorAliasRegistry[alias] = protocol
+			driverAliasRegistry[alias] = protocol
 		}
 	}
 }
 
-// NewProcessor creates a new processor for the given URL.
-func NewProcessor(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry) (Processor, error) {
+// NewDriver creates a new driver for the given URL.
+func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry) (Driver, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
-	processor := processorRegistry[u.Scheme]
-	if processor == nil {
-		protocol := processorAliasRegistry[u.Scheme]
+	driver := driverRegistry[u.Scheme]
+	if driver == nil {
+		protocol := driverAliasRegistry[u.Scheme]
 		if protocol != "" {
-			processor = processorRegistry[protocol]
+			driver = driverRegistry[protocol]
 		}
-		if processor == nil {
-			return nil, fmt.Errorf("no processor registered for protocol %s", u.Scheme)
+		if driver == nil {
+			return nil, fmt.Errorf("no driver registered for protocol %s", u.Scheme)
 		}
 	}
 
-	// start the processor if it implements the ProcessorLifecycle interface
-	if p, ok := processor.(ProcessorLifecycle); ok {
-		if err := p.Start(ProcessorConfig{
+	// start the driver if it implements the DriverLifecycle interface
+	if p, ok := driver.(DriverLifecycle); ok {
+		if err := p.Start(DriverConfig{
 			Context:        ctx,
 			URL:            urlString,
 			Logger:         logger.WithPrefix(fmt.Sprintf("[%s]", u.Scheme)),
@@ -140,5 +140,5 @@ func NewProcessor(ctx context.Context, logger logger.Logger, urlString string, r
 		}
 	}
 
-	return processor, nil
+	return driver, nil
 }

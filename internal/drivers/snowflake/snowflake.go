@@ -16,8 +16,8 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-type snowflakeProcessor struct {
-	config    internal.ProcessorConfig
+type snowflakeDriver struct {
+	config    internal.DriverConfig
 	logger    logger.Logger
 	pending   strings.Builder
 	count     int
@@ -28,18 +28,18 @@ type snowflakeProcessor struct {
 	ctx       context.Context
 }
 
-var _ internal.Processor = (*snowflakeProcessor)(nil)
-var _ internal.ProcessorLifecycle = (*snowflakeProcessor)(nil)
-var _ internal.Importer = (*snowflakeProcessor)(nil)
-var _ internal.ProcessorSessionHandler = (*snowflakeProcessor)(nil)
+var _ internal.Driver = (*snowflakeDriver)(nil)
+var _ internal.DriverLifecycle = (*snowflakeDriver)(nil)
+var _ internal.Importer = (*snowflakeDriver)(nil)
+var _ internal.DriverSessionHandler = (*snowflakeDriver)(nil)
 
-func (p *snowflakeProcessor) SetSessionID(sessionID string) {
+func (p *snowflakeDriver) SetSessionID(sessionID string) {
 	if sessionID != "" {
 		p.ctx = sf.WithRequestID(p.config.Context, sf.ParseUUID(sessionID))
 	}
 }
 
-func (p *snowflakeProcessor) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
+func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
 	url, err := getConnectionStringFromURL(url)
 	if err != nil {
 		return nil, err
@@ -56,8 +56,8 @@ func (p *snowflakeProcessor) connectToDB(ctx context.Context, url string) (*sql.
 	return db, nil
 }
 
-// Start the processor. This is called once at the beginning of the processor's lifecycle.
-func (p *snowflakeProcessor) Start(config internal.ProcessorConfig) error {
+// Start the driver. This is called once at the beginning of the driver's lifecycle.
+func (p *snowflakeDriver) Start(config internal.DriverConfig) error {
 	p.config = config
 	p.ctx = config.Context
 	p.logger = config.Logger.WithPrefix("[snowflake]")
@@ -75,8 +75,8 @@ func (p *snowflakeProcessor) Start(config internal.ProcessorConfig) error {
 	return nil
 }
 
-// Stop the processor. This is called once at the end of the processor's lifecycle.
-func (p *snowflakeProcessor) Stop() error {
+// Stop the driver. This is called once at the end of the driver's lifecycle.
+func (p *snowflakeDriver) Stop() error {
 	p.logger.Debug("stopping")
 	p.once.Do(func() {
 		p.logger.Debug("waiting on waitgroup")
@@ -96,12 +96,12 @@ func (p *snowflakeProcessor) Stop() error {
 }
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
-func (p *snowflakeProcessor) MaxBatchSize() int {
+func (p *snowflakeDriver) MaxBatchSize() int {
 	return -1
 }
 
-// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
-func (p *snowflakeProcessor) Process(event internal.DBChangeEvent) (bool, error) {
+// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
+func (p *snowflakeDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	p.logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
@@ -117,8 +117,8 @@ func (p *snowflakeProcessor) Process(event internal.DBChangeEvent) (bool, error)
 	return false, nil
 }
 
-// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
-func (p *snowflakeProcessor) Flush() error {
+// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
+func (p *snowflakeDriver) Flush() error {
 	p.logger.Debug("flush: %v", p.count)
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
@@ -137,7 +137,7 @@ func (p *snowflakeProcessor) Flush() error {
 }
 
 // Import is called to import data from the source.
-func (p *snowflakeProcessor) Import(config internal.ImporterConfig) error {
+func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
@@ -235,25 +235,25 @@ done:
 	return nil
 }
 
-// Description is the description of the processor.
-func (p *snowflakeProcessor) Description() string {
+// Description is the description of the driver.
+func (p *snowflakeDriver) Description() string {
 	return "Supports streaming EDS messages to a Snowflake database."
 }
 
-// ExampleURL should return an example URL for configuring the processor.
-func (p *snowflakeProcessor) ExampleURL() string {
+// ExampleURL should return an example URL for configuring the driver.
+func (p *snowflakeDriver) ExampleURL() string {
 	return "snowflake://user:password@host/database"
 }
 
-// Help should return a detailed help documentation for the processor.
-func (p *snowflakeProcessor) Help() string {
+// Help should return a detailed help documentation for the driver.
+func (p *snowflakeDriver) Help() string {
 	var help strings.Builder
 	help.WriteString(util.GenerateHelpSection("Schema", "The database will match the public schema from the Shopmonkey transactional database.\n"))
 	return help.String()
 }
 
 func init() {
-	var processor snowflakeProcessor
-	internal.RegisterProcessor("snowflake", &processor)
-	internal.RegisterImporter("snowflake", &processor)
+	var driver snowflakeDriver
+	internal.RegisterDriver("snowflake", &driver)
+	internal.RegisterImporter("snowflake", &driver)
 }

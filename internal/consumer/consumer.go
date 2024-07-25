@@ -47,8 +47,8 @@ type ConsumerConfig struct {
 	// MaxPendingBuffer is the maximum number of messages that can be buffered before the consumer starts dropping messages.
 	MaxPendingBuffer int
 
-	// Processor is the processor for the consumer.
-	Processor internal.Processor
+	// Driver is the driver for the consumer.
+	Driver internal.Driver
 
 	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
 	ExportTableTimestamps map[string]*time.Time
@@ -58,7 +58,7 @@ type Consumer struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	max             int
-	processor       internal.Processor
+	driver          internal.Driver
 	conn            *nats.Conn
 	jsconn          jetstream.Consumer
 	logger          logger.Logger
@@ -130,12 +130,12 @@ func (c *Consumer) handleError(err error) {
 
 func (c *Consumer) flush() bool {
 	c.logger.Trace("flush")
-	if c.processor == nil {
+	if c.driver == nil {
 		return c.stopping
 	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if err := c.processor.Flush(); err != nil {
+	if err := c.driver.Flush(); err != nil {
 		c.handleError(err)
 		return true
 	}
@@ -210,12 +210,12 @@ func (c *Consumer) bufferer() {
 				}
 				continue
 			}
-			flush, err := c.processor.Process(evt)
+			flush, err := c.driver.Process(evt)
 			if err != nil {
 				c.handleError(err)
 				return
 			}
-			maxsize := c.processor.MaxBatchSize()
+			maxsize := c.driver.MaxBatchSize()
 			if maxsize <= 0 {
 				maxsize = c.max
 			}
@@ -392,7 +392,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.ctx = ctx
 	consumer.cancel = cancel
 	consumer.conn = nc
-	consumer.processor = config.Processor
+	consumer.driver = config.Driver
 	consumer.buffer = make(chan jetstream.Msg, config.MaxAckPending)
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
@@ -400,12 +400,12 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.tableTimestamps = config.ExportTableTimestamps
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
 
-	if config.Processor != nil {
-		if p, ok := config.Processor.(internal.ProcessorSessionHandler); ok {
+	if config.Driver != nil {
+		if p, ok := config.Driver.(internal.DriverSessionHandler); ok {
 			p.SetSessionID(consumer.sessionID)
 		}
 	} else {
-		config.Logger.Debug("no processor set")
+		config.Logger.Debug("no driver set")
 	}
 
 	natsLogger := config.Logger.WithPrefix("[nats]")
