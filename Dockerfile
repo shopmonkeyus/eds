@@ -7,7 +7,7 @@ COPY . .
 
 RUN go mod download && go mod verify && go build -o eds-server
 
-FROM alpine:3.19
+FROM alpine:3.20
 
 ENV APP_HOME /go/src/github.com/shopmonkeyus/eds-server
 RUN mkdir -p "$APP_HOME"
