@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -335,7 +336,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 		info = &CredentialInfo{
 			companyIDs: []string{"*"},
 			companyID:  "dev",
-			sessionID:  "6ba7b812-9dad-11d1-80b4-00c04fd430c8", // dummy
+			sessionID:  uuid.NewString(),
 		}
 		logger.Debug("using localhost nats server")
 	} else {
@@ -427,11 +428,11 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	consumer.logger.Info("using info from credentials, name: %s companies: %s, session %s", info.companyID, info.companyIDs, info.sessionID)
 
-	var prefix string
+	var suffix string
 	if config.Suffix != "" {
-		prefix = "-" + config.Suffix
+		suffix = "-" + config.Suffix
 	}
-	name := fmt.Sprintf("eds-server-%s%s", info.companyID, prefix)
+	name := fmt.Sprintf("eds-server-%s%s", info.companyID, suffix)
 	var subjects []string
 	for _, companyID := range info.companyIDs {
 		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
@@ -447,7 +448,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		MaxRequestBatch:   config.MaxPendingBuffer,
 		FilterSubjects:    subjects,
 		AckPolicy:         jetstream.AckExplicitPolicy,
-		InactiveThreshold: time.Hour * 24 * 7,
+		InactiveThreshold: time.Hour * 24 * 3, // expire if unused 3 days from first creating
 	}
 	createConsumerContext, cancelCreate := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
 	defer cancelCreate()

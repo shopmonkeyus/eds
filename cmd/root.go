@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	glog "log"
+	"net/http"
 	"os"
 
 	"github.com/shopmonkeyus/go-common/logger"
@@ -93,6 +94,16 @@ func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
 		return log.WithSink(logSync, logger.LevelTrace), func() { logSync.Close() }
 	}
 	return log, func() {}
+}
+
+func setHTTPHeader(req *http.Request, apiKey string) {
+	req.Header = http.Header{
+		"Content-Type": {"application/json"},
+		"User-Agent":   {"Shopmonkey EDS Server/" + Version},
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 }
 
 // rootCmd represents the base command when called without any subcommands

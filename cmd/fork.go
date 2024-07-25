@@ -140,7 +140,7 @@ var forkCmd = &cobra.Command{
 			}
 		}()
 
-		logger.Info("server is running")
+		logger.Info("server is running version: %v", Version)
 
 		// wait for shutdown or error
 		<-sys.CreateShutdownChannel()
@@ -165,7 +165,7 @@ func init() {
 	forkCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "Snowflake Database connection string")
 	forkCmd.Flags().String("schema", "schema.json", "the Shopmonkey schema file")
-	forkCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
+	forkCmd.Flags().String("tables", "tables.json", "the Shopmonkey tables file")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Int("health-port", 0, "the port to listen for health checks")

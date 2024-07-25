@@ -90,10 +90,7 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 		if err != nil {
 			return "", fmt.Errorf("error creating request: %s", err)
 		}
-		req.Header = http.Header{
-			"Authorization": {"Bearer " + apiKey},
-			"Content-Type":  {"application/json"},
-		}
+		setHTTPHeader(req, apiKey)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			if shouldRetryError(err) {
@@ -174,10 +171,7 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 		}
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
-	req.Header = http.Header{
-		"Authorization": {"Bearer " + apiKey},
-		"Accept":        {"application/json"},
-	}
+	setHTTPHeader(req, apiKey)
 	var retryCount int
 	started := time.Now()
 	for time.Since(started) < time.Minute*5 {

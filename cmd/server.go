@@ -104,8 +104,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession,
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setHTTPHeader(req, apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
@@ -133,8 +132,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setHTTPHeader(req, apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send session end: %w", err)
@@ -160,8 +158,7 @@ func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId str
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	setHTTPHeader(req, apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send renew end: %w", err)
@@ -192,6 +189,7 @@ func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
+	setHTTPHeader(req, "")
 	req.Header.Set("Content-Type", "application/x-tgz")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -312,10 +310,6 @@ var serverCmd = &cobra.Command{
 		closer()
 
 		logger = logger.WithPrefix("[server]")
-
-		if prefix := mustFlagString(cmd, "consumer-prefix", false); prefix != "" {
-			logger.Fatal("consumer-prefix is deprecated, use --consumer-suffix instead")
-		}
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
@@ -511,8 +505,7 @@ func init() {
 	serverCmd.AddCommand(serverHelpCmd)
 
 	// NOTE: sync these with forkCmd
-	serverCmd.Flags().String("consumer-prefix", "", "deprecated - use --consumer-suffix instead")
-	serverCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
+	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().String("url", "", "provider connection string")
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
