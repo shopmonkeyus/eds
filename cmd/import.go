@@ -425,7 +425,7 @@ func loadTablesJSON(fp string) ([]TableExportInfo, error) {
 
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "import data from your Shopmonkey instance to your system",
+	Short: "Import data from your Shopmonkey instance to your system",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		noconfirm, _ := cmd.Flags().GetBool("no-confirm")

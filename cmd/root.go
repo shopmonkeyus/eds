@@ -122,7 +122,7 @@ func setHTTPHeader(req *http.Request, apiKey string) {
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:  "eds-server",
-	Long: "Shopmonkey Enterprise Data Streaming server \nFor detailed information, see: https://shopmonkey.dev/eds \nand https://github.com/shopmonkeyus/eds-server/blob/main/README.md ",
+	Long: "Shopmonkey Enterprise Data Streaming server (EDS) \nFor detailed information, see: https://shopmonkey.dev/eds \nand https://github.com/shopmonkeyus/eds-server",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
