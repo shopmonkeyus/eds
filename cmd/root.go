@@ -21,11 +21,11 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	val, err := cmd.Flags().GetString(name)
 	if err != nil {
 		fmt.Printf("error: %s\n", err)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	if required && val == "" {
 		fmt.Printf("error: required flag --%s missing\n", name)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	return val
 }
@@ -34,11 +34,11 @@ func mustFlagInt(cmd *cobra.Command, name string, required bool) int {
 	val, err := cmd.Flags().GetInt(name)
 	if err != nil {
 		fmt.Printf("error: %s\n", err)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	if required && val <= 0 {
 		fmt.Printf("error: required flag --%s missing\n", name)
-		os.Exit(2)
+		os.Exit(3)
 	}
 	return val
 }
@@ -102,7 +102,7 @@ func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
 		logSync, err := newLogFileSync(sink)
 		if err != nil {
 			log.Error("failed to open log file: %s. %s", sink, err)
-			os.Exit(2)
+			os.Exit(3)
 		}
 		return log.WithSink(logSync, logger.LevelTrace), func() { logSync.Close() }
 	}

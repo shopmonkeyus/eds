@@ -196,6 +196,7 @@ func (p *snowflakeProcessor) Import(config internal.ImporterConfig) error {
 	for _, table := range config.Tables {
 		wg.Add(1)
 		go func(table string) {
+			defer util.RecoverPanic(logger)
 			defer func() {
 				sem.Release(1)
 				wg.Done()

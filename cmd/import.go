@@ -225,6 +225,7 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 			return exportJobResponse{}, nil // cancelled
 		}
 		if job.Completed {
+			logger.Info("Export Progress: %s", job.String())
 			return *job, nil
 		}
 		logger.Debug("Waiting for Export to Complete: %s", job.String())
@@ -318,6 +319,7 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	for i := 0; i < concurrency; i++ {
 		downloadWG.Add(1)
 		go func() {
+			defer util.RecoverPanic(log)
 			defer downloadWG.Done()
 			for url := range downloadChan {
 				size, err := downloadFile(log, dir, url)
@@ -489,6 +491,7 @@ var importCmd = &cobra.Command{
 		defer cancel()
 
 		go func() {
+			defer util.RecoverPanic(logger)
 			select {
 			case <-ctx.Done():
 				return

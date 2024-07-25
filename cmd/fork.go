@@ -30,6 +30,7 @@ func runHealthCheckServerFork(logger logger.Logger, port int) {
 		w.WriteHeader(http.StatusOK)
 	})
 	go func() {
+		defer util.RecoverPanic(logger)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("failed to start health check server: %s", err)
 		}
@@ -47,6 +48,8 @@ var forkCmd = &cobra.Command{
 		defer closer()
 		logger = logger.WithPrefix("[fork]")
 
+		defer util.RecoverPanic(logger)
+
 		natsurl := mustFlagString(cmd, "server", true)
 		url := mustFlagString(cmd, "url", true)
 		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
@@ -61,21 +64,21 @@ var forkCmd = &cobra.Command{
 		registry, err := registry.NewFileRegistry(schemaFile)
 		if err != nil {
 			logger.Error("error creating registry: %s", err)
-			os.Exit(2)
+			os.Exit(3)
 		}
 
 		var exportTableTimestamps map[string]*time.Time
 		if exportTableData, err := loadTablesJSON(tablesFile); err != nil {
 			if cmd.Flags().Changed("tables") {
 				logger.Error("provided tables file %s not found!", tablesFile)
-				os.Exit(2)
+				os.Exit(3)
 			}
 			if errors.Is(err, os.ErrNotExist) {
 				logger.Info("tables file %s not found", tablesFile)
 				// this is okay
 			} else {
 				logger.Error("error loading tables: %s", err)
-				os.Exit(2)
+				os.Exit(3)
 			}
 		} else {
 			exportTableTimestamps = make(map[string]*time.Time)
@@ -87,7 +90,7 @@ var forkCmd = &cobra.Command{
 		processor, err := internal.NewProcessor(ctx, logger, url, registry)
 		if err != nil {
 			logger.Error("error creating processor: %s", err)
-			os.Exit(2)
+			os.Exit(3)
 		}
 
 		defer processor.Stop()
@@ -102,6 +105,7 @@ var forkCmd = &cobra.Command{
 		wg.Add(1)
 
 		go func() {
+			defer util.RecoverPanic(logger)
 			defer wg.Done()
 			var completed bool
 			for !completed {
@@ -118,7 +122,7 @@ var forkCmd = &cobra.Command{
 				})
 				if err != nil {
 					logger.Error("error creating consumer: %s", err)
-					os.Exit(2)
+					os.Exit(3)
 				}
 				select {
 				case <-ctx.Done():

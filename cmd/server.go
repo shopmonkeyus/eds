@@ -236,6 +236,7 @@ func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
 		w.WriteHeader(resp.StatusCode)
 	})
 	go func() {
+		defer util.RecoverPanic(logger)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("failed to start health check server: %s", err)
 		}
@@ -311,6 +312,8 @@ var serverCmd = &cobra.Command{
 
 		logger = logger.WithPrefix("[server]")
 
+		defer util.RecoverPanic(logger)
+
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
 		var credsFile string
@@ -351,6 +354,7 @@ var serverCmd = &cobra.Command{
 		notificationConsumer := newNotificationConsumer(logger, natsurl)
 
 		go func() {
+			defer util.RecoverPanic(logger)
 			ticker := time.NewTicker(time.Hour * 24 * 6)
 			defer ticker.Stop()
 			for {
@@ -422,14 +426,14 @@ var serverCmd = &cobra.Command{
 				failures++
 			} else {
 				ec := result.ProcessState.ExitCode()
-				if ec != 2 {
+				if ec != 3 {
 					sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, result.LogFileBundle)
 				}
 				if ec == 0 {
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
-				if ec == 2 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
+				if ec == 3 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
 					os.Exit(ec)
 				}
 				failures++
