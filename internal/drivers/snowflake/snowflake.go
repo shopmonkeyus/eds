@@ -115,7 +115,8 @@ func (p *snowflakeDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("error getting json object: %w", err)
 	}
-	p.batcher.Add(event.Table, event.ID, event.Operation, event.Diff, object)
+	key := event.Key[len(event.Key)-1]
+	p.batcher.Add(event.Table, key, event.Operation, event.Diff, object)
 	return false, nil
 }
 
