@@ -18,5 +18,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.22
-      - name: Build
+      - name: Go Build
         run: go build -v ./...
+      - name: Go Unit Tests
+        run: go test -v ./...
