@@ -19,13 +19,14 @@ import (
 type snowflakeDriver struct {
 	config    internal.DriverConfig
 	logger    logger.Logger
-	pending   strings.Builder
-	count     int
 	db        *sql.DB
 	schema    internal.SchemaMap
 	waitGroup sync.WaitGroup
 	once      sync.Once
 	ctx       context.Context
+	batcher   *util.Batcher
+	locker    sync.Mutex
+	sessionID string
 }
 
 var _ internal.Driver = (*snowflakeDriver)(nil)
@@ -35,6 +36,7 @@ var _ internal.DriverSessionHandler = (*snowflakeDriver)(nil)
 
 func (p *snowflakeDriver) SetSessionID(sessionID string) {
 	if sessionID != "" {
+		p.sessionID = sessionID
 		p.ctx = sf.WithRequestID(p.config.Context, sf.ParseUUID(sessionID))
 	}
 }
@@ -71,6 +73,7 @@ func (p *snowflakeDriver) Start(config internal.DriverConfig) error {
 		return fmt.Errorf("unable to create connection: %w", err)
 	}
 	p.db = db
+	p.batcher = util.NewBatcher()
 	p.logger.Debug("started")
 	return nil
 }
@@ -79,15 +82,18 @@ func (p *snowflakeDriver) Start(config internal.DriverConfig) error {
 func (p *snowflakeDriver) Stop() error {
 	p.logger.Debug("stopping")
 	p.once.Do(func() {
+		p.logger.Debug("waiting on flush")
+		p.Flush() // make sure we flush
+		p.logger.Debug("completed flush")
 		p.logger.Debug("waiting on waitgroup")
 		p.waitGroup.Wait()
 		p.logger.Debug("completed waitgroup")
-		p.Flush() // make sure we flush
+		p.locker.Lock()
+		defer p.locker.Unlock()
 		if p.db != nil {
 			p.logger.Debug("closing db")
 			p.db.Close()
 			p.db = nil
-			p.count = 0
 			p.logger.Debug("closed db")
 		}
 	})
@@ -105,34 +111,52 @@ func (p *snowflakeDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	p.logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql, err := toSQL(event, p.schema)
+	object, err := event.GetObject()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("error getting json object: %w", err)
 	}
-	p.logger.Trace("sql: %s", sql)
-	if _, err := p.pending.WriteString(sql); err != nil {
-		return false, fmt.Errorf("error writing sql to pending buffer: %w", err)
-	}
-	p.count++
+	p.batcher.Add(event.Table, event.ID, event.Operation, event.Diff, object)
 	return false, nil
 }
 
+var sequence int64
+
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 func (p *snowflakeDriver) Flush() error {
-	p.logger.Debug("flush: %v", p.count)
+	p.locker.Lock()
+	defer p.locker.Unlock()
+	if p.db == nil {
+		return internal.ErrDriverStopped
+	}
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	if p.count > 0 {
-		execCTX, err := sf.WithMultiStatement(p.ctx, p.count) // for the transaction below
+	records := p.batcher.Records()
+	count := len(records)
+	p.batcher.Clear()
+	p.logger.Debug("flush: %v", count)
+	if count > 0 {
+		sequence++
+		tag := fmt.Sprintf("eds-server-%s/%d/%d", p.sessionID, sequence, count)
+		ctx := sf.WithQueryTag(context.Background(), tag)
+		execCTX, err := sf.WithMultiStatement(ctx, count) // for the transaction below
 		if err != nil {
 			return fmt.Errorf("error creating exec context: %w", err)
 		}
-		if _, err := p.db.ExecContext(execCTX, p.pending.String()); err != nil {
-			return fmt.Errorf("unable to run query: %s: %w", p.pending.String(), err)
+		var query strings.Builder
+		for _, record := range records {
+			q, err := toSQL(record, p.schema)
+			if err != nil {
+				return fmt.Errorf("error creating sql query: %w for %s", err, record)
+			}
+			query.WriteString(q)
 		}
+		ts := time.Now()
+		p.logger.Trace("executing query (%s): %s", tag, query.String())
+		if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
+			return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
+		}
+		p.logger.Trace("executed query (%s) in %v", tag, time.Since(ts))
 	}
-	p.pending.Reset()
-	p.count = 0
 	return nil
 }
 

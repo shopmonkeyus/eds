@@ -8,6 +8,9 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
+// ErrDriverStopped is returned when the driver has been stopped and a process or flush is called.
+var ErrDriverStopped = fmt.Errorf("driver stopped")
+
 // DriverConfig is the configuration for a driver.
 type DriverConfig struct {
 
