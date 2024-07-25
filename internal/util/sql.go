@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -37,9 +38,14 @@ func SQLExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool
 	}
 }
 
+func IsJSON(str string) bool {
+	var js json.RawMessage
+	return json.Unmarshal([]byte(str), &js) == nil
+}
+
 // ToJSONStringVal returns a JSON string value checking for empty string and converting it to '{}'
 func ToJSONStringVal(name string, val string, jsonb map[string]bool) string {
-	if jsonb[name] && (val == "''" || val == "") {
+	if jsonb[name] && (val == "''" || val == "" || val == "null" || val == "[]") {
 		return "'{}'"
 	}
 	return val

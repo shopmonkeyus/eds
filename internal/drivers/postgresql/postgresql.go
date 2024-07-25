@@ -1,9 +1,11 @@
 package postgresql
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -126,6 +128,13 @@ func (p *postgresqlDriver) Flush() error {
 		}()
 		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
 			p.logger.Trace("offending sql: %s", p.pending.String())
+			//Post the offending sql to a file log. For large batch inserts, the offending SQL takes up too much space in the terminal
+			file, fileErr := os.Create("offend.txt")
+			if fileErr != nil {
+				fmt.Println(fileErr)
+
+			}
+			fmt.Fprintf(file, "%v\n", p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -218,6 +227,17 @@ func (p *postgresqlDriver) Import(config internal.ImporterConfig) error {
 		if size > 0 {
 			if err := executeSQL(pending.String()); err != nil {
 				logger.Trace("offending sql: %s", pending.String())
+				//Post the offending sql to a file log. For large batch inserts, the offending SQL takes up too much space in the terminal
+				file, fileErr := os.Create("offend.txt")
+				if fileErr != nil {
+					fmt.Println(fileErr)
+
+				}
+
+				writer := bufio.NewWriter(file)
+				writer.WriteString(pending.String())
+				writer.Flush()
+
 				return fmt.Errorf("unable to execute %s sql: %w", table, err)
 			}
 		}
