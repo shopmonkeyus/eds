@@ -1,7 +1,6 @@
 package snowflake
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -94,53 +93,40 @@ func quoteValue(value any) string {
 	return str
 }
 
-func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) {
+func toSQL(record *util.Record, schema internal.SchemaMap) (string, error) {
 	var sql strings.Builder
-	model := schema[c.Table]
-	primaryKeys := model.PrimaryKeys
-	if c.Operation == "DELETE" {
+	model := schema[record.Table]
+	if record.Operation == "DELETE" {
 		sql.WriteString("DELETE FROM ")
-		sql.WriteString(util.QuoteIdentifier(c.Table))
+		sql.WriteString(util.QuoteIdentifier(record.Table))
 		sql.WriteString(" WHERE ")
-		var predicate []string
-		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", util.QuoteIdentifier(pk), quoteValue(c.Key[1+i])))
-		}
-		sql.WriteString(strings.Join(predicate, " AND "))
+		sql.WriteString(util.QuoteIdentifier("id"))
+		sql.WriteString("=")
+		sql.WriteString(quoteValue(record.Id))
 		sql.WriteString(";\n")
 	} else {
-		o := make(map[string]any)
-		if err := json.Unmarshal(c.After, &o); err != nil {
-			return "", err
-		}
 		sql.WriteString("MERGE INTO ")
-		sql.WriteString(util.QuoteIdentifier(c.Table))
+		sql.WriteString(util.QuoteIdentifier(record.Table))
 		sql.WriteString(" USING (SELECT ")
-		sql.WriteString(strings.Join(util.QuoteStringIdentifiers(primaryKeys), ","))
+		sql.WriteString(util.QuoteIdentifier("id"))
 		sql.WriteString(" FROM ")
-		sql.WriteString(util.QuoteIdentifier(c.Table))
+		sql.WriteString(util.QuoteIdentifier(record.Table))
 		sql.WriteString(" WHERE ")
-		var sourcePredicates []string
-		var sourceNullPredicates []string
-		var targetPredicates []string
-		for _, pk := range primaryKeys {
-			val := o[pk]
-			sourcePredicates = append(sourcePredicates, fmt.Sprintf("%s=%s", util.QuoteIdentifier(pk), quoteValue(val)))
-			sourceNullPredicates = append(sourceNullPredicates, fmt.Sprintf("NULL AS %s", util.QuoteIdentifier(pk)))
-			targetPredicates = append(targetPredicates, fmt.Sprintf("source.%s=%s.%s", util.QuoteIdentifier(pk), util.QuoteIdentifier(c.Table), util.QuoteIdentifier(pk)))
-		}
+		sourcePredicate := fmt.Sprintf("%s=%s", util.QuoteIdentifier("id"), quoteValue(record.Id))
+		sourceNullPredicate := fmt.Sprintf("NULL AS %s", util.QuoteIdentifier("id"))
+		targetPredicate := fmt.Sprintf("source.%s=%s.%s", util.QuoteIdentifier("id"), util.QuoteIdentifier(record.Table), util.QuoteIdentifier("id"))
 		var columns []string
 		for _, name := range model.Columns {
 			columns = append(columns, util.QuoteIdentifier(name))
 		}
 		var insertVals []string
 		var updateValues []string
-		if c.Operation == "UPDATE" {
-			for _, name := range c.Diff {
+		if record.Operation == "UPDATE" {
+			for _, name := range record.Diff {
 				if !util.SliceContains(model.Columns, name) {
 					continue
 				}
-				if val, ok := o[name]; ok {
+				if val, ok := record.Object[name]; ok {
 					v := quoteValue(val)
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
 				} else {
@@ -148,7 +134,7 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 				}
 			}
 			for _, name := range model.Columns {
-				if val, ok := o[name]; ok {
+				if val, ok := record.Object[name]; ok {
 					v := quoteValue(val)
 					insertVals = append(insertVals, v)
 				} else {
@@ -157,7 +143,7 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 			}
 		} else {
 			for _, name := range model.Columns {
-				if val, ok := o[name]; ok {
+				if val, ok := record.Object[name]; ok {
 					v := quoteValue(val)
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
 					insertVals = append(insertVals, v)
@@ -167,11 +153,11 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 				}
 			}
 		}
-		sql.WriteString(strings.Join(sourcePredicates, " AND "))
+		sql.WriteString(sourcePredicate)
 		sql.WriteString(" UNION SELECT ")
-		sql.WriteString(strings.Join(sourceNullPredicates, " AND "))
+		sql.WriteString(sourceNullPredicate)
 		sql.WriteString(" LIMIT 1) AS source ON ")
-		sql.WriteString(strings.Join(targetPredicates, " AND "))
+		sql.WriteString(targetPredicate)
 		sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
 		sql.WriteString(strings.Join(updateValues, ","))
 		sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")

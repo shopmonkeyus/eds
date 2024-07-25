@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -136,6 +137,10 @@ func (c *Consumer) flush() bool {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if err := c.driver.Flush(); err != nil {
+		if errors.Is(err, internal.ErrDriverStopped) {
+			c.nackEverything()
+			return true
+		}
 		c.handleError(err)
 		return true
 	}
