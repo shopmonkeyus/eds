@@ -29,8 +29,8 @@ func (b *messageBalancer) Balance(msg gokafka.Message, partitions ...int) int {
 	return util.Modulo(util.Hash(string(msg.Key)), len(partitions))
 }
 
-type kafkaProcessor struct {
-	config    internal.ProcessorConfig
+type kafkaDriver struct {
+	config    internal.DriverConfig
 	logger    logger.Logger
 	writer    *gokafka.Writer
 	pending   []gokafka.Message
@@ -38,12 +38,12 @@ type kafkaProcessor struct {
 	once      sync.Once
 }
 
-var _ internal.Processor = (*kafkaProcessor)(nil)
-var _ internal.ProcessorLifecycle = (*kafkaProcessor)(nil)
-var _ internal.ProcessorHelp = (*kafkaProcessor)(nil)
+var _ internal.Driver = (*kafkaDriver)(nil)
+var _ internal.DriverLifecycle = (*kafkaDriver)(nil)
+var _ internal.DriverHelp = (*kafkaDriver)(nil)
 
-// Start the processor. This is called once at the beginning of the processor's lifecycle.
-func (p *kafkaProcessor) Start(pc internal.ProcessorConfig) error {
+// Start the driver. This is called once at the beginning of the driver's lifecycle.
+func (p *kafkaDriver) Start(pc internal.DriverConfig) error {
 	p.config = pc
 	p.logger = pc.Logger.WithPrefix("[kafka]")
 
@@ -68,8 +68,8 @@ func (p *kafkaProcessor) Start(pc internal.ProcessorConfig) error {
 	return nil
 }
 
-// Stop the processor. This is called once at the end of the processor's lifecycle.
-func (p *kafkaProcessor) Stop() error {
+// Stop the driver. This is called once at the end of the driver's lifecycle.
+func (p *kafkaDriver) Stop() error {
 	p.logger.Debug("stopping")
 	p.once.Do(func() {
 		p.logger.Debug("waiting on waitgroup")
@@ -88,7 +88,7 @@ func (p *kafkaProcessor) Stop() error {
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
 // Return -1 to indicate that there is no limit.
-func (p *kafkaProcessor) MaxBatchSize() int {
+func (p *kafkaDriver) MaxBatchSize() int {
 	return -1
 }
 
@@ -99,8 +99,8 @@ func strWithDef(val *string, def string) string {
 	return *val
 }
 
-// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
-func (p *kafkaProcessor) Process(event internal.DBChangeEvent) (bool, error) {
+// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
+func (p *kafkaDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	key := fmt.Sprintf("dbchange.%s.%s.%s.%s.%s", event.Table, event.Operation, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), event.ID)
@@ -116,8 +116,8 @@ func (p *kafkaProcessor) Process(event internal.DBChangeEvent) (bool, error) {
 	return false, nil
 }
 
-// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
-func (p *kafkaProcessor) Flush() error {
+// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
+func (p *kafkaDriver) Flush() error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if len(p.pending) > 0 {
@@ -129,18 +129,18 @@ func (p *kafkaProcessor) Flush() error {
 	return nil
 }
 
-// Description is the description of the processor.
-func (p *kafkaProcessor) Description() string {
+// Description is the description of the driver.
+func (p *kafkaDriver) Description() string {
 	return "Supports streaming EDS messages to a Kafka topic."
 }
 
-// ExampleURL should return an example URL for configuring the processor.
-func (p *kafkaProcessor) ExampleURL() string {
+// ExampleURL should return an example URL for configuring the driver.
+func (p *kafkaDriver) ExampleURL() string {
 	return "kafka://kafka:9092/topic"
 }
 
-// Help should return a detailed help documentation for the processor.
-func (p *kafkaProcessor) Help() string {
+// Help should return a detailed help documentation for the driver.
+func (p *kafkaDriver) Help() string {
 	var help strings.Builder
 	help.WriteString(util.GenerateHelpSection("Partitioning", "The partition key is calculated automatically based on the number of partitions for the topic and the incoming message.\nThe algorithm is to calculate a value (hash input) in the format: [TABLE].[COMPANY_ID].[LOCATION_ID].[PRIMARY_KEY]\nand use a hash function to generate a value modulo the number of topic partitions. This guarantees the correct ordering\nfor a given table and primary key while providing the ability to safely scale processing horizontally.\n"))
 	help.WriteString("\n")
@@ -151,5 +151,5 @@ func (p *kafkaProcessor) Help() string {
 }
 
 func init() {
-	internal.RegisterProcessor("kafka", &kafkaProcessor{})
+	internal.RegisterDriver("kafka", &kafkaDriver{})
 }

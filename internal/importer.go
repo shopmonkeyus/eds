@@ -56,7 +56,7 @@ var importerAliasRegistry = map[string]string{}
 // Register registers a importer for a given protocol.
 func RegisterImporter(protocol string, importer Importer) {
 	importerRegistry[protocol] = importer
-	if p, ok := importer.(ProcessorAlias); ok {
+	if p, ok := importer.(DriverAlias); ok {
 		for _, alias := range p.Aliases() {
 			importerAliasRegistry[alias] = protocol
 		}

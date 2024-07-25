@@ -444,7 +444,7 @@ var serverCmd = &cobra.Command{
 }
 
 var serverHelpCmd = &cobra.Command{
-	Use:   "help [processor]",
+	Use:   "help [driver]",
 	Short: "Get help for the server operations",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -455,7 +455,7 @@ var serverHelpCmd = &cobra.Command{
 		white := color.New(color.FgWhite).SprintFunc()
 		green := color.New(color.FgGreen).SprintFunc()
 		blue := color.New(color.FgBlue, color.Bold).SprintFunc()
-		md := internal.GetProcessorMetadata()
+		driverMetadata := internal.GetDriverMetadata()
 		fmt.Println()
 		fmt.Printf("%s\n", blue("Shopmonkey Enterprise Data Streaming (EDS) Server"))
 		fmt.Printf("%s\n", black("version: "+Version))
@@ -463,7 +463,7 @@ var serverHelpCmd = &cobra.Command{
 		if len(args) == 0 {
 			fmt.Println("This server version supports the following integrations:")
 			fmt.Println()
-			for _, metadata := range md {
+			for _, metadata := range driverMetadata {
 				fmt.Printf("%-25s%s\n", yellow(metadata.Name), whiteBold(metadata.Description))
 				fmt.Printf("%14s%s: %s\n", "", black("Example url"), cyan(metadata.ExampleURL))
 				fmt.Println()
@@ -475,17 +475,17 @@ var serverHelpCmd = &cobra.Command{
 			if Version == "dev" {
 				c = "go run . "
 			}
-			fmt.Printf(" $ %s\n", green(c+" server --url "+md[0].ExampleURL+" --api-key $TOKEN --creds /path/to/creds.json"))
+			fmt.Printf(" $ %s\n", green(c+" server --url "+driverMetadata[0].ExampleURL+" --api-key $TOKEN --creds /path/to/creds.json"))
 			fmt.Println()
 			fmt.Println(black("To get a full list of options, pass in the --help flag."))
 			fmt.Println()
 			fmt.Println(black("To get more detailed help for a specific integration run: " + c + "server help [name]"))
 			fmt.Println()
 		} else {
-			var metadata *internal.ProcessorMetadata
-			for _, processor := range md {
-				if processor.Name == args[0] {
-					metadata = &processor
+			var metadata *internal.DriverMetadata
+			for _, driver := range driverMetadata {
+				if driver.Name == args[0] {
+					metadata = &driver
 					break
 				}
 			}

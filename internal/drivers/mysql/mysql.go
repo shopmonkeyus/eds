@@ -1,4 +1,4 @@
-package postgresql
+package mysql
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -15,7 +16,7 @@ import (
 
 const maxBytesSizeInsert = 5_000_000
 
-type postgresqlProcessor struct {
+type mysqlDriver struct {
 	ctx       context.Context
 	logger    logger.Logger
 	db        *sql.DB
@@ -26,17 +27,17 @@ type postgresqlProcessor struct {
 	count     int
 }
 
-var _ internal.Processor = (*postgresqlProcessor)(nil)
-var _ internal.ProcessorLifecycle = (*postgresqlProcessor)(nil)
-var _ internal.Importer = (*postgresqlProcessor)(nil)
-var _ internal.ProcessorHelp = (*postgresqlProcessor)(nil)
+var _ internal.Driver = (*mysqlDriver)(nil)
+var _ internal.DriverLifecycle = (*mysqlDriver)(nil)
+var _ internal.Importer = (*mysqlDriver)(nil)
+var _ internal.DriverHelp = (*mysqlDriver)(nil)
 
-func (p *postgresqlProcessor) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
-	urlstr, err := getConnectionStringFromURL(url)
+func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
+	dsn, err := parseURLToDSN(urlstr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error parsing url: %w", err)
 	}
-	db, err := sql.Open("postgres", urlstr)
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
@@ -49,13 +50,13 @@ func (p *postgresqlProcessor) connectToDB(ctx context.Context, url string) (*sql
 	return db, nil
 }
 
-// Start the processor. This is called once at the beginning of the processor's lifecycle.
-func (p *postgresqlProcessor) Start(config internal.ProcessorConfig) error {
+// Start the driver. This is called once at the beginning of the driver's lifecycle.
+func (p *mysqlDriver) Start(config internal.DriverConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[postgresql]")
+	p.logger = config.Logger.WithPrefix("[mysql]")
 	schema, err := config.SchemaRegistry.GetLatestSchema()
 	if err != nil {
 		p.db.Close()
@@ -67,8 +68,8 @@ func (p *postgresqlProcessor) Start(config internal.ProcessorConfig) error {
 	return nil
 }
 
-// Stop the processor. This is called once at the end of the processor's lifecycle.
-func (p *postgresqlProcessor) Stop() error {
+// Stop the driver. This is called once at the end of the driver's lifecycle.
+func (p *mysqlDriver) Stop() error {
 	p.logger.Debug("stopping")
 	p.once.Do(func() {
 		p.logger.Debug("waiting on waitgroup")
@@ -87,12 +88,12 @@ func (p *postgresqlProcessor) Stop() error {
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
 // Return -1 to indicate that there is no limit.
-func (p *postgresqlProcessor) MaxBatchSize() int {
+func (p *mysqlDriver) MaxBatchSize() int {
 	return -1
 }
 
-// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the processor will NAK the event.
-func (p *postgresqlProcessor) Process(event internal.DBChangeEvent) (bool, error) {
+// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
+func (p *mysqlDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	p.logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
@@ -108,8 +109,8 @@ func (p *postgresqlProcessor) Process(event internal.DBChangeEvent) (bool, error
 	return false, nil
 }
 
-// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the processor will NAK all pending events.
-func (p *postgresqlProcessor) Flush() error {
+// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
+func (p *mysqlDriver) Flush() error {
 	p.logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
@@ -139,7 +140,7 @@ func (p *postgresqlProcessor) Flush() error {
 }
 
 // Import is called to import data from the source.
-func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
+func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
@@ -151,7 +152,7 @@ func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
 		return err
 	}
 
-	logger := config.Logger.WithPrefix("[postgres]")
+	logger := config.Logger.WithPrefix("[mysql]")
 	started := time.Now()
 	executeSQL := util.SQLExecuter(config.Context, logger, db, config.DryRun)
 
@@ -231,29 +232,25 @@ func (p *postgresqlProcessor) Import(config internal.ImporterConfig) error {
 	return nil
 }
 
-// Description is the description of the processor.
-func (p *postgresqlProcessor) Description() string {
-	return "Supports streaming EDS messages to a PostgreSQL database."
+// Description is the description of the driver.
+func (p *mysqlDriver) Description() string {
+	return "Supports streaming EDS messages to a MySQL database."
 }
 
-// ExampleURL should return an example URL for configuring the processor.
-func (p *postgresqlProcessor) ExampleURL() string {
-	return "postgres://localhost:26257/database"
+// ExampleURL should return an example URL for configuring the driver.
+func (p *mysqlDriver) ExampleURL() string {
+	return "mysql://user:password@localhost:3306/database"
 }
 
-// Help should return a detailed help documentation for the processor.
-func (p *postgresqlProcessor) Help() string {
+// Help should return a detailed help documentation for the driver.
+func (p *mysqlDriver) Help() string {
 	var help strings.Builder
 	help.WriteString(util.GenerateHelpSection("Schema", "The database will match the public schema from the Shopmonkey transactional database.\n"))
 	return help.String()
 }
 
-func (p *postgresqlProcessor) Aliases() []string {
-	return []string{"postgresql"}
-}
-
 func init() {
-	var processor postgresqlProcessor
-	internal.RegisterProcessor("postgres", &processor)
-	internal.RegisterImporter("postgres", &processor)
+	var driver mysqlDriver
+	internal.RegisterDriver("mysql", &driver)
+	internal.RegisterImporter("mysql", &driver)
 }
