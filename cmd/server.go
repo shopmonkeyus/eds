@@ -514,5 +514,5 @@ func init() {
 	serverCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
-	serverCmd.Flags().Int("health-port", 8080, "the port to listen for health checks")
+	serverCmd.Flags().Int("health-port", getOSInt("PORT", 8080), "the port to listen for health checks")
 }

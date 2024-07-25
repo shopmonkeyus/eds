@@ -5,6 +5,7 @@ import (
 	glog "log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
@@ -40,6 +41,18 @@ func mustFlagInt(cmd *cobra.Command, name string, required bool) int {
 		os.Exit(2)
 	}
 	return val
+}
+
+func getOSInt(name string, def int) int {
+	val, ok := os.LookupEnv(name)
+	if !ok {
+		return def
+	}
+	i, err := strconv.Atoi(val)
+	if err != nil {
+		return def
+	}
+	return i
 }
 
 type logFileSink struct {
