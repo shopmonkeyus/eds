@@ -60,9 +60,8 @@ type logFileSink struct {
 	f *os.File
 }
 
-func (s *logFileSink) Write(buf []byte) error {
-	_, err := s.f.Write(buf)
-	return err
+func (s *logFileSink) Write(buf []byte) (int, error) {
+	return s.f.Write(buf)
 }
 
 func (s *logFileSink) Close() error {
@@ -105,7 +104,9 @@ func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
 			log.Error("failed to open log file: %s. %s", sink, err)
 			os.Exit(3)
 		}
-		return log.WithSink(logSync, logger.LevelTrace), func() { logSync.Close() }
+		return logger.NewMultiLogger(log, logger.NewJSONLoggerWithSink(logSync, logger.LevelTrace)), func() {
+			logSync.Close()
+		}
 	}
 	return log, func() {}
 }

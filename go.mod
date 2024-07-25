@@ -18,7 +18,7 @@ require (
 	github.com/nats-io/nats.go v1.36.0
 	github.com/savsgio/gotils v0.0.0-20240704082632-aef3928b8a38
 	github.com/segmentio/kafka-go v0.4.47
-	github.com/shopmonkeyus/go-common v0.0.64
+	github.com/shopmonkeyus/go-common v0.0.65
 	github.com/snowflakedb/gosnowflake v1.10.1
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.9.0
