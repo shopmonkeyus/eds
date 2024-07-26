@@ -120,15 +120,21 @@ func toDeleteSQL(record *util.Record) string {
 	return sql.String()
 }
 
-func nullableValue(c internal.SchemaProperty) string {
+func nullableValue(c internal.SchemaProperty, wrap bool) string {
 	if c.Nullable {
 		return "NULL"
 	} else {
 		switch c.Type {
 		case "object":
-			return "PARSE_JSON('{}')"
+			if wrap {
+				return "PARSE_JSON('{}')"
+			}
+			return "'{}'"
 		case "array":
-			return "PARSE_JSON('[]')"
+			if wrap {
+				return "PARSE_JSON('[]')"
+			}
+			return "'[]'"
 		case "number", "integer":
 			return "0"
 		case "boolean":
@@ -171,7 +177,7 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 					v := quoteValue(val, fn)
 					insertVals = append(insertVals, v)
 				} else {
-					insertVals = append(insertVals, nullableValue(c))
+					insertVals = append(insertVals, nullableValue(c, true))
 				}
 			}
 			sql.WriteString("INSERT INTO ")
@@ -182,6 +188,7 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 			sql.WriteString(strings.Join(insertVals, ","))
 			sql.WriteString(";\n")
 		} else {
+			// update
 			var updateValues []string
 			for _, name := range record.Diff {
 				if !util.SliceContains(model.Columns, name) {
@@ -192,7 +199,7 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
 				} else {
 					c := model.Properties[name]
-					updateValues = append(updateValues, nullableValue(c))
+					updateValues = append(updateValues, nullableValue(c, false))
 				}
 			}
 			sql.WriteString("UPDATE ")
