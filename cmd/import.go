@@ -21,6 +21,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/registry"
+	"github.com/shopmonkeyus/eds-server/internal/tracker"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-common/sys"
@@ -534,6 +535,10 @@ var importCmd = &cobra.Command{
 		if err := registry.Save(schemaFile); err != nil {
 			logger.Fatal("error saving schema: %s", err)
 		}
+
+		// remove the tracker database since we're starting over
+		cwd, _ := os.Getwd()
+		os.Remove(tracker.TrackerFilenameFromDir(cwd))
 
 		// create a new importer for loading the data using the provider
 		importer, err := internal.NewImporter(ctx, logger, providerUrl, registry)

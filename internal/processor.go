@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/shopmonkeyus/eds-server/internal/tracker"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -25,6 +26,9 @@ type DriverConfig struct {
 
 	// SchemaRegistry is the schema registry to use for the driver.
 	SchemaRegistry SchemaRegistry
+
+	// Tracker is the local (on disk) database for tracking stuff that the driver can use.
+	Tracker *tracker.Tracker
 }
 
 // DriverSessionHandler is for drivers that want to receive the session id
@@ -115,7 +119,7 @@ func RegisterDriver(protocol string, driver Driver) {
 }
 
 // NewDriver creates a new driver for the given URL.
-func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry) (Driver, error) {
+func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry, tracker *tracker.Tracker) (Driver, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
@@ -138,6 +142,7 @@ func NewDriver(ctx context.Context, logger logger.Logger, urlString string, regi
 			URL:            urlString,
 			Logger:         logger.WithPrefix(fmt.Sprintf("[%s]", u.Scheme)),
 			SchemaRegistry: registry,
+			Tracker:        tracker,
 		}); err != nil {
 			return nil, err
 		}

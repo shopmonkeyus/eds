@@ -145,21 +145,56 @@ func (p *snowflakeDriver) Flush() error {
 		ctx := sf.WithQueryTag(context.Background(), tag)
 		var query strings.Builder
 		var statementCount int
-		for _, record := range records {
-			sql, count := toSQL(record, p.schema)
-			statementCount += count
+		var cachekeys []string
+		var deletekeys []string
+		for i, record := range records {
+			var force bool
+			var key string
+			switch record.Operation {
+			case "INSERT":
+				key = fmt.Sprintf("snowflake:%s:%s", record.Table, record.Id)
+				ok, _, err := p.config.Tracker.GetKey(key)
+				if err != nil {
+					return fmt.Errorf("error getting cache key %s from tracker: %w", key, err)
+				}
+				force = ok
+				if force {
+					p.logger.Trace("forcing delete before insert because we've seen an insert for %s/%s", record.Table, record.Id)
+				}
+			case "UPDATE":
+			case "DELETE":
+				key = fmt.Sprintf("snowflake:%s:%s", record.Table, record.Id)
+				deletekeys = append(deletekeys, key)
+			}
+			sql, c := toSQL(record, p.schema, force)
+			statementCount += c
+			p.logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i, count, strings.TrimRight(sql, "\n"))
 			query.WriteString(sql)
+			if key != "" {
+				cachekeys = append(cachekeys, key)
+			}
 		}
 		execCTX, err := sf.WithMultiStatement(ctx, statementCount)
 		if err != nil {
 			return fmt.Errorf("error creating exec context: %w", err)
 		}
 		ts := time.Now()
-		p.logger.Trace("executing query (%s/%d): %s", tag, statementCount, strings.TrimRight(query.String(), "\n"))
+		p.logger.Trace("executing query (%s/%d)", tag, statementCount)
 		if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
 			return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
 		}
 		p.logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
+		for _, key := range cachekeys {
+			// cache keys seen for the past 24 hours ... might want to make it configurable
+			if err := p.config.Tracker.SetKey(key, tag, time.Hour*24); err != nil {
+				return fmt.Errorf("error setting cache key %s in tracker: %w", key, err)
+			}
+		}
+		if len(deletekeys) > 0 {
+			if err := p.config.Tracker.DeleteKey(deletekeys...); err != nil {
+				return fmt.Errorf("error deleting cache keys from tracker: %w", err)
+			}
+		}
 	}
 	return nil
 }

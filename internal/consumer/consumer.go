@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	emptyBufferPauseTime           = time.Millisecond * 50 // time to wait when the buffer is empty to prevent CPU spinning
-	minPendingLatency              = time.Second           // minimum accumulation period before flushing
-	maxPendingLatency              = time.Second * 30      // maximum accumulation period before flushing
-	traceLogNatsProcessDetail bool = false                 // turn on trace logging for nats processing
+	emptyBufferPauseTime      = time.Millisecond * 50 // time to wait when the buffer is empty to prevent CPU spinning
+	minPendingLatency         = time.Second * 2       // minimum accumulation period before flushing
+	maxPendingLatency         = time.Second * 30      // maximum accumulation period before flushing
+	traceLogNatsProcessDetail = true                  // turn on trace logging for nats processing
 )
 
 // ConsumerConfig is the configuration for the consumer.

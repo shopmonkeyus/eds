@@ -15,6 +15,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/registry"
+	"github.com/shopmonkeyus/eds-server/internal/tracker"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-common/sys"
@@ -62,12 +63,22 @@ var forkCmd = &cobra.Command{
 		healthPort := mustFlagInt(cmd, "health-port", false)
 		serverStarted := time.Now()
 
+		cwd, _ := os.Getwd()
+
+		tracker, err := tracker.NewTracker(tracker.TrackerConfig{
+			Logger:  logger,
+			Context: ctx,
+			Dir:     cwd,
+		})
+		defer tracker.Close()
+
 		registry, err := registry.NewFileRegistry(schemaFile)
 		if err != nil {
 			logger.Error("error creating registry: %s", err)
 			os.Exit(3)
 		}
 
+		// TODO: remove these into the tracker
 		var exportTableTimestamps map[string]*time.Time
 		if exportTableData, err := loadTablesJSON(tablesFile); err != nil {
 			if cmd.Flags().Changed("tables") {
@@ -88,7 +99,7 @@ var forkCmd = &cobra.Command{
 			}
 		}
 
-		driver, err := internal.NewDriver(ctx, logger, url, registry)
+		driver, err := internal.NewDriver(ctx, logger, url, registry, tracker)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(3)
@@ -140,6 +151,7 @@ var forkCmd = &cobra.Command{
 					driver.Stop()
 					cancel()
 					closer()
+					tracker.Close()
 					os.Exit(1)
 				case <-restart:
 					logger.Debug("restarting consumer on SIGHUP")
@@ -160,6 +172,7 @@ var forkCmd = &cobra.Command{
 		driver.Stop()
 		cancel()
 		wg.Wait()
+		tracker.Close()
 
 		logger.Trace("server was up for %v", time.Since(serverStarted))
 		logger.Info("👋 Bye")

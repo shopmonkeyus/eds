@@ -120,44 +120,91 @@ func toDeleteSQL(record *util.Record) string {
 	return sql.String()
 }
 
-func toSQL(record *util.Record, schema internal.SchemaMap) (string, int) {
+func nullableValue(c internal.SchemaProperty) string {
+	if c.Nullable {
+		return "NULL"
+	} else {
+		switch c.Type {
+		case "object":
+			return "PARSE_JSON('{}')"
+		case "array":
+			return "PARSE_JSON('[]')"
+		case "number", "integer":
+			return "0"
+		case "boolean":
+			return "false"
+		default:
+			return "''"
+		}
+	}
+}
+
+func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string, int) {
 	var sql strings.Builder
 	model := schema[record.Table]
-	count := 1
-	sql.WriteString(toDeleteSQL(record))
+	var count int
+	if exists || record.Operation == "DELETE" {
+		sql.WriteString(toDeleteSQL(record))
+		count++
+	}
 	if record.Operation != "DELETE" {
-		var columns []string
-		for _, name := range model.Columns {
-			columns = append(columns, util.QuoteIdentifier(name))
-		}
-		var insertVals []string
-		for _, name := range model.Columns {
-			if val, ok := record.Object[name]; ok {
-				c := model.Properties[name]
-				var fn string
-				switch c.Type {
-				case "object":
-					fn = "PARSE_JSON"
-				case "array":
-					if c.Items != nil && (c.Items.Type == "object" || c.Items.Type == "string") {
-						fn = "PARSE_JSON"
-					} else {
-						fn = "TO_VARIANT"
-					}
-				}
-				v := quoteValue(val, fn)
-				insertVals = append(insertVals, v)
-			} else {
-				insertVals = append(insertVals, "NULL")
+		if record.Operation == "INSERT" {
+			var columns []string
+			for _, name := range model.Columns {
+				columns = append(columns, util.QuoteIdentifier(name))
 			}
+			var insertVals []string
+			for _, name := range model.Columns {
+				c := model.Properties[name]
+				if val, ok := record.Object[name]; ok {
+					var fn string
+					switch c.Type {
+					case "object":
+						fn = "PARSE_JSON"
+					case "array":
+						if c.Items != nil && (c.Items.Type == "object" || c.Items.Type == "string") {
+							fn = "PARSE_JSON"
+						} else {
+							fn = "TO_VARIANT"
+						}
+					}
+					v := quoteValue(val, fn)
+					insertVals = append(insertVals, v)
+				} else {
+					insertVals = append(insertVals, nullableValue(c))
+				}
+			}
+			sql.WriteString("INSERT INTO ")
+			sql.WriteString(util.QuoteIdentifier(record.Table))
+			sql.WriteString(" (")
+			sql.WriteString(strings.Join(columns, ","))
+			sql.WriteString(") SELECT ")
+			sql.WriteString(strings.Join(insertVals, ","))
+			sql.WriteString(";\n")
+		} else {
+			var updateValues []string
+			for _, name := range record.Diff {
+				if !util.SliceContains(model.Columns, name) {
+					continue
+				}
+				if val, ok := record.Object[name]; ok {
+					v := quoteValue(val, "")
+					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
+				} else {
+					c := model.Properties[name]
+					updateValues = append(updateValues, nullableValue(c))
+				}
+			}
+			sql.WriteString("UPDATE ")
+			sql.WriteString(util.QuoteIdentifier(record.Table))
+			sql.WriteString(" SET ")
+			sql.WriteString(strings.Join(updateValues, ","))
+			sql.WriteString(" WHERE ")
+			sql.WriteString(util.QuoteIdentifier("id"))
+			sql.WriteString(" = ")
+			sql.WriteString(quoteValue(record.Id, ""))
+			sql.WriteString(";\n")
 		}
-		sql.WriteString("INSERT INTO ")
-		sql.WriteString(util.QuoteIdentifier(record.Table))
-		sql.WriteString(" (")
-		sql.WriteString(strings.Join(columns, ","))
-		sql.WriteString(") SELECT ")
-		sql.WriteString(strings.Join(insertVals, ","))
-		sql.WriteString(";\n")
 		count++
 	}
 	return sql.String(), count
