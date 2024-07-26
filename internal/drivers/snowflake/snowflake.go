@@ -111,6 +111,11 @@ func (p *snowflakeDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	p.logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
+	if _, ok := p.schema[event.Table]; !ok {
+		// NOTE: remove this once we have schema evolution reimplemented
+		p.logger.Warn("skipping table not found in schema: %s", event.Table)
+		return false, nil
+	}
 	object, err := event.GetObject()
 	if err != nil {
 		return false, fmt.Errorf("error getting json object: %w", err)
