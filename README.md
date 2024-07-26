@@ -29,26 +29,27 @@ There are 3 main commands:
 
 All commands require a valid Shopmonkey API key. You can specify the key using the command line `--api-key` option or set the environment variable `SM_APIKEY`. Be careful to safeguard this key as it is like a password and will grant any user access to your protected data.
 
-The target destination is configured using the `--url` option. The provider that is selected is based on the scheme/protocol part of the URL. The following providers are supported:
+The target driver is configured using the `--url` option. The driver that is selected is based on the scheme/protocol part of the URL. The following drivers are supported:
 
 - **mysql** - used to stream data into a MySQL database
 - **postgres** - used to stream data into a PostgreSQL database
 - **snowflake** - used to stream data into a Snowflake database
 - **s3** - used to stream data into a S3 compatible cloud storage (AWS, Google Cloud, Minio, etc)
 - **kafka** - used to stream data into a Kafka topic
+- **eventhub** - used to stream data to Microsoft Azure [EventHub](https://azure.microsoft.com/en-us/products/event-hubs)
 
-> Not all provider's currently support importing data
+> Not all driver's currently support importing data
 
-You can get a list of providers with example URL patterns by running the following:
+You can get a list of drivers with example URL patterns by running the following:
 
 ```
 ./eds-server server help
 ```
 
-You can get specific help for a provider with the following:
+You can get specific help for a driver with the following:
 
 ```
-./eds-server server help [provider]
+./eds-server server help [driver]
 ```
 
 Such as:
@@ -70,11 +71,11 @@ Example:
 This command will import data from the Shopmonkey Database into PostgreSQL database and exit once completed.
 
 > [!CAUTION]
-> The import command will remove existing data from the target destination (dependent on the specific provider). Use with caution to not lose data.
+> The import command will remove existing data from the target destination (dependent on the specific driver). Use with caution to not lose data.
 
 ## Running the Server
 
-Running the server will start a process which will connect to the Shopmonkey system and stream change data capture (CDC) records in JSON format to the server which will forward them intelligently to the provider for specific handling. The Server will automatically handle logging, crash detection and sending health reports back to Shopmonkey for monitoring.
+Running the server will start a process which will connect to the Shopmonkey system and stream change data capture (CDC) records in JSON format to the server which will forward them intelligently to the driver for specific handling. The Server will automatically handle logging, crash detection and sending health reports back to Shopmonkey for monitoring.
 
 When the server is started for the first time, it will create a subscription on the Shopmonkey system to register interest in your real-time CDC changes. However, if the server is shutdown after more than 7 days, the subscription will be expired and any pending data will be lost. In this case, you will have to re-import your data and start streaming again.
 
