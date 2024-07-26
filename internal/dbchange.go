@@ -24,6 +24,11 @@ func (c *DBChangeEvent) String() string {
 	return "DBChangeEvent[op=" + c.Operation + ",table=" + c.Table + ",id=" + c.ID + "]"
 }
 
+func (c *DBChangeEvent) GetPrimaryKey() string {
+	key := c.Key[len(c.Key)-1]
+	return key
+}
+
 func (c *DBChangeEvent) GetObject() (map[string]any, error) {
 	if c.After != nil {
 		res := make(map[string]any)
