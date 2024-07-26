@@ -1,16 +1,19 @@
 package util
 
+import "github.com/shopmonkeyus/eds-server/internal"
+
 type Batcher struct {
 	records []*Record
 	pks     map[string]uint
 }
 
 type Record struct {
-	Table     string         `json:"table"`
-	Id        string         `json:"id"`
-	Operation string         `json:"operation"`
-	Diff      []string       `json:"diff"`
-	Object    map[string]any `json:"object"`
+	Table     string                  `json:"table"`
+	Id        string                  `json:"id"`
+	Operation string                  `json:"operation"`
+	Diff      []string                `json:"diff"`
+	Object    map[string]any          `json:"object"`
+	Event     *internal.DBChangeEvent `json:"-"`
 }
 
 func (r *Record) String() string {
@@ -23,7 +26,7 @@ func (b *Batcher) Records() []*Record {
 }
 
 // Add will add a record to the batcher
-func (b *Batcher) Add(table string, id string, operation string, diff []string, payload map[string]any) {
+func (b *Batcher) Add(table string, id string, operation string, diff []string, payload map[string]any, event *internal.DBChangeEvent) {
 	var primaryKey string
 	if val, ok := payload["id"].(string); ok {
 		primaryKey = val
@@ -38,7 +41,7 @@ func (b *Batcher) Add(table string, id string, operation string, diff []string, 
 			b.records = append(b.records[:index], b.records[index+1:]...)
 			delete(b.pks, hashkey)
 		}
-		b.records = append(b.records, &Record{Table: table, Id: primaryKey, Operation: operation})
+		b.records = append(b.records, &Record{Table: table, Id: primaryKey, Operation: operation, Event: event})
 		b.pks[hashkey] = uint(len(b.records) - 1)
 	} else {
 		if found {
@@ -52,11 +55,12 @@ func (b *Batcher) Add(table string, id string, operation string, diff []string, 
 			if len(entry.Diff) == 0 {
 				entry.Diff = diff
 			}
+			entry.Event = event
 			entry.Operation = operation
 			entry.Object = payload // replace the payload with the new update
 		} else {
 			// not found just add it
-			b.records = append(b.records, &Record{Table: table, Id: primaryKey, Operation: operation, Diff: diff, Object: payload})
+			b.records = append(b.records, &Record{Table: table, Id: primaryKey, Operation: operation, Diff: diff, Object: payload, Event: event})
 			b.pks[hashkey] = uint(len(b.records) - 1)
 		}
 	}
