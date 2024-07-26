@@ -113,7 +113,7 @@ func (p *snowflakeDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	defer p.waitGroup.Done()
 	if _, ok := p.schema[event.Table]; !ok {
 		// NOTE: remove this once we have schema evolution reimplemented
-		p.logger.Warn("skipping table not found in schema: %s", event.Table)
+		p.logger.Warn("skipping event: %s because table was not found in schema: %s", event.String(), event.Table)
 		return false, nil
 	}
 	object, err := event.GetObject()
