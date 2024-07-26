@@ -105,7 +105,8 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession,
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
 	}
@@ -133,7 +134,8 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return "", fmt.Errorf("failed to send session end: %w", err)
 	}
@@ -159,7 +161,8 @@ func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId str
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send renew end: %w", err)
 	}
@@ -191,7 +194,8 @@ func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
 	}
 	setHTTPHeader(req, "")
 	req.Header.Set("Content-Type", "application/x-tgz")
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return fmt.Errorf("failed to upload logs: %w", err)
 	}

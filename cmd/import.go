@@ -92,7 +92,8 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 			return "", fmt.Errorf("error creating request: %s", err)
 		}
 		setHTTPHeader(req, apiKey)
-		resp, err := http.DefaultClient.Do(req)
+		retry := util.NewHTTPRetry(req)
+		resp, err := retry.Do()
 		if err != nil {
 			if shouldRetryError(err) {
 				retryCount++
@@ -173,40 +174,21 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
 	setHTTPHeader(req, apiKey)
-	var retryCount int
-	started := time.Now()
-	for time.Since(started) < time.Minute*5 {
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			if shouldRetryError(err) {
-				retryCount++
-				backoffRetry(retryCount)
-				continue
-			}
-			return nil, fmt.Errorf("error fetching bulk export status: %s", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			buf, _ := io.ReadAll(resp.Body)
-			if shouldRetryStatus(resp.StatusCode) {
-				retryCount++
-				backoffRetry(retryCount)
-				continue
-			}
-			return nil, fmt.Errorf("API error: %s (status code=%d)", string(buf), resp.StatusCode)
-		}
-		job, err := decodeAPIResponse[exportJobResponse](resp)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding response: %s", err)
-		}
-		for table, data := range job.Tables {
-			if data.Status == "Failed" {
-				return job, fmt.Errorf("error exporting table %s: %s", table, data.Error)
-			}
-		}
-		return job, nil
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
+	if err != nil {
+		return nil, fmt.Errorf("error fetching bulk export status: %s", err)
 	}
-	return nil, fmt.Errorf("error checking status of export job: too many retries")
+	job, err := decodeAPIResponse[exportJobResponse](resp)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding response: %s", err)
+	}
+	for table, data := range job.Tables {
+		if data.Status == "Failed" {
+			return job, fmt.Errorf("error exporting table %s: %s", table, data.Error)
+		}
+	}
+	return job, nil
 }
 
 func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, jobID string) (exportJobResponse, error) {
