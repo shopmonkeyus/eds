@@ -42,3 +42,16 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge
+    stdin_open: true
+    ports:
+      - "1433:1433"
+    environment:
+      - MSSQL_SA_PASSWORD=Asdf1234!
+      - ACCEPT_EULA=Y
+      - MSSQL_DATA_DIR=/var/opt/mssql/data
+      - MSSQL_LOG_DIR=/var/opt/mssql/log
+      - MSSQL_BACKUP_DIR=/var/opt/mssql/backup
+    volumes:
+      - ./sqlserver-data:/var/opt/mssql

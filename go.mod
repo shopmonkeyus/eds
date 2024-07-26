@@ -15,6 +15,7 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
+	github.com/microsoft/go-mssqldb v1.7.2
 	github.com/nats-io/jwt/v2 v2.5.8
 	github.com/nats-io/nats.go v1.36.0
 	github.com/savsgio/gotils v0.0.0-20240704082632-aef3928b8a38
@@ -76,6 +77,8 @@ require (
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

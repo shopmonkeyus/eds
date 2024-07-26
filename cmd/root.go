@@ -17,6 +17,7 @@ import (
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/postgresql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/s3"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/snowflake"
+	_ "github.com/shopmonkeyus/eds-server/internal/drivers/sqlserver"
 )
 
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
