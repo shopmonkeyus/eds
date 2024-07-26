@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	// Register all drivers
+	_ "github.com/shopmonkeyus/eds-server/internal/drivers/eventhub"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/kafka"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/mysql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/postgresql"
