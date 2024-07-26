@@ -228,15 +228,9 @@ func (p *postgresqlDriver) Import(config internal.ImporterConfig) error {
 			if err := executeSQL(pending.String()); err != nil {
 				logger.Trace("offending sql: %s", pending.String())
 				//Post the offending sql to a file log. For large batch inserts, the offending SQL takes up too much space in the terminal
-				file, fileErr := os.Create("offend.txt")
-				if fileErr != nil {
-					fmt.Println(fileErr)
-
+				if err := os.WriteFile("offend.txt", []byte(pending.String()), 0666); err != nil {
+					p.logger.Error("unable to write offending sql to file: %w", err)
 				}
-
-				writer := bufio.NewWriter(file)
-				writer.WriteString(pending.String())
-				writer.Flush()
 
 				return fmt.Errorf("unable to execute %s sql: %w", table, err)
 			}
