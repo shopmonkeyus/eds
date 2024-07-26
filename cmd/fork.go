@@ -70,6 +70,10 @@ var forkCmd = &cobra.Command{
 			Context: ctx,
 			Dir:     cwd,
 		})
+		if err != nil {
+			logger.Error("error creating tracker db: %s", err)
+			os.Exit(3)
+		}
 		defer tracker.Close()
 
 		registry, err := registry.NewFileRegistry(schemaFile)
@@ -116,6 +120,8 @@ var forkCmd = &cobra.Command{
 		var wg sync.WaitGroup
 		wg.Add(1)
 
+		restartFlag, _ := cmd.Flags().GetBool("restart")
+
 		go func() {
 			defer util.RecoverPanic(logger)
 			defer wg.Done()
@@ -131,6 +137,7 @@ var forkCmd = &cobra.Command{
 					MaxPendingBuffer:      maxPendingBuffer,
 					Driver:                driver,
 					ExportTableTimestamps: exportTableTimestamps,
+					Restart:               restartFlag,
 				})
 				if err != nil {
 					logger.Error("error creating consumer: %s", err)
@@ -191,5 +198,6 @@ func init() {
 	forkCmd.Flags().String("tables", "tables.json", "the Shopmonkey tables file")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
+	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
 	forkCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
 }

@@ -373,6 +373,7 @@ var serverCmd = &cobra.Command{
 							logger.Fatal("failed to write creds to file: %s", err)
 						}
 						if currentProcess != nil {
+							logger.Info("need to restart child process to reload nats credentials")
 							currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
 						} else {
 							logger.Fatal("no child process to signal on credentials renew")
@@ -523,4 +524,6 @@ func init() {
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	serverCmd.Flags().Int("health-port", getOSInt("PORT", 8080), "the port to listen for health checks")
+	serverCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
+	serverCmd.Flags().MarkHidden("restart")
 }

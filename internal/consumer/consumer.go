@@ -53,6 +53,9 @@ type ConsumerConfig struct {
 
 	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
 	ExportTableTimestamps map[string]*time.Time
+
+	// Restart the consumer from the beginning of the stream
+	Restart bool
 }
 
 type Consumer struct {
@@ -454,6 +457,9 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		FilterSubjects:    subjects,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		InactiveThreshold: time.Hour * 24 * 3, // expire if unused 3 days from first creating
+	}
+	if config.Restart {
+		jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
 	}
 	createConsumerContext, cancelCreate := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
 	defer cancelCreate()

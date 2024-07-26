@@ -199,7 +199,7 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
 				} else {
 					c := model.Properties[name]
-					updateValues = append(updateValues, nullableValue(c, false))
+					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), nullableValue(c, false)))
 				}
 			}
 			sql.WriteString("UPDATE ")
@@ -208,7 +208,7 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 			sql.WriteString(strings.Join(updateValues, ","))
 			sql.WriteString(" WHERE ")
 			sql.WriteString(util.QuoteIdentifier("id"))
-			sql.WriteString(" = ")
+			sql.WriteString("=")
 			sql.WriteString(quoteValue(record.Id, ""))
 			sql.WriteString(";\n")
 		}
