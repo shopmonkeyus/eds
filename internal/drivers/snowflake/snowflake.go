@@ -139,24 +139,23 @@ func (p *snowflakeDriver) Flush() error {
 		sequence++
 		tag := fmt.Sprintf("eds-server-%s/%d/%d", p.sessionID, sequence, count)
 		ctx := sf.WithQueryTag(context.Background(), tag)
-		execCTX, err := sf.WithMultiStatement(ctx, count) // for the transaction below
+		var query strings.Builder
+		var statementCount int
+		for _, record := range records {
+			sql, count := toSQL(record, p.schema)
+			statementCount += count
+			query.WriteString(sql)
+		}
+		execCTX, err := sf.WithMultiStatement(ctx, statementCount)
 		if err != nil {
 			return fmt.Errorf("error creating exec context: %w", err)
 		}
-		var query strings.Builder
-		for _, record := range records {
-			q, err := toSQL(record, p.schema)
-			if err != nil {
-				return fmt.Errorf("error creating sql query: %w for %s", err, record)
-			}
-			query.WriteString(q)
-		}
 		ts := time.Now()
-		p.logger.Trace("executing query (%s): %s", tag, query.String())
+		p.logger.Trace("executing query (%s/%d): %s", tag, statementCount, strings.TrimRight(query.String(), "\n"))
 		if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
 			return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
 		}
-		p.logger.Trace("executed query (%s) in %v", tag, time.Since(ts))
+		p.logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
 	}
 	return nil
 }

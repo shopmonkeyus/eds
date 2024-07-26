@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/registry"
@@ -128,12 +129,17 @@ var forkCmd = &cobra.Command{
 				case <-ctx.Done():
 					completed = true
 				case err := <-consumer.Error():
-					logger.Error("error from consumer: %s", err)
+					if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) {
+						logger.Warn("nats server / consumer needs reconnection: %s", err)
+					} else {
+						logger.Error("error from consumer: %s", err)
+					}
 					if err := consumer.Stop(); err != nil {
 						logger.Error("error stopping consumer: %s", err)
 					}
 					driver.Stop()
 					cancel()
+					closer()
 					os.Exit(1)
 				case <-restart:
 					logger.Debug("restarting consumer on SIGHUP")
