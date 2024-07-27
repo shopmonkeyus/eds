@@ -315,6 +315,7 @@ var serverIgnoreFlags = map[string]bool{
 	"--api-url":        true,
 	"--api-key":        true,
 	"--silent":         true,
+	"--port":           true,
 	"--health-port":    true,
 	"--renew-interval": true,
 }
@@ -335,7 +336,10 @@ var serverCmd = &cobra.Command{
 		apikey := mustFlagString(cmd, "api-key", true)
 		var credsFile string
 
-		defer os.Remove(credsFile) // make sure we remove the temporary credential
+		// must be in a defer to make sure we pick up credsFile variable
+		defer func() {
+			os.Remove(credsFile) // make sure we remove the temporary credential
+		}()
 
 		var skipping bool
 		var _args []string
@@ -358,9 +362,27 @@ var serverCmd = &cobra.Command{
 		if err != nil {
 			logger.Fatal("failed to get free port: %s", err)
 		}
-		healthPort := mustFlagInt(cmd, "health-port", true)
+		healthPort := mustFlagInt(cmd, "port", true)
+		oldHealthPort := mustFlagInt(cmd, "health-port", false)
+		if oldHealthPort > 0 {
+			healthPort = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
+		}
 		runHealthCheckServer(logger, healthPort, fwdPort)
-		_args = append(_args, "--health-port", fmt.Sprintf("%d", fwdPort))
+		_args = append(_args, "--port", fmt.Sprintf("%d", fwdPort))
+
+		dataDir := mustFlagString(cmd, "data-dir", true)
+		dataDir, _ = filepath.Abs(filepath.Clean(dataDir))
+
+		if !util.Exists(dataDir) {
+			logger.Fatal("data directory %s does not exist. please create the directory and retry again.", dataDir)
+		}
+		if ok, err := util.IsDirWritable(dataDir); !ok {
+			logger.Fatal("%s", err)
+		}
+
+		logger.Debug("using data directory: %s", dataDir)
+
+		_args = append(_args, "--data-dir", dataDir)
 
 		var currentProcess *os.Process
 		var sessionId string
@@ -419,7 +441,7 @@ var serverCmd = &cobra.Command{
 			sessionId = session.SessionId
 			if credsFile == "" && session.Credential != nil {
 				// write credential to file
-				credsFile = filepath.Join(os.TempDir(), fmt.Sprintf("eds-%s.creds", session.SessionId))
+				credsFile = filepath.Join(dataDir, fmt.Sprintf("eds-%s.creds", session.SessionId))
 				if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
 					logger.Fatal("failed to write creds to file: %s", err)
 				}
@@ -531,19 +553,39 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverHelpCmd)
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("couldn't get current working directory: ", err)
+		os.Exit(1)
+	}
+
 	// NOTE: sync these with forkCmd
-	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
-	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().String("url", "", "provider connection string")
-	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
+	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
+	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
+
+	// deprecated but left for backwards compatibility
+	serverCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
+	serverCmd.Flags().MarkDeprecated("health-port", "use --port instead")
+
+	// internal use only
 	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
+	serverCmd.Flags().MarkHidden("schema")
 	serverCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
+	serverCmd.Flags().MarkHidden("tables")
+	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	serverCmd.Flags().MarkHidden("api-url")
+	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
+	serverCmd.Flags().MarkHidden("server")
+	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
+	serverCmd.Flags().MarkHidden("consumer-suffix")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
+	serverCmd.Flags().MarkHidden("maxAckPending")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
-	serverCmd.Flags().Int("health-port", getOSInt("PORT", 8080), "the port to listen for health checks")
+	serverCmd.Flags().MarkHidden("maxPendingBuffer")
 	serverCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
 	serverCmd.Flags().MarkHidden("restart")
-	serverCmd.Flags().Duration("renew-interval", time.Hour*24*6, "the interval to renew the session")
+	serverCmd.Flags().Duration("renew-interval", time.Hour*24, "the interval to renew the session")
 	serverCmd.Flags().MarkHidden("renew-interval")
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -57,20 +58,30 @@ var forkCmd = &cobra.Command{
 		natsurl := mustFlagString(cmd, "server", true)
 		url := mustFlagString(cmd, "url", true)
 		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
-		schemaFile := mustFlagString(cmd, "schema", true)
-		tablesFile := mustFlagString(cmd, "tables", true)
+		datadir := mustFlagString(cmd, "data-dir", true)
+		_schemaFile := mustFlagString(cmd, "schema", true)
+		_tablesFile := mustFlagString(cmd, "tables", true)
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
-		healthPort := mustFlagInt(cmd, "health-port", false)
+		port := mustFlagInt(cmd, "port", false)
+
 		serverStarted := time.Now()
 
-		cwd, _ := os.Getwd()
+		// assume these are default in the same directory as the data-dir
+		schemaFile := filepath.Join(datadir, _schemaFile)
+		if util.Exists(_schemaFile) {
+			schemaFile = _schemaFile
+		}
+		tablesFile := filepath.Join(datadir, _tablesFile)
+		if util.Exists(tablesFile) {
+			tablesFile = _tablesFile
+		}
 
 		tracker, err := tracker.NewTracker(tracker.TrackerConfig{
 			Logger:  logger,
 			Context: ctx,
-			Dir:     cwd,
+			Dir:     datadir,
 		})
 		if err != nil {
 			logger.Error("error creating tracker db: %s", err)
@@ -113,7 +124,7 @@ var forkCmd = &cobra.Command{
 
 		defer driver.Stop()
 
-		runHealthCheckServerFork(logger, healthPort)
+		runHealthCheckServerFork(logger, port)
 
 		// create a channel to listen for SIGHUP to restart the consumer
 		restart := make(chan os.Signal, 1)
@@ -192,6 +203,7 @@ func init() {
 	rootCmd.AddCommand(forkCmd)
 	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
 	// NOTE: sync these with serverCmd
+	forkCmd.Flags().String("data-dir", "", "the data directory for storing logs and other data")
 	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
@@ -201,5 +213,5 @@ func init() {
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
-	forkCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
+	forkCmd.Flags().Int("port", 0, "the port to listen for health checks and metrics")
 }
