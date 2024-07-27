@@ -227,6 +227,8 @@ github.com/shopmonkeyus/go-common v0.0.65 h1:4Fn+ljpzzsedlh3fXZMRYUHceo8Hy92lOMV
 github.com/shopmonkeyus/go-common v0.0.65/go.mod h1:LW/eeD8MolKHZP7qRtF73tw1JoAy9kyoDwTIlXoLeSY=
 github.com/shopmonkeyus/go-common v0.0.67 h1:lqWs1oXi+jp9/WcWJsDCsbIC8tR4KtfxE7dshkqFcRQ=
 github.com/shopmonkeyus/go-common v0.0.67/go.mod h1:LW/eeD8MolKHZP7qRtF73tw1JoAy9kyoDwTIlXoLeSY=
+github.com/shopmonkeyus/go-common v0.0.68 h1:TaIz9nxgYa+0cdJKCuyiH5ZKjRHkZXvXvSS1UvwGido=
+github.com/shopmonkeyus/go-common v0.0.68/go.mod h1:YOSV3UmAG1D8T7rb1+sK2ktIVtJQ35FAFzn2+MqhToM=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/snowflakedb/gosnowflake v1.10.1 h1:VGeQxsQj5s3hP0cRmtNYozhUvs2Y7Reu5Pk5pKuRGpI=
