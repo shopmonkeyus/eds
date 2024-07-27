@@ -60,7 +60,7 @@ jobs:
         uses: docker/build-push-action@v6
         id: push
         if: github.event_name != 'release'
-        timeout-minutes: 10
+        timeout-minutes: 12
         with:
           context: .
           file: Dockerfile
@@ -76,7 +76,7 @@ jobs:
         uses: docker/build-push-action@v6
         id: push_release
         if: github.event_name == 'release' && github.event.action == 'published'
-        timeout-minutes: 10
+        timeout-minutes: 12
         with:
           context: .
           file: Dockerfile
