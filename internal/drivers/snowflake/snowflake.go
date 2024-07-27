@@ -138,8 +138,8 @@ func (p *snowflakeDriver) Flush() error {
 	records := p.batcher.Records()
 	count := len(records)
 	p.batcher.Clear()
-	p.logger.Debug("flush: %v", count)
 	if count > 0 {
+		p.logger.Debug("flush: %d / %d", count, sequence+1)
 		sequence++
 		tag := fmt.Sprintf("eds-server-%s/%d/%d", p.sessionID, sequence, count)
 		ctx := sf.WithQueryTag(context.Background(), tag)
@@ -162,6 +162,11 @@ func (p *snowflakeDriver) Flush() error {
 					p.logger.Trace("forcing delete before insert because we've seen an insert for %s/%s", record.Table, record.Id)
 				}
 			case "UPDATE":
+				if len(record.Diff) == 1 && record.Diff[0] == "updatedDate" {
+					// slight optimization to skip records that just have an updatedDate and nothing else
+					p.logger.Trace("skipping update because only updatedDate changed for %s/%s", record.Table, record.Id)
+					continue
+				}
 			case "DELETE":
 				key = fmt.Sprintf("snowflake:%s:%s", record.Table, record.Id)
 				deletekeys = append(deletekeys, key)
@@ -174,20 +179,22 @@ func (p *snowflakeDriver) Flush() error {
 				cachekeys = append(cachekeys, key)
 			}
 		}
-		execCTX, err := sf.WithMultiStatement(ctx, statementCount)
-		if err != nil {
-			return fmt.Errorf("error creating exec context: %w", err)
+		if statementCount > 0 {
+			execCTX, err := sf.WithMultiStatement(ctx, statementCount)
+			if err != nil {
+				return fmt.Errorf("error creating exec context: %w", err)
+			}
+			ts := time.Now()
+			p.logger.Trace("executing query (%s/%d)", tag, statementCount)
+			if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
+				return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
+			}
+			p.logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
 		}
-		ts := time.Now()
-		p.logger.Trace("executing query (%s/%d)", tag, statementCount)
-		if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
-			return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
-		}
-		p.logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
-		for _, key := range cachekeys {
-			// cache keys seen for the past 24 hours ... might want to make it configurable
-			if err := p.config.Tracker.SetKey(key, tag, time.Hour*24); err != nil {
-				return fmt.Errorf("error setting cache key %s in tracker: %w", key, err)
+		if len(cachekeys) > 0 {
+			// cache keys seen for the past 24 hours ... might want to make it configurable at some point but this is good enough for now
+			if err := p.config.Tracker.SetKeys(cachekeys, tag, time.Hour*24); err != nil {
+				return fmt.Errorf("error setting cache keys: %s in tracker: %w", cachekeys, err)
 			}
 		}
 		if len(deletekeys) > 0 {

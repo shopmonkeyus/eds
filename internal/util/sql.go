@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -29,7 +30,7 @@ func SQLExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool
 			log.Info("[dry-run] %s", sql)
 			return nil
 		}
-		log.Debug("executing: %s", sql)
+		log.Debug("executing: %s", strings.TrimRight(sql, "\n"))
 		if _, err := db.ExecContext(ctx, sql); err != nil {
 			return err
 		}

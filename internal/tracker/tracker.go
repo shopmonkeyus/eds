@@ -74,6 +74,26 @@ func (t *Tracker) SetKey(key, value string, expires time.Duration) error {
 	return nil
 }
 
+// SetKeys will set multiple key to the same value in the database.
+func (t *Tracker) SetKeys(keys []string, value string, expires time.Duration) error {
+	err := t.db.Update(func(tx *buntdb.Tx) error {
+		var opts *buntdb.SetOptions
+		if expires > 0 {
+			opts = &buntdb.SetOptions{Expires: true, TTL: expires}
+		}
+		for _, key := range keys {
+			if _, _, err := tx.Set(key, value, opts); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set keys: %w", err)
+	}
+	return nil
+}
+
 // DeleteKey will delete the key from the database.
 func (t *Tracker) DeleteKey(keys ...string) error {
 	return t.db.Update(func(tx *buntdb.Tx) error {

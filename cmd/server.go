@@ -156,7 +156,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 }
 
 func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, nil)
+	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, strings.NewReader(util.JSONStringify(map[string]any{})))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
@@ -178,7 +178,7 @@ func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId str
 	if !s.Success {
 		return nil, fmt.Errorf("failed to renew session: %s", s.Message)
 	}
-	logger.Trace("session %s renew successfully: %s", sessionId)
+	logger.Trace("session %s renew successfully", sessionId)
 	return s.Data.Credential, nil
 }
 
@@ -300,10 +300,11 @@ func newNotificationConsumer(logger logger.Logger, natsurl string) *notification
 }
 
 var serverIgnoreFlags = map[string]bool{
-	"--api-url":     true,
-	"--api-key":     true,
-	"--silent":      true,
-	"--health-port": true,
+	"--api-url":        true,
+	"--api-key":        true,
+	"--silent":         true,
+	"--health-port":    true,
+	"--renew-interval": true,
 }
 
 var serverCmd = &cobra.Command{
@@ -331,7 +332,9 @@ var serverCmd = &cobra.Command{
 				skipping = false
 				continue
 			}
-			if serverIgnoreFlags[arg] {
+			tok := strings.Split(arg, "=")
+			_arg := tok[0]
+			if serverIgnoreFlags[_arg] {
 				skipping = true
 				continue
 			}
@@ -352,6 +355,7 @@ var serverCmd = &cobra.Command{
 
 		processCallback := func(p *os.Process) {
 			currentProcess = p
+			logger.Debug("fork process started with pid: %d", p.Pid)
 		}
 
 		natsurl := mustFlagString(cmd, "server", true)
@@ -359,7 +363,9 @@ var serverCmd = &cobra.Command{
 
 		go func() {
 			defer util.RecoverPanic(logger)
-			ticker := time.NewTicker(time.Hour * 24 * 6)
+			duration, _ := cmd.Flags().GetDuration("renew-interval")
+			logger.Trace("will renew session every %v", duration)
+			ticker := time.NewTicker(duration)
 			defer ticker.Stop()
 			for {
 				select {
@@ -526,4 +532,6 @@ func init() {
 	serverCmd.Flags().Int("health-port", getOSInt("PORT", 8080), "the port to listen for health checks")
 	serverCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
 	serverCmd.Flags().MarkHidden("restart")
+	serverCmd.Flags().Duration("renew-interval", time.Hour*24*6, "the interval to renew the session")
+	serverCmd.Flags().MarkHidden("renew-interval")
 }

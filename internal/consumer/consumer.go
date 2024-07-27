@@ -259,7 +259,7 @@ func (c *Consumer) bufferer() {
 			count := len(c.pending)
 			if count > 0 && count < c.max && time.Since(*c.pendingStarted) >= minPendingLatency {
 				if traceLogNatsProcessDetail {
-					c.logger.Trace("flush 3 called.count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
+					c.logger.Trace("flush 3 called. count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
 				}
 				if c.flush() {
 					return
@@ -369,7 +369,14 @@ func (c *Consumer) Start() error {
 		return fmt.Errorf("consumer already started")
 	}
 	// start consuming messages
-	sub, err := c.jsconn.Consume(c.process)
+	sub, err := c.jsconn.Consume(
+		c.process,
+		jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, err error) {
+			c.logger.Warn("consumer error: %s", err)
+		}),
+		jetstream.PullExpiry(time.Minute),
+		jetstream.PullMaxMessages(4_096),
+	)
 	if err != nil {
 		c.conn.Close()
 		return fmt.Errorf("error starting jetstream consumer: %w", err)
@@ -421,10 +428,10 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		jetstream.WithClientTrace(
 			&jetstream.ClientTrace{
 				RequestSent: func(subj string, payload []byte) {
-					natsLogger.Trace("nats tx: %s: %s", subj, string(payload))
+					natsLogger.Trace("tx: %s: %s", subj, string(payload))
 				},
 				ResponseReceived: func(subj string, payload []byte, hdr nats.Header) {
-					natsLogger.Trace("nats rx: %s: %s", subj, string(payload))
+					natsLogger.Trace("rx: %s: %s", subj, string(payload))
 				},
 			},
 		),
@@ -450,7 +457,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	jsConfig := jetstream.ConsumerConfig{
 		Durable:           name,
 		MaxAckPending:     config.MaxAckPending,
-		MaxDeliver:        1_000,
+		MaxDeliver:        20,
 		AckWait:           time.Minute * 5,
 		DeliverPolicy:     jetstream.DeliverNewPolicy,
 		MaxRequestBatch:   config.MaxPendingBuffer,
