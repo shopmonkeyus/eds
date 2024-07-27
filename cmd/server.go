@@ -239,6 +239,18 @@ func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
 		}
 		w.WriteHeader(resp.StatusCode)
 	})
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", fwdport))
+		if err != nil {
+			logger.Error("metric failed: %s", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+		io.Copy(w, resp.Body)
+		resp.Body.Close()
+	})
 	go func() {
 		defer util.RecoverPanic(logger)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {

@@ -137,6 +137,7 @@ func (c *Consumer) flush() bool {
 	if c.driver == nil {
 		return c.stopping
 	}
+	started := time.Now()
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if err := c.driver.Flush(); err != nil {
@@ -147,15 +148,21 @@ func (c *Consumer) flush() bool {
 		c.handleError(err)
 		return true
 	}
+	var count float64
 	for _, m := range c.pending {
 		if err := m.Ack(); err != nil {
+			internal.PendingEvents.Dec()
 			c.logger.Error("error acking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
 			c.nackEverything()
 			return true
 		}
+		internal.PendingEvents.Dec()
+		count++
 	}
 	c.pending = nil
 	c.pendingStarted = nil
+	internal.FlushDuration.Observe(time.Since(started).Seconds())
+	internal.FlushCount.Observe(count)
 	return c.stopping
 }
 func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) bool {
@@ -199,6 +206,7 @@ func (c *Consumer) bufferer() {
 			md, _ := msg.Metadata()
 			var evt internal.DBChangeEvent
 			if err := json.Unmarshal(buf, &evt); err != nil {
+				internal.PendingEvents.Dec()
 				log.Error("error unmarshalling: %s (seq:%d): %s", string(buf), md.Sequence.Consumer, err)
 				c.handleError(err)
 				return
@@ -216,10 +224,12 @@ func (c *Consumer) bufferer() {
 						break
 					}
 				}
+				internal.PendingEvents.Dec()
 				continue
 			}
 			flush, err := c.driver.Process(evt)
 			if err != nil {
+				internal.PendingEvents.Dec()
 				c.handleError(err)
 				return
 			}
@@ -282,6 +292,8 @@ func (c *Consumer) bufferer() {
 }
 
 func (c *Consumer) process(msg jetstream.Msg) {
+	internal.PendingEvents.Inc()
+	internal.TotalEvents.Inc()
 	c.buffer <- msg
 }
 

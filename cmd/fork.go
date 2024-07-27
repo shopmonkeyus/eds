@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/registry"
@@ -31,6 +32,7 @@ func runHealthCheckServerFork(logger logger.Logger, port int) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	http.Handle("/metrics", promhttp.Handler())
 	go func() {
 		defer util.RecoverPanic(logger)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
@@ -82,7 +84,7 @@ var forkCmd = &cobra.Command{
 			os.Exit(3)
 		}
 
-		// TODO: remove these into the tracker
+		// TODO: move these into the tracker
 		var exportTableTimestamps map[string]*time.Time
 		if exportTableData, err := loadTablesJSON(tablesFile); err != nil {
 			if cmd.Flags().Changed("tables") {

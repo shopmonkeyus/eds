@@ -17,6 +17,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/nats-io/jwt/v2 v2.5.8
 	github.com/nats-io/nats.go v1.36.0
+	github.com/prometheus/client_golang v1.19.1
 	github.com/savsgio/gotils v0.0.0-20240704082632-aef3928b8a38
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/shopmonkeyus/go-common v0.0.68
@@ -56,6 +57,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.3 // indirect
 	github.com/aws/smithy-go v1.20.3 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/catppuccin/go v0.2.0 // indirect
 	github.com/charmbracelet/bubbles v0.18.0 // indirect
 	github.com/charmbracelet/bubbletea v0.26.6 // indirect
@@ -101,6 +103,9 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/prometheus/client_model v0.5.0 // indirect
+	github.com/prometheus/common v0.48.0 // indirect
+	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
@@ -124,5 +129,6 @@ require (
 	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/tools v0.23.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240716161551-93cc26a95ae9 // indirect
+	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

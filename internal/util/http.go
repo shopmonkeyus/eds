@@ -19,7 +19,7 @@ type HTTPRetry struct {
 func (r *HTTPRetry) shouldRetry(resp *http.Response, err error) bool {
 	if err != nil {
 		msg := err.Error()
-		if strings.Contains(msg, "connection reset") {
+		if strings.Contains(msg, "connection reset") || strings.Contains(msg, "connection refused") {
 			return r.attempts <= maxAttempts
 		}
 	}
