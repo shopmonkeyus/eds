@@ -5,14 +5,22 @@ on:
     branches:
       - main
   pull_request:
+  release:
+    types: [published]
 
 concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  attestations: write
+
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,6 +58,8 @@ jobs:
           fi
       - name: Build and Push
         uses: docker/build-push-action@v6
+        id: push
+        if: github.event_name != 'release'
         timeout-minutes: 10
         with:
           context: .
@@ -62,3 +72,33 @@ jobs:
           platforms: linux/arm64,linux/amd64
           tags: us-docker.pkg.dev/shopmonkey-v2/public/eds-server:${{ steps.sha.outputs.sha }}
           labels: org.opencontainers.image.source=https://github.com/shopmonkeyus/eds-server,git.branch=${{ steps.branch-name.outputs.current_branch }},git.sha=${{ steps.sha.outputs.sha }}
+      - name: Build and Push for Release
+        uses: docker/build-push-action@v6
+        id: push_release
+        if: github.event_name == 'release' && github.event.action == 'published'
+        timeout-minutes: 10
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            GIT_SHA=${{ steps.sha.outputs.sha }}
+            GIT_BRANCH=${{ steps.branch-name.outputs.current_branch }}
+            BUILD_DATE=${{ steps.date.outputs.date }}
+          push: true
+          platforms: linux/arm64,linux/amd64
+          tags: us-docker.pkg.dev/shopmonkey-v2/public/eds-server:${{ github.event.release.tag_name }}
+          labels: org.opencontainers.image.source=https://github.com/shopmonkeyus/eds-server,git.branch=${{ steps.branch-name.outputs.current_branch }},git.sha=${{ steps.sha.outputs.sha }}
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        if: github.event_name != 'release'
+        with:
+          subject-name: us-docker.pkg.dev/shopmonkey-v2/public/eds-server
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Generate artifact attestation for release
+        uses: actions/attest-build-provenance@v1
+        if: github.event_name == 'release' && github.event.action == 'published'
+        with:
+          subject-name: us-docker.pkg.dev/shopmonkey-v2/public/eds-server
+          subject-digest: ${{ steps.push_release.outputs.digest }}
+          push-to-registry: true
