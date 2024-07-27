@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: platform-x-large
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up Go
