@@ -33,6 +33,7 @@ var _ internal.Driver = (*snowflakeDriver)(nil)
 var _ internal.DriverLifecycle = (*snowflakeDriver)(nil)
 var _ internal.Importer = (*snowflakeDriver)(nil)
 var _ internal.DriverSessionHandler = (*snowflakeDriver)(nil)
+var _ internal.DriverHelp = (*snowflakeDriver)(nil)
 
 func (p *snowflakeDriver) SetSessionID(sessionID string) {
 	if sessionID != "" {
@@ -303,6 +304,11 @@ done:
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// Name is a unique name for the driver.
+func (p *snowflakeDriver) Name() string {
+	return "Snowflake"
 }
 
 // Description is the description of the driver.

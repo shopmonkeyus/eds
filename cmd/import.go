@@ -347,10 +347,10 @@ func isCancelled(ctx context.Context) bool {
 	}
 }
 
-func createEDSSession(ctx context.Context, logger logger.Logger, serverURL string, apiURL string, apiKey string, suffix string) error {
+func createEDSSession(ctx context.Context, logger logger.Logger, serverURL string, apiURL string, apiKey string, suffix string, driverUrl string) error {
 	logger.Info("Creating EDS Checkpoint...")
 	// TODO: just get the cred instead of starting a session?
-	session, err := sendStart(logger, apiURL, apiKey)
+	session, err := sendStart(logger, apiURL, apiKey, driverUrl)
 	if err != nil {
 		return fmt.Errorf("error creating EDS session: %s", err)
 	}
@@ -412,7 +412,7 @@ var importCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		noconfirm, _ := cmd.Flags().GetBool("no-confirm")
-		providerUrl := mustFlagString(cmd, "url", true)
+		driverUrl := mustFlagString(cmd, "url", true)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		parallel := mustFlagInt(cmd, "parallel", false)
 		apiURL := mustFlagString(cmd, "api-url", true)
@@ -428,7 +428,7 @@ var importCmd = &cobra.Command{
 
 		if !dryRun && !noconfirm {
 
-			u, err := url.Parse(providerUrl)
+			u, err := url.Parse(driverUrl)
 			if err != nil {
 				logger.Fatal("error parsing url: %s", err)
 			}
@@ -489,7 +489,7 @@ var importCmd = &cobra.Command{
 		if !noEDSSession {
 			serverURL := mustFlagString(cmd, "server", true)
 			suffix := mustFlagString(cmd, "consumer-suffix", false)
-			if err := createEDSSession(ctx, logger, serverURL, apiURL, apiKey, suffix); err != nil {
+			if err := createEDSSession(ctx, logger, serverURL, apiURL, apiKey, suffix, driverUrl); err != nil {
 				logger.Error("error creating EDS session: %s", err)
 				logger.Info("If you do not intend to run EDS server after the import then you may use --no-eds-session to skip this")
 				os.Exit(1)
@@ -523,7 +523,7 @@ var importCmd = &cobra.Command{
 		os.Remove(tracker.TrackerFilenameFromDir(cwd))
 
 		// create a new importer for loading the data using the provider
-		importer, err := internal.NewImporter(ctx, logger, providerUrl, registry)
+		importer, err := internal.NewImporter(ctx, logger, driverUrl, registry)
 		if err != nil {
 			logger.Fatal("error creating importer: %s", err)
 		}
@@ -638,7 +638,7 @@ var importCmd = &cobra.Command{
 		logger.Info("Importing data to tables %s", strings.Join(tables, ", "))
 		if err := importer.Import(internal.ImporterConfig{
 			Context:        ctx,
-			URL:            providerUrl,
+			URL:            driverUrl,
 			Logger:         logger,
 			SchemaRegistry: registry,
 			MaxParallel:    parallel,

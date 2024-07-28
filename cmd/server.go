@@ -25,12 +25,20 @@ var Version string // set in main
 
 const maxFailures = 5
 
+type driverMeta struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	URL         string `json:"url"` // this is masked since it can contain sensitive information
+}
+
 type sessionStart struct {
-	Version   string `json:"version"`
-	Hostname  string `json:"hostname"`
-	IPAddress string `json:"ipAddress"`
-	MachineId string `json:"machineId"`
-	OsInfo    any    `json:"osinfo"`
+	Version   string     `json:"version"`
+	Hostname  string     `json:"hostname"`
+	IPAddress string     `json:"ipAddress"`
+	MachineId string     `json:"machineId"`
+	OsInfo    any        `json:"osinfo"`
+	Driver    driverMeta `json:"driver"`
 }
 
 type edsSession struct {
@@ -75,7 +83,7 @@ func writeCredsToFile(data string, filename string) error {
 	return nil
 }
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -98,6 +106,21 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession,
 	body.Hostname = hostname
 	body.Version = Version
 	body.OsInfo = osinfo
+
+	driverMeta, err := internal.GetDriverMetadataForURL(driverUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get driver metadata: %w", err)
+	}
+	body.Driver.Description = driverMeta.Description
+	body.Driver.Name = driverMeta.Name
+	body.Driver.ID = driverMeta.Scheme
+	body.Driver.URL, err = util.MaskURL(driverUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mask driver URL: %w", err)
+	}
+
+	logger.Trace("sending session start: %s", util.JSONStringify(body))
+
 	req, err := http.NewRequest("POST", apiURL+"/v3/eds", bytes.NewBuffer([]byte(util.JSONStringify(body))))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
@@ -280,6 +303,8 @@ var serverCmd = &cobra.Command{
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
+		url := mustFlagString(cmd, "url", true)
+
 		var credsFile string
 
 		// must be in a defer to make sure we pick up credsFile variable
@@ -417,7 +442,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey)
+			session, err := sendStart(logger, apiurl, apikey, url)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}

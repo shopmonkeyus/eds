@@ -70,6 +70,9 @@ type DriverAlias interface {
 // DriverHelp is an interface that Drivers implement for controlling the help system.
 type DriverHelp interface {
 
+	// Name is a unique name for the driver.
+	Name() string
+
 	// Description is the description of the driver.
 	Description() string
 
@@ -81,6 +84,7 @@ type DriverHelp interface {
 }
 
 type DriverMetadata struct {
+	Scheme         string
 	Name           string
 	Description    string
 	ExampleURL     string
@@ -94,18 +98,48 @@ var driverAliasRegistry = map[string]string{}
 // GetDriverMetadata returns the metadata for all the registered drivers.
 func GetDriverMetadata() []DriverMetadata {
 	var res []DriverMetadata
-	for name, driver := range driverRegistry {
+	for scheme, driver := range driverRegistry {
 		if help, ok := driver.(DriverHelp); ok {
 			res = append(res, DriverMetadata{
-				Name:           name,
+				Scheme:         scheme,
+				Name:           help.Name(),
 				Description:    help.Description(),
 				ExampleURL:     help.ExampleURL(),
 				Help:           help.Help(),
-				SupportsImport: importerRegistry[name] != nil,
+				SupportsImport: importerRegistry[scheme] != nil,
 			})
 		}
 	}
 	return res
+}
+
+// GetDriverMetadataForURL returns the metadata for a specific url or nil if not supported.
+func GetDriverMetadataForURL(urlString string) (*DriverMetadata, error) {
+	u, err := url.Parse(urlString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+	proto := u.Scheme
+	for scheme, driver := range driverRegistry {
+		if scheme == proto {
+			if help, ok := driver.(DriverHelp); ok {
+				return &DriverMetadata{
+					Scheme:         scheme,
+					Name:           help.Name(),
+					Description:    help.Description(),
+					ExampleURL:     help.ExampleURL(),
+					Help:           help.Help(),
+					SupportsImport: importerRegistry[scheme] != nil,
+				}, nil
+			} else {
+				return &DriverMetadata{
+					Scheme: scheme,
+					Name:   scheme,
+				}, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // Register registers a driver for a given protocol.

@@ -146,6 +146,11 @@ func (p *eventHubDriver) Flush() error {
 	return nil
 }
 
+// Name is a unique name for the driver.
+func (p *eventHubDriver) Name() string {
+	return "Microsoft Azure EventHub"
+}
+
 // Description is the description of the driver.
 func (p *eventHubDriver) Description() string {
 	return "Supports streaming EDS messages to a Microsoft Azure EventHub."
