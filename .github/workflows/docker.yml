@@ -22,9 +22,9 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     env:
-      REGION: us-central
       ARTIFACT_REPO: public
       IMAGE_NAME: eds-server
+      PLATFORM_PROJECT_ID: shopmonkey-v2
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -67,7 +67,7 @@ jobs:
           fi
 
           for TAG in $TAGS; do
-            TAG_LIST+="${{ env.REGION }}-docker.pkg.dev/${{ secrets.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:$TAG,"
+            TAG_LIST+="us-docker.pkg.dev/${{ env.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:$TAG,"
           done
 
           # remove the trailing comma
@@ -95,6 +95,6 @@ jobs:
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}
+          subject-name: us-docker.pkg.dev/${{ env.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
