@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/fatih/color"
@@ -331,20 +330,29 @@ var serverCmd = &cobra.Command{
 
 		_args = append(_args, "--data-dir", dataDir)
 
-		var currentProcess *os.Process
 		var sessionId string
 
 		processCallback := func(p *os.Process) {
-			currentProcess = p
 			logger.Debug("fork process started with pid: %d", p.Pid)
 		}
 
 		restart := func() {
-			if currentProcess != nil {
-				logger.Info("need to restart")
-				currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
+			logger.Info("need to restart")
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", fwdPort))
+			if err != nil {
+				logger.Error("restart failed: %s", err)
 			} else {
-				logger.Fatal("no child process on restart")
+				logger.Debug("restart response: %d", resp.StatusCode)
+			}
+		}
+
+		shutdown := func(msg string) {
+			logger.Info("shutdown requested: %s", msg)
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", fwdPort))
+			if err != nil {
+				logger.Fatal("shutdown failed: %s", err)
+			} else {
+				logger.Debug("shutdown response: %d", resp.StatusCode)
 			}
 		}
 
@@ -360,15 +368,6 @@ var serverCmd = &cobra.Command{
 				restart()
 			} else {
 				logger.Trace("no new credentials to renew")
-			}
-		}
-
-		shutdown := func(msg string) {
-			if currentProcess != nil {
-				logger.Info("shutdown requested: %s", msg)
-				currentProcess.Signal(syscall.SIGTERM) // tell the child to shutdown
-			} else {
-				logger.Fatal("no child process to signal on shutdown")
 			}
 		}
 
@@ -449,7 +448,6 @@ var serverCmd = &cobra.Command{
 				LogFileSink:      true,
 				ProcessCallback:  processCallback,
 			})
-			currentProcess = nil
 			notificationConsumer.Stop()
 			if err != nil && result == nil {
 				logger.Error("failed to fork: %s", err)

@@ -126,7 +126,7 @@ var forkCmd = &cobra.Command{
 
 		runHealthCheckServerFork(logger, port)
 
-		// create a channel to listen for SIGHUP to restart the consumer
+		// create a channel to listen for signals to control the process
 		restart := make(chan os.Signal, 1)
 		signal.Notify(restart, syscall.SIGHUP)
 
@@ -135,7 +135,7 @@ var forkCmd = &cobra.Command{
 
 		restartFlag, _ := cmd.Flags().GetBool("restart")
 
-		// the ability to pause and unpause the consumer from HTTP control
+		// the ability to control the process from HTTP control channel
 		pauseCh := make(chan bool)
 		http.HandleFunc("/control/pause", func(w http.ResponseWriter, r *http.Request) {
 			pauseCh <- true
@@ -145,10 +145,21 @@ var forkCmd = &cobra.Command{
 			pauseCh <- false
 			w.WriteHeader(http.StatusOK)
 		})
+		http.HandleFunc("/control/restart", func(w http.ResponseWriter, r *http.Request) {
+			restart <- syscall.SIGHUP
+			w.WriteHeader(http.StatusOK)
+		})
+		http.HandleFunc("/control/shutdown", func(w http.ResponseWriter, r *http.Request) {
+			restart <- syscall.SIGTERM
+			w.WriteHeader(http.StatusOK)
+		})
 
 		go func() {
 			defer util.RecoverPanic(logger)
-			defer wg.Done()
+			defer func() {
+				cancel()
+				wg.Done()
+			}()
 			var completed bool
 			var paused bool
 			var localConsumer *consumer.Consumer
@@ -188,18 +199,20 @@ var forkCmd = &cobra.Command{
 					if err := localConsumer.Stop(); err != nil {
 						logger.Error("error stopping consumer: %s", err)
 					}
-					driver.Stop()
-					cancel()
-					closer()
-					tracker.Close()
-					os.Exit(1)
-				case <-restart:
-					logger.Debug("restarting consumer on SIGHUP")
+					return
+				case sig := <-restart:
+					switch sig {
+					case syscall.SIGHUP:
+						logger.Debug("restarting consumer")
+						paused = false
+					case syscall.SIGTERM:
+						logger.Debug("shutting down")
+						completed = true
+					}
 					if err := localConsumer.Stop(); err != nil {
 						logger.Error("error stopping consumer: %s", err)
 					}
 					localConsumer = nil
-					paused = false
 				case pause := <-pauseCh:
 					if pause {
 						if !paused {
@@ -213,11 +226,7 @@ var forkCmd = &cobra.Command{
 							paused = false
 							if err := localConsumer.Unpause(); err != nil {
 								logger.Error("error unpausing: %s", err)
-								driver.Stop()
-								cancel()
-								closer()
-								tracker.Close()
-								os.Exit(1)
+								return
 							}
 						}
 					}
@@ -227,8 +236,11 @@ var forkCmd = &cobra.Command{
 
 		logger.Info("server is running version: %v", Version)
 
-		// wait for shutdown or error
-		<-sys.CreateShutdownChannel()
+		// wait for shutdown or cancel
+		select {
+		case <-ctx.Done():
+		case <-sys.CreateShutdownChannel():
+		}
 
 		logger.Debug("server is stopping")
 
