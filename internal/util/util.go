@@ -3,7 +3,6 @@ package util
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,19 +46,6 @@ func ToFileURI(dir string, file string) string {
 // IsLocalhost returns true if the URL is localhost or 127.0.0.1
 func IsLocalhost(url string) bool {
 	return strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1")
-}
-
-// GetFreePort asks the kernel for a free open port that is ready to use.
-func GetFreePort() (port int, err error) {
-	var a *net.TCPAddr
-	if a, err = net.ResolveTCPAddr("tcp", "localhost:0"); err == nil {
-		var l *net.TCPListener
-		if l, err = net.ListenTCP("tcp", a); err == nil {
-			defer l.Close()
-			return l.Addr().(*net.TCPAddr).Port, nil
-		}
-	}
-	return
 }
 
 // ListDir will return an array of files recursively walking into sub directories

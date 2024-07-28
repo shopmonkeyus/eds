@@ -247,39 +247,6 @@ func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessio
 	}
 }
 
-func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", fwdport))
-		if err != nil {
-			logger.Error("health check failed: %s", err)
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		if resp.StatusCode != http.StatusOK {
-			logger.Error("health check failed: %d", resp.StatusCode)
-		}
-		w.WriteHeader(resp.StatusCode)
-	})
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", fwdport))
-		if err != nil {
-			logger.Error("metric failed: %s", err)
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(resp.StatusCode)
-		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-		io.Copy(w, resp.Body)
-		resp.Body.Close()
-	})
-	go func() {
-		defer util.RecoverPanic(logger)
-		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("failed to start health check server: %s", err)
-		}
-	}()
-}
-
 var serverIgnoreFlags = map[string]bool{
 	"--api-url":        true,
 	"--api-key":        true,
@@ -336,19 +303,13 @@ var serverCmd = &cobra.Command{
 			_args = append(_args, arg)
 		}
 
-		// setup health check server
-		fwdPort, err := util.GetFreePort()
-		if err != nil {
-			logger.Fatal("failed to get free port: %s", err)
-		}
-		healthPort := mustFlagInt(cmd, "port", true)
+		port := mustFlagInt(cmd, "port", true)
 		oldHealthPort := mustFlagInt(cmd, "health-port", false)
 		if oldHealthPort > 0 {
-			healthPort = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
+			port = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
 		}
-		runHealthCheckServer(logger, healthPort, fwdPort)
 
-		_args = append(_args, "--port", fmt.Sprintf("%d", fwdPort))
+		_args = append(_args, "--port", fmt.Sprintf("%d", port))
 		_args = append(_args, "--data-dir", dataDir)
 		_args = append(_args, "--server", server)
 
@@ -360,7 +321,7 @@ var serverCmd = &cobra.Command{
 
 		restart := func() {
 			logger.Info("need to restart")
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", fwdPort))
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", port))
 			if err != nil {
 				logger.Error("restart failed: %s", err)
 			} else {
@@ -370,7 +331,7 @@ var serverCmd = &cobra.Command{
 
 		shutdown := func(msg string) {
 			logger.Info("shutdown requested: %s", msg)
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", fwdPort))
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", port))
 			if err != nil {
 				logger.Fatal("shutdown failed: %s", err)
 			} else {
@@ -395,7 +356,7 @@ var serverCmd = &cobra.Command{
 
 		pause := func() {
 			logger.Info("server pause requested")
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/pause", fwdPort))
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/pause", port))
 			if err != nil {
 				logger.Error("pause failed: %s", err)
 			} else {
@@ -405,7 +366,7 @@ var serverCmd = &cobra.Command{
 
 		unpause := func() {
 			logger.Info("server unpause requested")
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/unpause", fwdPort))
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/unpause", port))
 			if err != nil {
 				logger.Error("unpause failed: %s", err)
 			} else {
