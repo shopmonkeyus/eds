@@ -304,6 +304,8 @@ var serverCmd = &cobra.Command{
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
 		url := mustFlagString(cmd, "url", true)
+		server := mustFlagString(cmd, "server", true)
+		dataDir := getDataDir(cmd, logger)
 
 		var credsFile string
 		var sessionDir string
@@ -345,11 +347,10 @@ var serverCmd = &cobra.Command{
 			healthPort = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
 		}
 		runHealthCheckServer(logger, healthPort, fwdPort)
+
 		_args = append(_args, "--port", fmt.Sprintf("%d", fwdPort))
-
-		dataDir := getDataDir(cmd, logger)
-
 		_args = append(_args, "--data-dir", dataDir)
+		_args = append(_args, "--server", server)
 
 		var sessionId string
 
