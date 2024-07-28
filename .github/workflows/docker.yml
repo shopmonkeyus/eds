@@ -39,7 +39,7 @@ jobs:
 
       - name: Configure Docker to use gcloud
         run: |
-          gcloud --quiet auth configure-docker $REGION-docker.pkg.dev
+          gcloud --quiet auth configure-docker us-docker.pkg.dev
 
       - name: Get current date
         id: date
