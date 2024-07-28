@@ -5,6 +5,7 @@ import (
 	glog "log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/shopmonkeyus/go-common/logger"
@@ -17,6 +18,7 @@ import (
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/postgresql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/s3"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/snowflake"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
@@ -120,6 +122,28 @@ func setHTTPHeader(req *http.Request, apiKey string) {
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+}
+
+func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
+	dataDir := mustFlagString(cmd, "data-dir", true)
+	dataDir, _ = filepath.Abs(filepath.Clean(dataDir))
+
+	if !util.Exists(dataDir) {
+		logger.Fatal("data directory %s does not exist. please create the directory and retry again.", dataDir)
+	}
+	if ok, err := util.IsDirWritable(dataDir); !ok {
+		logger.Fatal("%s", err)
+	}
+
+	logger.Debug("using data directory: %s", dataDir)
+	return dataDir
+}
+
+func getSchemaAndTableFiles(datadir string) (string, string) {
+	// assume these are default in the same directory as the data-dir
+	schemaFile := filepath.Join(datadir, "schema.json")
+	tablesFile := filepath.Join(datadir, "tables.json")
+	return schemaFile, tablesFile
 }
 
 // rootCmd represents the base command when called without any subcommands

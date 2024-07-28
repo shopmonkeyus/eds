@@ -418,13 +418,15 @@ var importCmd = &cobra.Command{
 		apiURL := mustFlagString(cmd, "api-url", true)
 		apiKey := mustFlagString(cmd, "api-key", true)
 		jobID := mustFlagString(cmd, "job-id", false)
-		schemaFile := mustFlagString(cmd, "schema", false)
 		single, _ := cmd.Flags().GetBool("single")
 		dir := mustFlagString(cmd, "dir", false)
 
 		logger, closer := newLogger(cmd)
 		defer closer()
 		logger = logger.WithPrefix("[import]")
+
+		dataDir := getDataDir(cmd, logger)
+		schemaFile, _ := getSchemaAndTableFiles(dataDir)
 
 		if !dryRun && !noconfirm {
 
@@ -519,8 +521,7 @@ var importCmd = &cobra.Command{
 		}
 
 		// remove the tracker database since we're starting over
-		cwd, _ := os.Getwd()
-		os.Remove(tracker.TrackerFilenameFromDir(cwd))
+		os.Remove(tracker.TrackerFilenameFromDir(dataDir))
 
 		// create a new importer for loading the data using the provider
 		importer, err := internal.NewImporter(ctx, logger, driverUrl, registry)
@@ -541,10 +542,10 @@ var importCmd = &cobra.Command{
 			logger.Trace("exit success: %v", success)
 			var filesRemoved bool
 			if success {
-				if _, err := sys.CopyFile(filepath.Join(dir, "tables.json"), "tables.json"); err != nil {
+				if _, err := sys.CopyFile(filepath.Join(dir, "tables.json"), filepath.Join(dataDir, "tables.json")); err != nil {
 					logger.Error("error copying tables.json: %s", err)
 				} else {
-					logger.Info("tables.json saved to: %s", "tables.json")
+					logger.Info("tables.json saved")
 				}
 				if !noCleanup {
 					os.RemoveAll(dir)
@@ -586,7 +587,7 @@ var importCmd = &cobra.Command{
 			}
 
 			// download the files
-			dir, err = os.MkdirTemp("", "eds-import-"+jobID+"-*")
+			dir, err = os.MkdirTemp(dataDir, "import-"+jobID+"-*")
 			if err != nil {
 				logger.Error("error creating temp dir: %s", err)
 				return
@@ -603,6 +604,7 @@ var importCmd = &cobra.Command{
 			if isCancelled(ctx) {
 				return
 			}
+
 			to, err := os.Create(filepath.Join(dir, "tables.json"))
 			if err != nil {
 				logger.Error("couldn't open temp tables file: %s", err)
@@ -658,21 +660,38 @@ var importCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(importCmd)
-	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually changes")
-	importCmd.Flags().String("url", "", "provider connection string")
-	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("couldn't get current working directory: ", err)
+		os.Exit(1)
+	}
+
+	// normal flags
+	importCmd.Flags().String("url", "", "driver connection string")
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
+	importCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
+
+	// helpful flags
 	importCmd.Flags().String("job-id", "", "resume an existing job")
+	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make changes")
 	importCmd.Flags().Bool("no-confirm", false, "skip the confirmation prompt")
 	importCmd.Flags().Bool("no-eds-session", false, "skip creating an EDS session")
-	importCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
-	importCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
+	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
+	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
+
+	// tuning and testing flags
+	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
+	importCmd.Flags().Bool("single", false, "run one insert at a time instead of batching")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")
 	importCmd.Flags().StringSlice("locationIds", nil, "only import these location ids")
-	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
-	importCmd.Flags().String("schema", "schema.json", "the schema file to output")
-	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
-	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
-	importCmd.Flags().Bool("single", false, "run one insert at a time instead of batching")
+
+	// internal flags
+	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	importCmd.Flags().MarkHidden("api-url")
+	importCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
+	importCmd.Flags().MarkHidden("server")
+	importCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
+	importCmd.Flags().MarkHidden("consumer-suffix")
 }

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -47,6 +46,7 @@ var forkCmd = &cobra.Command{
 	Short: "Run the server",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		serverStarted := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		logger, closer := newLogger(cmd)
@@ -59,24 +59,12 @@ var forkCmd = &cobra.Command{
 		url := mustFlagString(cmd, "url", true)
 		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
 		datadir := mustFlagString(cmd, "data-dir", true)
-		_schemaFile := mustFlagString(cmd, "schema", true)
-		_tablesFile := mustFlagString(cmd, "tables", true)
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
 		port := mustFlagInt(cmd, "port", false)
 
-		serverStarted := time.Now()
-
-		// assume these are default in the same directory as the data-dir
-		schemaFile := filepath.Join(datadir, _schemaFile)
-		if util.Exists(_schemaFile) {
-			schemaFile = _schemaFile
-		}
-		tablesFile := filepath.Join(datadir, _tablesFile)
-		if util.Exists(tablesFile) {
-			tablesFile = _tablesFile
-		}
+		schemaFile, tablesFile := getSchemaAndTableFiles(datadir)
 
 		tracker, err := tracker.NewTracker(tracker.TrackerConfig{
 			Logger:  logger,
@@ -257,14 +245,13 @@ var forkCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(forkCmd)
 	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
+
 	// NOTE: sync these with serverCmd
 	forkCmd.Flags().String("data-dir", "", "the data directory for storing logs and other data")
 	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
-	forkCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
-	forkCmd.Flags().String("url", "", "Snowflake Database connection string")
-	forkCmd.Flags().String("schema", "schema.json", "the Shopmonkey schema file")
-	forkCmd.Flags().String("tables", "tables.json", "the Shopmonkey tables file")
+	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
+	forkCmd.Flags().String("url", "", "driver connection string")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")

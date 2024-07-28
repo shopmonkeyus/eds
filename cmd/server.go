@@ -306,10 +306,16 @@ var serverCmd = &cobra.Command{
 		url := mustFlagString(cmd, "url", true)
 
 		var credsFile string
+		var sessionDir string
 
 		// must be in a defer to make sure we pick up credsFile variable
 		defer func() {
-			os.Remove(credsFile) // make sure we remove the temporary credential
+			// make sure we remove the temporary credential
+			os.Remove(credsFile)
+			// if this is the last file in the directory, go ahead and remove it too
+			if files, _ := os.ReadDir(sessionDir); len(files) == 0 {
+				os.RemoveAll(sessionDir)
+			}
 		}()
 
 		var skipping bool
@@ -341,17 +347,7 @@ var serverCmd = &cobra.Command{
 		runHealthCheckServer(logger, healthPort, fwdPort)
 		_args = append(_args, "--port", fmt.Sprintf("%d", fwdPort))
 
-		dataDir := mustFlagString(cmd, "data-dir", true)
-		dataDir, _ = filepath.Abs(filepath.Clean(dataDir))
-
-		if !util.Exists(dataDir) {
-			logger.Fatal("data directory %s does not exist. please create the directory and retry again.", dataDir)
-		}
-		if ok, err := util.IsDirWritable(dataDir); !ok {
-			logger.Fatal("%s", err)
-		}
-
-		logger.Debug("using data directory: %s", dataDir)
+		dataDir := getDataDir(cmd, logger)
 
 		_args = append(_args, "--data-dir", dataDir)
 
@@ -448,9 +444,13 @@ var serverCmd = &cobra.Command{
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
+			sessionDir = filepath.Join(dataDir, sessionId)
+			if err := os.MkdirAll(sessionDir, 0700); err != nil {
+				logger.Fatal("failed to create session directory: %s", err)
+			}
 			if credsFile == "" && session.Credential != nil {
 				// write credential to file
-				credsFile = filepath.Join(dataDir, fmt.Sprintf("eds-%s.creds", session.SessionId))
+				credsFile = filepath.Join(sessionDir, "nats.creds")
 				if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
 					logger.Fatal("failed to write creds to file: %s", err)
 				}
@@ -472,6 +472,7 @@ var serverCmd = &cobra.Command{
 				ForwardInterrupt: true,
 				LogFileSink:      true,
 				ProcessCallback:  processCallback,
+				Dir:              sessionDir,
 			})
 			notificationConsumer.Stop()
 			if err != nil && result == nil {
@@ -483,6 +484,9 @@ var serverCmd = &cobra.Command{
 					sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, result.LogFileBundle)
 				}
 				if ec == 0 {
+					// on success, remove the logs
+					os.Remove(filepath.Join(sessionDir, "server_stderr.txt"))
+					os.Remove(filepath.Join(sessionDir, "server_stdout.txt"))
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
