@@ -139,6 +139,32 @@ The server will automatically detect crashes, report them to Shopmonkey and rest
 
 Coming soon.
 
+# Deployment
+
+You can use Docker to run the server.
+
+The image path is: `us-docker.pkg.dev/shopmonkey-v2/public/eds-server`
+
+Each release will automatically add 2 image tags in the format:
+
+- `us-docker.pkg.dev/shopmonkey-v2/public/eds-server:<version>`
+- `us-docker.pkg.dev/shopmonkey-v2/public/eds-server:latest`
+
+For example, for the v3.0.2 release, the Docker image tag to use is:
+
+`us-docker.pkg.dev/shopmonkey-v2/public/eds-server:v3.0.2`
+
+> [!CAUTION]
+> You should pin the version of the release when referencing the Docker image in your deployment.
+
+When configuring this image in Docker Compose or Kubernetes you may want to pass in arguments to customize.
+
+You should use the arguments without the name of the binary such as:
+
+```
+["server", "--data-dir", "/var/data", "--verbose"]
+```
+
 # Local Development
 
 ## Requirements
