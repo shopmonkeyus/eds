@@ -265,7 +265,7 @@ type notificationConsumer struct {
 	logger  logger.Logger
 	natsurl string
 
-	Notifications <-chan string
+	Notifications chan *Notification
 }
 
 func (c *notificationConsumer) Start(sessionId string, credsFile string) error {
@@ -281,8 +281,23 @@ func (c *notificationConsumer) Start(sessionId string, credsFile string) error {
 	return nil
 }
 
+type Notification struct {
+	Action string `json:"action"`
+	Data   any    `json:"data,omitempty"`
+}
+
+func (n *Notification) String() string {
+	return util.JSONStringify(n)
+}
+
 func (c *notificationConsumer) callback(m *nats.Msg) {
-	c.logger.Trace("received message: %s", string(m.Data))
+	var notification Notification
+	if err := util.DecodeNatsMsg(m, &notification); err != nil {
+		c.logger.Error("failed to decode notification message: %s", err)
+		return
+	}
+	c.logger.Trace("received message: %s", notification.String())
+	c.Notifications <- &notification
 }
 
 func (c *notificationConsumer) Stop() {
@@ -307,7 +322,7 @@ func newNotificationConsumer(logger logger.Logger, natsurl string) *notification
 	return &notificationConsumer{
 		logger:        logger,
 		natsurl:       natsurl,
-		Notifications: make(chan string),
+		Notifications: make(chan *Notification),
 	}
 }
 
@@ -392,6 +407,30 @@ var serverCmd = &cobra.Command{
 			logger.Debug("fork process started with pid: %d", p.Pid)
 		}
 
+		restart := func() {
+			if currentProcess != nil {
+				logger.Info("need to restart child process to reload nats credentials")
+				currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
+			} else {
+				logger.Fatal("no child process to signal on credentials renew")
+			}
+		}
+
+		renew := func() {
+			creds, err := sendRenew(logger, apiurl, apikey, sessionId)
+			if err != nil {
+				logger.Fatal("failed to renew session: %s", err)
+			}
+			if creds != nil {
+				if err := writeCredsToFile(*creds, credsFile); err != nil {
+					logger.Fatal("failed to write creds to file: %s", err)
+				}
+				restart()
+			} else {
+				logger.Trace("no new credentials to renew")
+			}
+		}
+
 		natsurl := mustFlagString(cmd, "server", true)
 		notificationConsumer := newNotificationConsumer(logger, natsurl)
 
@@ -404,25 +443,18 @@ var serverCmd = &cobra.Command{
 			for {
 				select {
 				case <-ticker.C:
-					creds, err := sendRenew(logger, apiurl, apikey, sessionId)
-					if err != nil {
-						logger.Fatal("failed to renew session: %s", err)
+					renew()
+				case notification := <-notificationConsumer.Notifications:
+					switch notification.Action {
+					case "restart":
+						logger.Info("received restart notification")
+						restart()
+					case "renew":
+						logger.Info("received renew notification")
+						renew()
+					default:
+						logger.Warn("unhandled notification: %s", notification.String())
 					}
-					if creds != nil {
-						if err := writeCredsToFile(*creds, credsFile); err != nil {
-							logger.Fatal("failed to write creds to file: %s", err)
-						}
-						if currentProcess != nil {
-							logger.Info("need to restart child process to reload nats credentials")
-							currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
-						} else {
-							logger.Fatal("no child process to signal on credentials renew")
-						}
-					} else {
-						logger.Trace("no new credentials to renew")
-					}
-				case action := <-notificationConsumer.Notifications:
-					logger.Info("received notification: %s", action)
 				}
 			}
 		}()
