@@ -389,7 +389,14 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	return nc, info, nil
 }
 
-func (c *Consumer) Start() error {
+func (c *Consumer) Pause() {
+	c.logger.Debug("pausing")
+	c.subscriber.Drain()
+	c.subscriber = nil
+	c.logger.Debug("paused")
+}
+
+func (c *Consumer) Unpause() error {
 	if c.subscriber != nil {
 		return fmt.Errorf("consumer already started")
 	}
@@ -407,6 +414,17 @@ func (c *Consumer) Start() error {
 		return fmt.Errorf("error starting jetstream consumer: %w", err)
 	}
 	c.subscriber = sub
+	return nil
+}
+
+func (c *Consumer) Start() error {
+	if c.subscriber != nil {
+		return fmt.Errorf("consumer already started")
+	}
+
+	if err := c.Unpause(); err != nil {
+		return err
+	}
 
 	// start the background processor
 	go c.bufferer()

@@ -14,9 +14,8 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/consumer"
+	"github.com/shopmonkeyus/eds-server/internal/notification"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -259,73 +258,6 @@ func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
 	}()
 }
 
-type notificationConsumer struct {
-	nc      *nats.Conn
-	sub     *nats.Subscription
-	logger  logger.Logger
-	natsurl string
-
-	Notifications chan *Notification
-}
-
-func (c *notificationConsumer) Start(sessionId string, credsFile string) error {
-	var err error
-	c.nc, _, err = consumer.NewNatsConnection(c.logger, c.natsurl, credsFile)
-	if err != nil {
-		return fmt.Errorf("failed to create nats connection: %w", err)
-	}
-	c.sub, err = c.nc.Subscribe(fmt.Sprintf("eds.notify.%s.>", sessionId), c.callback)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to eds.notify: %w", err)
-	}
-	return nil
-}
-
-type Notification struct {
-	Action string `json:"action"`
-	Data   any    `json:"data,omitempty"`
-}
-
-func (n *Notification) String() string {
-	return util.JSONStringify(n)
-}
-
-func (c *notificationConsumer) callback(m *nats.Msg) {
-	var notification Notification
-	if err := util.DecodeNatsMsg(m, &notification); err != nil {
-		c.logger.Error("failed to decode notification message: %s", err)
-		return
-	}
-	c.logger.Trace("received message: %s", notification.String())
-	c.Notifications <- &notification
-}
-
-func (c *notificationConsumer) Stop() {
-	if c.sub != nil {
-		if err := c.sub.Unsubscribe(); err != nil {
-			c.logger.Error("failed to unsubscribe from nats: %s", err)
-		}
-		c.sub = nil
-	}
-	if c.nc != nil {
-		c.nc.Close()
-		c.nc = nil
-	}
-}
-
-func (c *notificationConsumer) Restart(sessionId string, credsFile string) error {
-	c.Stop()
-	return c.Start(sessionId, credsFile)
-}
-
-func newNotificationConsumer(logger logger.Logger, natsurl string) *notificationConsumer {
-	return &notificationConsumer{
-		logger:        logger,
-		natsurl:       natsurl,
-		Notifications: make(chan *Notification),
-	}
-}
-
 var serverIgnoreFlags = map[string]bool{
 	"--api-url":        true,
 	"--api-key":        true,
@@ -409,10 +341,10 @@ var serverCmd = &cobra.Command{
 
 		restart := func() {
 			if currentProcess != nil {
-				logger.Info("need to restart child process to reload nats credentials")
+				logger.Info("need to restart")
 				currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
 			} else {
-				logger.Fatal("no child process to signal on credentials renew")
+				logger.Fatal("no child process on restart")
 			}
 		}
 
@@ -431,31 +363,52 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
+		shutdown := func(msg string) {
+			if currentProcess != nil {
+				logger.Info("shutdown requested: %s", msg)
+				currentProcess.Signal(syscall.SIGTERM) // tell the child to shutdown
+			} else {
+				logger.Fatal("no child process to signal on shutdown")
+			}
+		}
+
+		pause := func() {
+			logger.Info("server pause requested")
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/pause", fwdPort))
+			if err != nil {
+				logger.Error("pause failed: %s", err)
+			} else {
+				logger.Debug("pause response: %d", resp.StatusCode)
+			}
+		}
+
+		unpause := func() {
+			logger.Info("server unpause requested")
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/unpause", fwdPort))
+			if err != nil {
+				logger.Error("unpause failed: %s", err)
+			} else {
+				logger.Debug("unpause response: %d", resp.StatusCode)
+			}
+		}
+
 		natsurl := mustFlagString(cmd, "server", true)
-		notificationConsumer := newNotificationConsumer(logger, natsurl)
+
+		// create a notification consumer that will listen for notification actions and handle them here
+		notificationConsumer := notification.New(logger, natsurl, notification.NotificationHandler{
+			Restart:  restart,
+			Renew:    renew,
+			Shutdown: shutdown,
+			Pause:    pause,
+			Unpause:  unpause,
+		})
 
 		go func() {
 			defer util.RecoverPanic(logger)
 			duration, _ := cmd.Flags().GetDuration("renew-interval")
 			logger.Trace("will renew session every %v", duration)
-			ticker := time.NewTicker(duration)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					renew()
-				case notification := <-notificationConsumer.Notifications:
-					switch notification.Action {
-					case "restart":
-						logger.Info("received restart notification")
-						restart()
-					case "renew":
-						logger.Info("received renew notification")
-						renew()
-					default:
-						logger.Warn("unhandled notification: %s", notification.String())
-					}
-				}
+			for range time.Tick(duration) {
+				renew()
 			}
 		}()
 

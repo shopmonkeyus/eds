@@ -36,7 +36,7 @@ func runHealthCheckServerFork(logger logger.Logger, port int) {
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
 		defer util.RecoverPanic(logger)
-		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
+		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), nil); err != nil && err != http.ErrServerClosed {
 			logger.Fatal("failed to start health check server: %s", err)
 		}
 	}()
@@ -135,37 +135,57 @@ var forkCmd = &cobra.Command{
 
 		restartFlag, _ := cmd.Flags().GetBool("restart")
 
+		// the ability to pause and unpause the consumer from HTTP control
+		pauseCh := make(chan bool)
+		http.HandleFunc("/control/pause", func(w http.ResponseWriter, r *http.Request) {
+			pauseCh <- true
+			w.WriteHeader(http.StatusOK)
+		})
+		http.HandleFunc("/control/unpause", func(w http.ResponseWriter, r *http.Request) {
+			pauseCh <- false
+			w.WriteHeader(http.StatusOK)
+		})
+
 		go func() {
 			defer util.RecoverPanic(logger)
 			defer wg.Done()
 			var completed bool
+			var paused bool
+			var localConsumer *consumer.Consumer
+			var err error
 			for !completed {
-				consumer, err := consumer.NewConsumer(consumer.ConsumerConfig{
-					Context:               ctx,
-					Logger:                logger,
-					URL:                   natsurl,
-					Credentials:           creds,
-					Suffix:                consumerSuffix,
-					MaxAckPending:         maxAckPending,
-					MaxPendingBuffer:      maxPendingBuffer,
-					Driver:                driver,
-					ExportTableTimestamps: exportTableTimestamps,
-					Restart:               restartFlag,
-				})
-				if err != nil {
-					logger.Error("error creating consumer: %s", err)
-					os.Exit(3)
+				if !paused && localConsumer == nil {
+					localConsumer, err = consumer.NewConsumer(consumer.ConsumerConfig{
+						Context:               ctx,
+						Logger:                logger,
+						URL:                   natsurl,
+						Credentials:           creds,
+						Suffix:                consumerSuffix,
+						MaxAckPending:         maxAckPending,
+						MaxPendingBuffer:      maxPendingBuffer,
+						Driver:                driver,
+						ExportTableTimestamps: exportTableTimestamps,
+						Restart:               restartFlag,
+					})
+					if err != nil {
+						logger.Error("error creating consumer: %s", err)
+						os.Exit(3)
+					}
 				}
 				select {
 				case <-ctx.Done():
 					completed = true
-				case err := <-consumer.Error():
+					if localConsumer != nil {
+						localConsumer.Stop()
+						localConsumer = nil
+					}
+				case err := <-localConsumer.Error():
 					if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) {
 						logger.Warn("nats server / consumer needs reconnection: %s", err)
 					} else {
 						logger.Error("error from consumer: %s", err)
 					}
-					if err := consumer.Stop(); err != nil {
+					if err := localConsumer.Stop(); err != nil {
 						logger.Error("error stopping consumer: %s", err)
 					}
 					driver.Stop()
@@ -175,9 +195,32 @@ var forkCmd = &cobra.Command{
 					os.Exit(1)
 				case <-restart:
 					logger.Debug("restarting consumer on SIGHUP")
-				}
-				if err := consumer.Stop(); err != nil {
-					logger.Error("error stopping consumer: %s", err)
+					if err := localConsumer.Stop(); err != nil {
+						logger.Error("error stopping consumer: %s", err)
+					}
+					localConsumer = nil
+					paused = false
+				case pause := <-pauseCh:
+					if pause {
+						if !paused {
+							paused = true
+							logger.Debug("pausing")
+							localConsumer.Pause()
+						}
+					} else {
+						if paused {
+							logger.Debug("unpausing")
+							paused = false
+							if err := localConsumer.Unpause(); err != nil {
+								logger.Error("error unpausing: %s", err)
+								driver.Stop()
+								cancel()
+								closer()
+								tracker.Close()
+								os.Exit(1)
+							}
+						}
+					}
 				}
 			}
 		}()
