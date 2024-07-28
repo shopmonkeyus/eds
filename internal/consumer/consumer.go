@@ -69,6 +69,7 @@ type Consumer struct {
 	subscriber      jetstream.ConsumeContext
 	buffer          chan jetstream.Msg
 	pending         []jetstream.Msg
+	started         *time.Time
 	pendingStarted  *time.Time
 	waitGroup       sync.WaitGroup
 	once            sync.Once
@@ -298,10 +299,24 @@ func (c *Consumer) process(msg jetstream.Msg) {
 }
 
 type heartbeat struct {
-	SessionId string `json:"sessionId" msgpack:"sessionId"`
+	SessionId string                `json:"sessionId" msgpack:"sessionId"`
+	Uptime    time.Duration         `json:"uptime" msgpack:"uptime"`
+	Stats     *internal.SystemStats `json:"stats" msgpack:"stats"`
 }
 
-func (c *Consumer) heartbeat(subject string, payload []byte) error {
+func (c *Consumer) heartbeat() error {
+	stats, err := internal.GetSystemStats()
+	if err != nil {
+		return fmt.Errorf("error getting system stats: %w", err)
+	}
+
+	subject := fmt.Sprintf("eds.heartbeat.%s", c.sessionID)
+	payload := []byte(util.JSONStringify(heartbeat{
+		SessionId: c.sessionID,
+		Stats:     stats,
+		Uptime:    time.Duration(time.Since(*c.started).Seconds()),
+	}))
+
 	msg := nats.NewMsg(subject)
 	msgId := util.Hash(time.Now().UnixNano())
 	msg.Header.Set(nats.MsgIdHdr, msgId)
@@ -309,17 +324,15 @@ func (c *Consumer) heartbeat(subject string, payload []byte) error {
 	if err := c.conn.PublishMsg(msg); err != nil {
 		return err
 	}
-	c.logger.Trace("heartbeat sent %s", msgId)
+	c.logger.Trace("heartbeat sent %s with: %v", msgId, string(payload))
 	return nil
 }
 
 // sendHeartbeats sends a heartbeat every minute
 func (c *Consumer) sendHeartbeats() {
-	// payload never changes, so we can just create it once
-	heartbeatSubject := fmt.Sprintf("eds.heartbeat.%s", c.sessionID)
-	heartbeatPayload := []byte(util.JSONStringify(heartbeat{SessionId: c.sessionID}))
+
 	// first heartbeat
-	if err := c.heartbeat(heartbeatSubject, heartbeatPayload); err != nil {
+	if err := c.heartbeat(); err != nil {
 		c.logger.Error("error sending heartbeat: %s", err)
 	}
 	// we dont need the WG here since this doesnt need to gracefully complete
@@ -331,7 +344,7 @@ func (c *Consumer) sendHeartbeats() {
 			c.logger.Debug("context done, stopping heartbeat")
 			return
 		case <-ticker.C:
-			if err := c.heartbeat(heartbeatSubject, heartbeatPayload); err != nil {
+			if err := c.heartbeat(); err != nil {
 				c.logger.Error("error sending heartbeat: %s", err)
 			}
 		}
@@ -415,6 +428,8 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	ctx, cancel := context.WithCancel(config.Context)
 
 	var consumer Consumer
+	started := time.Now()
+	consumer.started = &started
 	consumer.max = config.MaxAckPending
 	consumer.ctx = ctx
 	consumer.cancel = cancel

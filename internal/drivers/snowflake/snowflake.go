@@ -173,7 +173,7 @@ func (p *snowflakeDriver) Flush() error {
 			}
 			sql, c := toSQL(record, p.schema, force)
 			statementCount += c
-			p.logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i, count, strings.TrimRight(sql, "\n"))
+			p.logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i+1, count, strings.TrimRight(sql, "\n"))
 			query.WriteString(sql)
 			if key != "" {
 				cachekeys = append(cachekeys, key)
