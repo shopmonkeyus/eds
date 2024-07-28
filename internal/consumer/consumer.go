@@ -71,6 +71,7 @@ type Consumer struct {
 	pending         []jetstream.Msg
 	started         *time.Time
 	pendingStarted  *time.Time
+	pauseStarted    *time.Time
 	waitGroup       sync.WaitGroup
 	once            sync.Once
 	lock            sync.Mutex
@@ -302,6 +303,7 @@ type heartbeat struct {
 	SessionId string                `json:"sessionId" msgpack:"sessionId"`
 	Uptime    time.Duration         `json:"uptime" msgpack:"uptime"`
 	Stats     *internal.SystemStats `json:"stats" msgpack:"stats"`
+	Paused    *time.Time            `json:"paused,omitempty" msgpack:"paused,omitempty"`
 }
 
 func (c *Consumer) heartbeat() error {
@@ -315,6 +317,7 @@ func (c *Consumer) heartbeat() error {
 		SessionId: c.sessionID,
 		Stats:     stats,
 		Uptime:    time.Duration(time.Since(*c.started).Seconds()),
+		Paused:    c.pauseStarted,
 	}))
 
 	msg := nats.NewMsg(subject)
@@ -393,6 +396,8 @@ func (c *Consumer) Pause() {
 	c.logger.Debug("pausing")
 	c.subscriber.Drain()
 	c.subscriber = nil
+	t := time.Now()
+	c.pauseStarted = &t
 	c.logger.Debug("paused")
 }
 
@@ -414,6 +419,7 @@ func (c *Consumer) Unpause() error {
 		return fmt.Errorf("error starting jetstream consumer: %w", err)
 	}
 	c.subscriber = sub
+	c.pauseStarted = nil
 	return nil
 }
 
