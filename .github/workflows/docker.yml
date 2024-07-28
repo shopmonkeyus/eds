@@ -22,7 +22,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     env:
-      REGION: us-central1
+      REGION: us-central
       ARTIFACT_REPO: public
       IMAGE_NAME: eds-server
     steps:
