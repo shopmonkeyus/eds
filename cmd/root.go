@@ -47,6 +47,22 @@ func mustFlagInt(cmd *cobra.Command, name string, required bool) int {
 	return val
 }
 
+func mustFlagBool(cmd *cobra.Command, name string, required bool) bool {
+	if cmd.Flags().Changed(name) {
+		val, err := cmd.Flags().GetBool(name)
+		if err != nil {
+			fmt.Printf("error: %s\n", err)
+			os.Exit(3)
+		}
+		return val
+	}
+	if required {
+		fmt.Printf("error: required flag --%s missing\n", name)
+		os.Exit(3)
+	}
+	return false
+}
+
 func getOSInt(name string, def int) int {
 	val, ok := os.LookupEnv(name)
 	if !ok {

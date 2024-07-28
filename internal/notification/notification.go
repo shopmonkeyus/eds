@@ -26,6 +26,9 @@ type NotificationHandler struct {
 
 	// Unpause action is called to unpause the driver from processing.
 	Unpause func()
+
+	// Upgrade action is called to upgrade the server version.
+	Upgrade func(version string, url string)
 }
 
 type Notification struct {
@@ -61,10 +64,12 @@ func (c *NotificationConsumer) Start(sessionId string, credsFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create nats connection: %w", err)
 	}
-	c.sub, err = c.nc.Subscribe(fmt.Sprintf("eds.notify.%s.>", sessionId), c.callback)
+	subject := fmt.Sprintf("eds.notify.%s.>", sessionId)
+	c.sub, err = c.nc.Subscribe(subject, c.callback)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to eds.notify: %w", err)
 	}
+	c.logger.Debug("subscribed to: %s", subject)
 	return nil
 }
 
@@ -119,6 +124,21 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		c.handler.Pause()
 	case "unpause":
 		c.handler.Unpause()
+	case "upgrade":
+		var url, version string
+		if v, ok := notification.Data["url"].(string); ok {
+			url = v
+		} else {
+			c.logger.Warn("invalid upgrade notification. missing url for: %s", notification.String())
+			return
+		}
+		if v, ok := notification.Data["version"].(string); ok {
+			version = v
+		} else {
+			c.logger.Warn("invalid upgrade notification. missing version for: %s", notification.String())
+			return
+		}
+		c.handler.Upgrade(version, url)
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

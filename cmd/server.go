@@ -2,14 +2,18 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
@@ -18,6 +22,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
+	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 )
 
@@ -254,6 +259,177 @@ var serverIgnoreFlags = map[string]bool{
 	"--port":           true,
 	"--health-port":    true,
 	"--renew-interval": true,
+	"--wrapper":        true,
+	"--parent":         true,
+}
+
+func collectCommandArgs() []string {
+	var skipping bool
+	var _args []string
+	for _, arg := range os.Args[2:] {
+		if skipping {
+			skipping = false
+			continue
+		}
+		tok := strings.Split(arg, "=")
+		_arg := tok[0]
+		if serverIgnoreFlags[_arg] {
+			skipping = true
+			continue
+		}
+		_args = append(_args, arg)
+	}
+	return _args
+}
+
+// runWrapperLoop will run the main parent process which will fork the child process (server)
+// which acts as a control mechanism for the fork process (which has all the real logic).
+// this loop is only responsible for waiting for a restart signal and then restarting the child process.
+func runWrapperLoop(logger logger.Logger) {
+	logger = logger.WithPrefix("[wrapper]")
+	logger.Trace("running the wrapper loop")
+	port, err := util.GetFreePort()
+	if err != nil {
+		logger.Fatal("failed to get free port: %s", err)
+	}
+
+	parentProcess := os.Args[0] // start of with the original process
+
+	logger.Trace("parent process port is: %d", port)
+
+	exitCode := -1
+	restart := make(chan bool, 1)
+	exited := make(chan bool, 1)
+	var waitGroup sync.WaitGroup
+	var inUpgrade bool
+
+	httphandler := &http.ServeMux{}
+	httpsrv := &http.Server{
+		Addr:           fmt.Sprintf("127.0.0.1:%d", port), // only bind to localhost so we don't expose externally
+		Handler:        httphandler,
+		ReadTimeout:    5 * time.Second,
+		WriteTimeout:   1 * time.Second,
+		IdleTimeout:    5 * time.Minute,
+		MaxHeaderBytes: 1 << 20,
+	}
+	httphandler.HandleFunc("/restart", func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("received restart request")
+		buf, err := io.ReadAll(r.Body)
+		if err != nil {
+			logger.Error("failed to read body: %s", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		r.Body.Close()
+		inUpgrade = true
+		tok := strings.Split(string(buf), ",") // format is: version,command
+		newVersion := tok[0]
+		newCmd := tok[1]
+		logger.Trace("received restart cmd: %s with expected version: %s", newCmd, newVersion)
+		// NOTE: we do this is a separate goroutine so we can respond to the request w/o blocking
+		// since we will need to shutdown the child process
+		go func() {
+			defer util.RecoverPanic(logger)
+			var output bytes.Buffer
+			cmd := exec.Command(newCmd, "version")
+			cmd.Stdout = &output
+			if err := cmd.Run(); err != nil {
+				logger.Error("failed to run new command: %s", err)
+			} else {
+				if newVersion != strings.TrimSpace(output.String()) {
+					logger.Error("new version does not match: %s != %s, not upgrading", newVersion, output.String())
+				} else {
+					logger.Debug("new version matches: %s", newVersion)
+					logger.Debug("swapping out old process: %s with new process: %s", parentProcess, newCmd)
+					parentProcess = newCmd
+				}
+			}
+			// TODO: in all failure cases we need to send back some kind of error response to our API
+			restart <- true
+		}()
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	go func() {
+		defer util.RecoverPanic(logger)
+		if err := httpsrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("failed to start wrapper server: %s", err)
+		}
+	}()
+
+	args := os.Args[1:]
+	args = append(args, "--wrapper")
+	args = append(args, fmt.Sprintf("--parent=%d", port))
+
+	shutdownHTTP := func() {
+		defer util.RecoverPanic(logger)
+		logger.Info("initiating HTTP server shutdown")
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancelShutdown()
+		if err := httpsrv.Shutdown(shutdownCtx); err != nil {
+			logger.Error("HTTP server shutdown error: %s", err)
+		}
+		logger.Info("HTTP server successfully shutdown")
+	}
+
+	var failures int
+	var completed bool
+
+	for failures < maxFailures && !completed {
+		logger.Trace("starting process: %s %s", parentProcess, strings.Join(args, " "))
+		cmd := exec.Command(parentProcess, args...)
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		cmd.Stdin = os.Stdin
+		if err := cmd.Start(); err != nil {
+			logger.Fatal("failed to start: %s", err)
+		}
+		waitGroup.Add(1)
+		go func() {
+			defer util.RecoverPanic(logger)
+			defer waitGroup.Done()
+			if err := cmd.Wait(); err != nil {
+				logger.Error("wrapper process exited: %s", err)
+			}
+			exitCode = cmd.ProcessState.ExitCode()
+			logger.Trace("wrapper process exited with exit code: %d", exitCode)
+			if !completed {
+				exited <- true
+			}
+		}()
+		select {
+		case <-restart:
+			logger.Trace("restarting process")
+			cmd.Process.Signal(syscall.SIGINT)
+		case <-sys.CreateShutdownChannel():
+			logger.Trace("SIGINT received")
+			cmd.Process.Signal(syscall.SIGINT)
+			exitCode = 0
+			completed = true
+		case <-exited:
+			logger.Trace("exit received: %d", exitCode)
+			if inUpgrade && exitCode != 0 {
+				inUpgrade = false
+				failures++
+				parentProcess = os.Args[0] // reset to the original process since the upgrade failed
+				logger.Trace("upgrade failed, resetting to original process and restarting")
+				continue
+			}
+			if exitCode == 0 || exitCode == 1 {
+				completed = true
+			} else {
+				failures++
+				time.Sleep(time.Second * time.Duration(failures))
+			}
+		}
+	}
+
+	logger.Trace("waiting for child processes to exit")
+	waitGroup.Wait()
+	logger.Trace("child process exited")
+	shutdownHTTP()
+	logger.Trace("exit with exit code: %d", exitCode)
+	os.Exit(exitCode)
 }
 
 var serverCmd = &cobra.Command{
@@ -267,6 +443,12 @@ var serverCmd = &cobra.Command{
 		logger = logger.WithPrefix("[server]")
 
 		defer util.RecoverPanic(logger)
+
+		wrapper := mustFlagBool(cmd, "wrapper", false)
+		if !wrapper {
+			runWrapperLoop(logger)
+			return
+		}
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
@@ -287,28 +469,14 @@ var serverCmd = &cobra.Command{
 			}
 		}()
 
-		var skipping bool
-		var _args []string
-		for _, arg := range os.Args[2:] {
-			if skipping {
-				skipping = false
-				continue
-			}
-			tok := strings.Split(arg, "=")
-			_arg := tok[0]
-			if serverIgnoreFlags[_arg] {
-				skipping = true
-				continue
-			}
-			_args = append(_args, arg)
-		}
-
 		port := mustFlagInt(cmd, "port", true)
 		oldHealthPort := mustFlagInt(cmd, "health-port", false)
 		if oldHealthPort > 0 {
 			port = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
 		}
+		parentPort := mustFlagInt(cmd, "parent", true)
 
+		_args := collectCommandArgs()
 		_args = append(_args, "--port", fmt.Sprintf("%d", port))
 		_args = append(_args, "--data-dir", dataDir)
 		_args = append(_args, "--server", server)
@@ -374,6 +542,23 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
+		upgrade := func(version string, url string) {
+			logger.Info("server upgrade requested to version: %s from url: %s", version, url)
+			pause()
+			// TODO - run the upgrade and when completed and ready, exit with special exit code for force a restart
+			// to the new binary
+			var body bytes.Buffer
+			body.WriteString(version)
+			body.WriteString(",")
+			body.WriteString(os.Args[0]) /// FIXME: change this to the new binary
+			resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/restart", parentPort), "text/plain", &body)
+			if err != nil {
+				logger.Error("restart failed: %s", err)
+			} else {
+				logger.Debug("restart response: %d", resp.StatusCode)
+			}
+		}
+
 		natsurl := mustFlagString(cmd, "server", true)
 
 		// create a notification consumer that will listen for notification actions and handle them here
@@ -383,6 +568,7 @@ var serverCmd = &cobra.Command{
 			Shutdown: shutdown,
 			Pause:    pause,
 			Unpause:  unpause,
+			Upgrade:  upgrade,
 		})
 
 		go func() {
@@ -562,4 +748,8 @@ func init() {
 	serverCmd.Flags().MarkHidden("restart")
 	serverCmd.Flags().Duration("renew-interval", time.Hour*24, "the interval to renew the session")
 	serverCmd.Flags().MarkHidden("renew-interval")
+	serverCmd.Flags().Bool("wrapper", false, "running in wrapper mode")
+	serverCmd.Flags().MarkHidden("wrapper")
+	serverCmd.Flags().Int("parent", -1, "the parent pid")
+	serverCmd.Flags().MarkHidden("parent")
 }
