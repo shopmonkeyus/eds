@@ -20,85 +20,81 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest-4-cores
+    runs-on: ubuntu-latest
+    env:
+      REGION: us-central1
+      ARTIFACT_REPO: public
+      IMAGE_NAME: eds-server
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        timeout-minutes: 2
-        with:
-          registry: us-docker.pkg.dev
-          username: _json_key
-          password: ${{ secrets.GCP_SA_KEY }}
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        timeout-minutes: 2
-      - name: Set up Docker Buildx
+
+      - name: Configure Docker Buildx
         uses: docker/setup-buildx-action@v3
-        timeout-minutes: 2
+
+      - name: Configure auth for GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker to use gcloud
+        run: |
+          gcloud --quiet auth configure-docker $REGION-docker.pkg.dev
+
       - name: Get current date
         id: date
         run: echo "date=$(date +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
       - name: Get branch name
         id: branch-name
         uses: tj-actions/branch-names@v8
-      - name: Get the build SHA
-        id: sha
-        env:
-          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
-          PR_SHA: ${{ github.event.pull_request.head.sha }}
-          MERGE_SHA: ${{ github.sha }}
+
+      - name: Construct the tags
+        id: construct_tags
         run: |
-          if [ "$GIT_BRANCH" = "main" ];
-          then
-            echo sha=$MERGE_SHA >> $GITHUB_OUTPUT
-          else
-            echo sha=$PR_SHA >> $GITHUB_OUTPUT
+          # default to the SHA
+          TAGS=${{ github.sha }}
+
+          # if we're on the main branch, add the beta tag
+          if [[ $GITHUB_REF == 'refs/heads/main' ]]; then
+            TAGS="$TAGS beta"
           fi
-      - name: Build and Push
+
+          # if it's a release, use the version and latest tags
+          if [[ $GITHUB_EVENT_NAME == 'release' ]]; then
+            VERSION_TAG=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
+            TAGS="$TAGS $VERSION_TAG latest"
+          fi
+
+          for TAG in $TAGS; do
+            TAG_LIST+="${{ env.REGION }}-docker.pkg.dev/${{ secrets.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:$TAG,"
+          done
+
+          # remove the trailing comma
+          TAG_LIST=${TAG_LIST%,}
+
+          echo tags=$TAG_LIST >> $GITHUB_OUTPUT
+
+      - name: Build and push to Artifact Registry
         uses: docker/build-push-action@v6
         id: push
-        if: github.event_name != 'release'
-        timeout-minutes: 12
+        env:
+          BUILD_DATE: ${{ steps.date.outputs.date }}
+          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
+          GIT_SHA: ${{ github.sha }}
         with:
-          context: .
-          file: Dockerfile
-          build-args: |
-            GIT_SHA=${{ steps.sha.outputs.sha }}
-            GIT_BRANCH=${{ steps.branch-name.outputs.current_branch }}
-            BUILD_DATE=${{ steps.date.outputs.date }}
           push: true
-          platforms: linux/arm64,linux/amd64
-          tags: us-docker.pkg.dev/shopmonkey-v2/public/eds-server:${{ steps.sha.outputs.sha }}
-          labels: org.opencontainers.image.source=https://github.com/shopmonkeyus/eds-server,git.branch=${{ steps.branch-name.outputs.current_branch }},git.sha=${{ steps.sha.outputs.sha }}
-      - name: Build and Push for Release
-        uses: docker/build-push-action@v6
-        id: push_release
-        if: github.event_name == 'release' && github.event.action == 'published'
-        timeout-minutes: 12
-        with:
           context: .
-          file: Dockerfile
+          file: ./Dockerfile
+          tags: ${{ steps.construct_tags.outputs.tags }}
           build-args: |
-            GIT_SHA=${{ steps.sha.outputs.sha }}
-            GIT_BRANCH=${{ steps.branch-name.outputs.current_branch }}
-            BUILD_DATE=${{ steps.date.outputs.date }}
-          push: true
-          platforms: linux/arm64,linux/amd64
-          tags: us-docker.pkg.dev/shopmonkey-v2/public/eds-server:${{ github.event.release.tag_name }}
-          labels: org.opencontainers.image.source=https://github.com/shopmonkeyus/eds-server,git.branch=${{ steps.branch-name.outputs.current_branch }},git.sha=${{ steps.sha.outputs.sha }}
+            BUILD_DATE=$BUILD_DATE
+            GIT_BRANCH=$GIT_BRANCH 
+            GIT_SHA=$GIT_SHA
+
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
-        if: github.event_name != 'release'
         with:
-          subject-name: us-docker.pkg.dev/shopmonkey-v2/public/eds-server
+          subject-name: ${{ env.REGION }}-docker.pkg.dev/${{ secrets.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-      - name: Generate artifact attestation for release
-        uses: actions/attest-build-provenance@v1
-        if: github.event_name == 'release' && github.event.action == 'published'
-        with:
-          subject-name: us-docker.pkg.dev/shopmonkey-v2/public/eds-server
-          subject-digest: ${{ steps.push_release.outputs.digest }}
           push-to-registry: true
