@@ -241,7 +241,7 @@ func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
 
 // Description is the description of the driver.
 func (p *sqlserverDriver) Description() string {
-	return "Supports streaming EDS messages to a sqlserver database."
+	return "Supports streaming EDS messages to a Microsoft SQL Server database."
 }
 
 // ExampleURL should return an example URL for configuring the driver.

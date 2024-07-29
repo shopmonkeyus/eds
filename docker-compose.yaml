@@ -17,7 +17,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: eds
       MYSQL_USER: eds
-      MYSQL_PASSWORD: eds
+      MYSQL_PASSWORD: Asdf1234!
       MYSQL_DATABASE: eds
     ports:
       - 13306:3306
@@ -25,7 +25,7 @@ services:
     image: postgres
     environment:
       POSTGRES_USER: eds
-      POSTGRES_PASSWORD: eds
+      POSTGRES_PASSWORD: Asdf1234!
       POSTGRES_DB: eds
     ports:
       - 15432:5432
