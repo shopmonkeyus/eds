@@ -202,8 +202,8 @@ func createSQL(s *internal.Schema) string {
 }
 
 func parseURLToDSN(urlstr string) (string, error) {
-	// Example input: "sqlserver://sa:eds@localhost:11433?database=eds"
-	// Desired output: "sqlserver://sa:eds@localhost:11433?database=eds&multiStatements=true"
+	// Example input: "sqlserver://sa:eds@localhost:11433/database=eds"
+	// Desired output: "sqlserver://sa:eds@localhost:11433/database=eds&multiStatements=true"
 	u, err := url.Parse(urlstr)
 	if err != nil {
 		return "", fmt.Errorf("error parsing url: %w", err)
@@ -213,7 +213,7 @@ func parseURLToDSN(urlstr string) (string, error) {
 
 	// Start building the DSN string
 	var dsn strings.Builder
-	dsn.WriteString(u.Scheme) // Add the scheme (e.g., "sqlserver")
+	dsn.WriteString("sqlserver") // Add the scheme (e.g., "sqlserver")
 	dsn.WriteString("://")
 
 	if u.User != nil {
@@ -228,7 +228,7 @@ func parseURLToDSN(urlstr string) (string, error) {
 	}
 
 	if encoded := vals.Encode(); encoded != "" {
-		dsn.WriteString("?")
+		dsn.WriteString("/")
 		dsn.WriteString(encoded)
 	}
 

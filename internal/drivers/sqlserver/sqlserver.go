@@ -246,7 +246,7 @@ func (p *sqlserverDriver) Description() string {
 
 // ExampleURL should return an example URL for configuring the driver.
 func (p *sqlserverDriver) ExampleURL() string {
-	return "sqlserver://user:password@localhost:11433?database"
+	return "sqlserver://user:password@localhost:11433/database"
 }
 
 // Help should return a detailed help documentation for the driver.
