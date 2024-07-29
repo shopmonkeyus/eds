@@ -5,7 +5,10 @@ import (
 	glog "log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
@@ -18,6 +21,7 @@ import (
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/s3"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/snowflake"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/sqlserver"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
@@ -46,6 +50,22 @@ func mustFlagInt(cmd *cobra.Command, name string, required bool) int {
 	return val
 }
 
+func mustFlagBool(cmd *cobra.Command, name string, required bool) bool {
+	if cmd.Flags().Changed(name) {
+		val, err := cmd.Flags().GetBool(name)
+		if err != nil {
+			fmt.Printf("error: %s\n", err)
+			os.Exit(3)
+		}
+		return val
+	}
+	if required {
+		fmt.Printf("error: required flag --%s missing\n", name)
+		os.Exit(3)
+	}
+	return false
+}
+
 func getOSInt(name string, def int) int {
 	val, ok := os.LookupEnv(name)
 	if !ok {
@@ -59,10 +79,14 @@ func getOSInt(name string, def int) int {
 }
 
 type logFileSink struct {
-	f *os.File
+	logDir string
+	lock   sync.Mutex
+	f      *os.File
 }
 
 func (s *logFileSink) Write(buf []byte) (int, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	return s.f.Write(buf)
 }
 
@@ -70,23 +94,47 @@ func (s *logFileSink) Close() error {
 	return s.f.Close()
 }
 
-func newLogFileSync(file string) (*logFileSink, error) {
-	of, err := os.Create(file)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open log file: %w", err)
+// Rotate creates a new log file and closes the old one
+// returns the old file name
+func (s *logFileSink) Rotate() (string, error) {
+	var old string
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.f != nil {
+		if err := s.Close(); err != nil {
+			return "", err
+		}
+		old = s.f.Name()
 	}
-	return &logFileSink{f: of}, nil
+	if err := os.MkdirAll(s.logDir, 0755); err != nil {
+		return "", err
+	}
+	f, err := os.Create(filepath.Join(s.logDir, fmt.Sprintf("eds-server-%s.log", time.Now().UTC().Format(time.RFC3339))))
+	if err != nil {
+		return "", err
+	}
+	s.f = f
+	return old, nil
+}
+
+func newLogFileSink(dir string) (*logFileSink, error) {
+	sink := logFileSink{
+		logDir: dir,
+	}
+	if _, err := sink.Rotate(); err != nil {
+		return nil, fmt.Errorf("error creating log file: %s", err)
+	}
+	return &sink, nil
 }
 
 type CloseFunc func()
 
-func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
+func newLogger(cmd *cobra.Command) logger.Logger {
 	ts, _ := cmd.Flags().GetBool("timestamp")
 	if !ts {
 		glog.SetFlags(0)
 	}
 	glog.SetOutput(os.Stdout)
-	sink, _ := cmd.Flags().GetString("log-file-sink")
 	silent, _ := cmd.Flags().GetBool("silent")
 	var log logger.Logger
 	if silent {
@@ -99,18 +147,16 @@ func newLogger(cmd *cobra.Command) (logger.Logger, CloseFunc) {
 			log = logger.NewConsoleLogger(logger.LevelInfo)
 		}
 	}
-	if sink != "" {
+
+	return log
+}
+
+func newLoggerWithSink(log logger.Logger, sink logger.Sink) logger.Logger {
+	if sink != nil {
 		log.Trace("using log file sink: %s", sink)
-		logSync, err := newLogFileSync(sink)
-		if err != nil {
-			log.Error("failed to open log file: %s. %s", sink, err)
-			os.Exit(3)
-		}
-		return logger.NewMultiLogger(log, logger.NewJSONLoggerWithSink(logSync, logger.LevelTrace)), func() {
-			logSync.Close()
-		}
+		return logger.NewMultiLogger(log, logger.NewJSONLoggerWithSink(sink, logger.LevelTrace))
 	}
-	return log, func() {}
+	return log
 }
 
 func setHTTPHeader(req *http.Request, apiKey string) {
@@ -121,6 +167,28 @@ func setHTTPHeader(req *http.Request, apiKey string) {
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+}
+
+func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
+	dataDir := mustFlagString(cmd, "data-dir", true)
+	dataDir, _ = filepath.Abs(filepath.Clean(dataDir))
+
+	if !util.Exists(dataDir) {
+		logger.Fatal("data directory %s does not exist. please create the directory and retry again.", dataDir)
+	}
+	if ok, err := util.IsDirWritable(dataDir); !ok {
+		logger.Fatal("%s", err)
+	}
+
+	logger.Debug("using data directory: %s", dataDir)
+	return dataDir
+}
+
+func getSchemaAndTableFiles(datadir string) (string, string) {
+	// assume these are default in the same directory as the data-dir
+	schemaFile := filepath.Join(datadir, "schema.json")
+	tablesFile := filepath.Join(datadir, "tables.json")
+	return schemaFile, tablesFile
 }
 
 // rootCmd represents the base command when called without any subcommands

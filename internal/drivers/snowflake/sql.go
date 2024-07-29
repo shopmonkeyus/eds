@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,11 +14,25 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
-func quoteString(val string) string {
-	return "'" + strings.ReplaceAll(val, "'", "''") + "'"
+var mustEscape = regexp.MustCompile(`['\n\r\t]`)
+
+func quoteString(val string, fn string) string {
+	if val == "NULL" {
+		return val
+	}
+	var res string
+	if fn != "" || mustEscape.MatchString(val) {
+		res = "$$" + val + "$$"
+	} else {
+		res = "'" + val + "'"
+	}
+	if fn != "" {
+		return fn + "(" + res + ")"
+	}
+	return res
 }
 
-func quoteValue(value any) string {
+func quoteValue(value any, fn string) string {
 	var str string
 	switch arg := value.(type) {
 	case nil:
@@ -63,7 +78,7 @@ func quoteValue(value any) string {
 			str = strconv.FormatBool(*arg)
 		}
 	case string:
-		str = quoteString(arg)
+		str = quoteString(arg, fn)
 	case *time.Time:
 		if arg == nil {
 			str = "NULL"
@@ -73,7 +88,7 @@ func quoteValue(value any) string {
 	case time.Time:
 		str = arg.Truncate(time.Microsecond).Format("'2006-01-02 15:04:05.999999999Z07:00:00'")
 	case map[string]interface{}:
-		str = quoteString(util.JSONStringify(arg))
+		str = quoteString(util.JSONStringify(arg), fn)
 	default:
 		value := reflect.ValueOf(arg)
 		if value.Kind() == reflect.Ptr {
@@ -81,92 +96,125 @@ func quoteValue(value any) string {
 				str = "NULL"
 			} else {
 				if value.Elem().Kind() == reflect.Struct {
-					str = quoteString(util.JSONStringify(arg))
+					str = quoteString(util.JSONStringify(arg), fn)
 				} else {
-					str = quoteString(fmt.Sprintf("%v", value.Elem().Interface()))
+					str = quoteString(fmt.Sprintf("%v", value.Elem().Interface()), fn)
 				}
 			}
 		} else {
-			str = quoteString(util.JSONStringify(arg))
+			str = quoteString(util.JSONStringify(arg), fn)
 		}
 	}
 	return str
 }
 
-func toSQL(record *util.Record, schema internal.SchemaMap) (string, error) {
+func toDeleteSQL(record *util.Record) string {
+	var sql strings.Builder
+	sql.WriteString("DELETE FROM ")
+	sql.WriteString(util.QuoteIdentifier(record.Table))
+	sql.WriteString(" WHERE ")
+	sql.WriteString(util.QuoteIdentifier("id"))
+	sql.WriteString("=")
+	sql.WriteString(quoteValue(record.Id, ""))
+	sql.WriteString(";\n")
+	return sql.String()
+}
+
+func nullableValue(c internal.SchemaProperty, wrap bool) string {
+	if c.Nullable {
+		return "NULL"
+	} else {
+		switch c.Type {
+		case "object":
+			if wrap {
+				return "PARSE_JSON('{}')"
+			}
+			return "'{}'"
+		case "array":
+			if wrap {
+				return "PARSE_JSON('[]')"
+			}
+			return "'[]'"
+		case "number", "integer":
+			return "0"
+		case "boolean":
+			return "false"
+		default:
+			return "''"
+		}
+	}
+}
+
+func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string, int) {
 	var sql strings.Builder
 	model := schema[record.Table]
-	if record.Operation == "DELETE" {
-		sql.WriteString("DELETE FROM ")
-		sql.WriteString(util.QuoteIdentifier(record.Table))
-		sql.WriteString(" WHERE ")
-		sql.WriteString(util.QuoteIdentifier("id"))
-		sql.WriteString("=")
-		sql.WriteString(quoteValue(record.Id))
-		sql.WriteString(";\n")
-	} else {
-		sql.WriteString("MERGE INTO ")
-		sql.WriteString(util.QuoteIdentifier(record.Table))
-		sql.WriteString(" USING (SELECT ")
-		sql.WriteString(util.QuoteIdentifier("id"))
-		sql.WriteString(" FROM ")
-		sql.WriteString(util.QuoteIdentifier(record.Table))
-		sql.WriteString(" WHERE ")
-		sourcePredicate := fmt.Sprintf("%s=%s", util.QuoteIdentifier("id"), quoteValue(record.Id))
-		sourceNullPredicate := fmt.Sprintf("NULL AS %s", util.QuoteIdentifier("id"))
-		targetPredicate := fmt.Sprintf("source.%s=%s.%s", util.QuoteIdentifier("id"), util.QuoteIdentifier(record.Table), util.QuoteIdentifier("id"))
-		var columns []string
-		for _, name := range model.Columns {
-			columns = append(columns, util.QuoteIdentifier(name))
-		}
-		var insertVals []string
-		var updateValues []string
-		if record.Operation == "UPDATE" {
+	var count int
+	if exists || record.Operation == "DELETE" {
+		sql.WriteString(toDeleteSQL(record))
+		count++
+	}
+	if record.Operation != "DELETE" {
+		if record.Operation == "INSERT" {
+			var columns []string
+			for _, name := range model.Columns {
+				columns = append(columns, util.QuoteIdentifier(name))
+			}
+			var insertVals []string
+			for _, name := range model.Columns {
+				c := model.Properties[name]
+				if val, ok := record.Object[name]; ok {
+					var fn string
+					switch c.Type {
+					case "object":
+						fn = "PARSE_JSON"
+					case "array":
+						if c.Items != nil && (c.Items.Type == "object" || c.Items.Type == "string") {
+							fn = "PARSE_JSON"
+						} else {
+							fn = "TO_VARIANT"
+						}
+					}
+					v := quoteValue(val, fn)
+					insertVals = append(insertVals, v)
+				} else {
+					insertVals = append(insertVals, nullableValue(c, true))
+				}
+			}
+			sql.WriteString("INSERT INTO ")
+			sql.WriteString(util.QuoteIdentifier(record.Table))
+			sql.WriteString(" (")
+			sql.WriteString(strings.Join(columns, ","))
+			sql.WriteString(") SELECT ")
+			sql.WriteString(strings.Join(insertVals, ","))
+			sql.WriteString(";\n")
+		} else {
+			// update
+			var updateValues []string
 			for _, name := range record.Diff {
 				if !util.SliceContains(model.Columns, name) {
 					continue
 				}
 				if val, ok := record.Object[name]; ok {
-					v := quoteValue(val)
+					v := quoteValue(val, "")
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
 				} else {
-					updateValues = append(updateValues, "NULL")
+					c := model.Properties[name]
+					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), nullableValue(c, false)))
 				}
 			}
-			for _, name := range model.Columns {
-				if val, ok := record.Object[name]; ok {
-					v := quoteValue(val)
-					insertVals = append(insertVals, v)
-				} else {
-					insertVals = append(insertVals, "NULL")
-				}
-			}
-		} else {
-			for _, name := range model.Columns {
-				if val, ok := record.Object[name]; ok {
-					v := quoteValue(val)
-					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
-					insertVals = append(insertVals, v)
-				} else {
-					updateValues = append(updateValues, "NULL")
-					insertVals = append(insertVals, "NULL")
-				}
-			}
+			sql.WriteString("UPDATE ")
+			sql.WriteString(util.QuoteIdentifier(record.Table))
+			sql.WriteString(" SET ")
+			sql.WriteString(strings.Join(updateValues, ","))
+			sql.WriteString(" WHERE ")
+			sql.WriteString(util.QuoteIdentifier("id"))
+			sql.WriteString("=")
+			sql.WriteString(quoteValue(record.Id, ""))
+			sql.WriteString(";\n")
 		}
-		sql.WriteString(sourcePredicate)
-		sql.WriteString(" UNION SELECT ")
-		sql.WriteString(sourceNullPredicate)
-		sql.WriteString(" LIMIT 1) AS source ON ")
-		sql.WriteString(targetPredicate)
-		sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
-		sql.WriteString(strings.Join(updateValues, ","))
-		sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
-		sql.WriteString(strings.Join(columns, ","))
-		sql.WriteString(") VALUES (")
-		sql.WriteString(strings.Join(insertVals, ","))
-		sql.WriteString(");\n")
+		count++
 	}
-	return sql.String(), nil
+	return sql.String(), count
 }
 
 func getConnectionStringFromURL(urlString string) (string, error) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/shopmonkeyus/eds-server/internal/tracker"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -25,6 +26,9 @@ type DriverConfig struct {
 
 	// SchemaRegistry is the schema registry to use for the driver.
 	SchemaRegistry SchemaRegistry
+
+	// Tracker is the local (on disk) database for tracking stuff that the driver can use.
+	Tracker *tracker.Tracker
 }
 
 // DriverSessionHandler is for drivers that want to receive the session id
@@ -66,6 +70,9 @@ type DriverAlias interface {
 // DriverHelp is an interface that Drivers implement for controlling the help system.
 type DriverHelp interface {
 
+	// Name is a unique name for the driver.
+	Name() string
+
 	// Description is the description of the driver.
 	Description() string
 
@@ -77,6 +84,7 @@ type DriverHelp interface {
 }
 
 type DriverMetadata struct {
+	Scheme         string
 	Name           string
 	Description    string
 	ExampleURL     string
@@ -90,18 +98,48 @@ var driverAliasRegistry = map[string]string{}
 // GetDriverMetadata returns the metadata for all the registered drivers.
 func GetDriverMetadata() []DriverMetadata {
 	var res []DriverMetadata
-	for name, driver := range driverRegistry {
+	for scheme, driver := range driverRegistry {
 		if help, ok := driver.(DriverHelp); ok {
 			res = append(res, DriverMetadata{
-				Name:           name,
+				Scheme:         scheme,
+				Name:           help.Name(),
 				Description:    help.Description(),
 				ExampleURL:     help.ExampleURL(),
 				Help:           help.Help(),
-				SupportsImport: importerRegistry[name] != nil,
+				SupportsImport: importerRegistry[scheme] != nil,
 			})
 		}
 	}
 	return res
+}
+
+// GetDriverMetadataForURL returns the metadata for a specific url or nil if not supported.
+func GetDriverMetadataForURL(urlString string) (*DriverMetadata, error) {
+	u, err := url.Parse(urlString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+	proto := u.Scheme
+	for scheme, driver := range driverRegistry {
+		if scheme == proto {
+			if help, ok := driver.(DriverHelp); ok {
+				return &DriverMetadata{
+					Scheme:         scheme,
+					Name:           help.Name(),
+					Description:    help.Description(),
+					ExampleURL:     help.ExampleURL(),
+					Help:           help.Help(),
+					SupportsImport: importerRegistry[scheme] != nil,
+				}, nil
+			} else {
+				return &DriverMetadata{
+					Scheme: scheme,
+					Name:   scheme,
+				}, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // Register registers a driver for a given protocol.
@@ -115,7 +153,7 @@ func RegisterDriver(protocol string, driver Driver) {
 }
 
 // NewDriver creates a new driver for the given URL.
-func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry) (Driver, error) {
+func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry, tracker *tracker.Tracker) (Driver, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
@@ -138,6 +176,7 @@ func NewDriver(ctx context.Context, logger logger.Logger, urlString string, regi
 			URL:            urlString,
 			Logger:         logger.WithPrefix(fmt.Sprintf("[%s]", u.Scheme)),
 			SchemaRegistry: registry,
+			Tracker:        tracker,
 		}); err != nil {
 			return nil, err
 		}
