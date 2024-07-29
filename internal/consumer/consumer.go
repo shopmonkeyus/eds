@@ -1,6 +1,7 @@
 package consumer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	cnats "github.com/shopmonkeyus/go-common/nats"
+	"github.com/vmihailenco/msgpack"
 )
 
 const (
@@ -313,21 +315,28 @@ func (c *Consumer) heartbeat() error {
 	}
 
 	subject := fmt.Sprintf("eds.heartbeat.%s", c.sessionID)
-	payload := []byte(util.JSONStringify(heartbeat{
+
+	hb := heartbeat{
 		SessionId: c.sessionID,
 		Stats:     stats,
 		Uptime:    time.Duration(time.Since(*c.started).Seconds()),
 		Paused:    c.pauseStarted,
-	}))
+	}
 
+	buffer := bytes.Buffer{}
+	enc := msgpack.NewEncoder(&buffer).UseJSONTag(true)
+	if err := enc.Encode(hb); err != nil {
+		return fmt.Errorf("error encoding heartbeat: %w", err)
+	}
 	msg := nats.NewMsg(subject)
 	msgId := util.Hash(time.Now().UnixNano())
 	msg.Header.Set(nats.MsgIdHdr, msgId)
-	msg.Data = payload
+	msg.Header.Set("content-encoding", "msgpack")
+	msg.Data = buffer.Bytes()
 	if err := c.conn.PublishMsg(msg); err != nil {
 		return err
 	}
-	c.logger.Trace("heartbeat sent %s with: %v", msgId, string(payload))
+	c.logger.Trace("heartbeat sent %s with: %v", msgId, util.JSONStringify(hb))
 	return nil
 }
 

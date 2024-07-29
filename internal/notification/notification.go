@@ -29,11 +29,14 @@ type NotificationHandler struct {
 
 	// Upgrade action is called to upgrade the server version.
 	Upgrade func(version string, url string)
+
+	// SendLogs action is called to send logs to the server.
+	SendLogs func()
 }
 
 type Notification struct {
-	Action string         `json:"action"`
-	Data   map[string]any `json:"data,omitempty"`
+	Action string         `json:"action" msgpack:"action"`
+	Data   map[string]any `json:"data,omitempty" msgpack:"data,omitempty"`
 }
 
 func (n *Notification) String() string {
@@ -139,6 +142,8 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 			return
 		}
 		c.handler.Upgrade(version, url)
+	case "sendlogs":
+		c.handler.SendLogs()
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}
