@@ -239,6 +239,10 @@ func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
 	return nil
 }
 
+func (p *sqlserverDriver) Name() string {
+	return "SQL Server"
+}
+
 // Description is the description of the driver.
 func (p *sqlserverDriver) Description() string {
 	return "Supports streaming EDS messages to a Microsoft SQL Server database."
