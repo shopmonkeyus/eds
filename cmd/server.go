@@ -253,7 +253,7 @@ func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessio
 	}
 }
 
-func getUploadURL(logger logger.Logger, apiURL string, apiKey string, sessionId string) (string, error) {
+func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, sessionId string) (string, error) {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/v3/eds/%s/log", apiURL, sessionId), strings.NewReader("{}"))
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
@@ -262,19 +262,19 @@ func getUploadURL(logger logger.Logger, apiURL string, apiKey string, sessionId 
 	retry := util.NewHTTPRetry(req)
 	resp, err := retry.Do()
 	if err != nil {
-		return "", fmt.Errorf("failed to send session end: %w", err)
+		return "", fmt.Errorf("failed to get log upload url: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to send session end. status code=%d. %s", resp.StatusCode, string(buf))
+		return "", fmt.Errorf("failed to get log upload url. status code=%d. %s", resp.StatusCode, string(buf))
 	}
 	var s sessionEndResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 	if !s.Success {
-		return "", fmt.Errorf("failed to end session: %s", s.Message)
+		return "", fmt.Errorf("failed to get log upload url: %s", s.Message)
 	}
 	logger.Trace("session %s log url received: %s", sessionId, s.Data.URL)
 	return s.Data.URL, nil
@@ -619,7 +619,7 @@ var serverCmd = &cobra.Command{
 			}
 			compressedLogFile := logFile + ".gz"
 			defer os.Remove(compressedLogFile)
-			url, err := getUploadURL(logger, apiurl, apikey, sessionId)
+			url, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 			if err != nil {
 				logger.Error("failed to get upload URL: %s", err)
 				return
