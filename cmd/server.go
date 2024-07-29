@@ -26,7 +26,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version string // set in main
+var Version string                // set in main
+var ShopmonkeyPublicPGPKey string // set in main
 
 const maxFailures = 5
 
