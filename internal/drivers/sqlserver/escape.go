@@ -18,7 +18,6 @@
 package sqlserver
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -237,17 +236,6 @@ func quoteValue(arg any) string {
 		}
 	}
 	return string(buf)
-}
-
-func doubleSingleQuotes(input []byte) []byte {
-	var result bytes.Buffer
-	for _, b := range input {
-		if b == '\'' {
-			result.WriteByte('\'')
-		}
-		result.WriteByte(b)
-	}
-	return result.Bytes()
 }
 
 func appendSQLArgBool(buf []byte, v bool) []byte {
