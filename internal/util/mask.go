@@ -30,7 +30,9 @@ func MaskURL(urlString string) (string, error) {
 	p := u.Path
 	if p != "/" {
 		str.WriteString("/")
-		str.WriteString(cstr.Mask(p[1:]))
+		if len(p) > 1 && p[0] == '/' {
+			str.WriteString(cstr.Mask(p[1:]))
+		}
 	}
 	qs := u.Query().Encode()
 	if qs != "" {
