@@ -183,7 +183,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 }
 
 func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, strings.NewReader(util.JSONStringify(map[string]any{})))
+	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, strings.NewReader("{}"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
@@ -251,6 +251,33 @@ func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessio
 	if errored {
 		logger.Info("error log files saved to %s for session: %s", logfile, sessionId)
 	}
+}
+
+func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, sessionId string) (string, error) {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/v3/eds/%s/log", apiURL, sessionId), strings.NewReader("{}"))
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	setHTTPHeader(req, apiKey)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to get log upload url: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		buf, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to get log upload url. status code=%d. %s", resp.StatusCode, string(buf))
+	}
+	var s sessionEndResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	if !s.Success {
+		return "", fmt.Errorf("failed to get log upload url: %s", s.Message)
+	}
+	logger.Trace("session %s log url received: %s", sessionId, s.Data.URL)
+	return s.Data.URL, nil
 }
 
 var serverIgnoreFlags = map[string]bool{
@@ -438,8 +465,7 @@ var serverCmd = &cobra.Command{
 	Short: "Run the server",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		logger, closer := newLogger(cmd)
-		closer()
+		logger := newLogger(cmd)
 
 		logger = logger.WithPrefix("[server]")
 
@@ -560,6 +586,53 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
+		sendLogs := func() {
+			// TODO: lock this so we don't rotate the logs while we are uploading them!
+			logger.Info("server logfile requested")
+			if sessionId == "" {
+				logger.Error("no session ID to rotate logs")
+				return
+			}
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/logfile", port))
+			if err != nil {
+				logger.Error("logfile failed: %s", err)
+				return
+			}
+			logger.Debug("logfile response: %d", resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				logger.Error("logfile failed: %d", resp.StatusCode)
+				return
+			}
+			defer resp.Body.Close()
+
+			buf, err := io.ReadAll(resp.Body)
+			if err != nil {
+				logger.Error("failed to read body: %s", err)
+				return
+			}
+			logFile := string(buf)
+			logger.Debug("uploading logfile: %s", logFile)
+			// gzip the log file, do this first in case we get an error!
+			if err := util.GzipFile(logFile); err != nil {
+				logger.Error("failed to compress log file: %s", err)
+				return
+			}
+			compressedLogFile := logFile + ".gz"
+			defer os.Remove(compressedLogFile)
+			url, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
+			if err != nil {
+				logger.Error("failed to get upload URL: %s", err)
+				return
+			}
+			if err := uploadLogs(logger, url, compressedLogFile); err != nil {
+				logger.Error("failed to upload logs to %s: %s", url, err)
+				return
+			}
+			// fork will be done writing to the file, so we can remove it
+			logger.Debug("removing old logfile: %s", logFile)
+			os.Remove(logFile)
+		}
+
 		natsurl := mustFlagString(cmd, "server", true)
 
 		// create a notification consumer that will listen for notification actions and handle them here
@@ -570,14 +643,25 @@ var serverCmd = &cobra.Command{
 			Pause:    pause,
 			Unpause:  unpause,
 			Upgrade:  upgrade,
+			SendLogs: sendLogs,
 		})
 
+		// setup tickers
+		duration, _ := cmd.Flags().GetDuration("renew-interval")
+		logger.Trace("will renew session every %v", duration)
+		renewTicker := time.NewTicker(duration)
+		logSenderTicker := time.NewTicker(time.Hour)
+		defer renewTicker.Stop()
+		defer logSenderTicker.Stop()
 		go func() {
 			defer util.RecoverPanic(logger)
-			duration, _ := cmd.Flags().GetDuration("renew-interval")
-			logger.Trace("will renew session every %v", duration)
-			for range time.Tick(duration) {
-				renew()
+			for {
+				select {
+				case <-logSenderTicker.C:
+					sendLogs()
+				case <-renewTicker.C:
+					renew()
+				}
 			}
 		}()
 
@@ -619,7 +703,6 @@ var serverCmd = &cobra.Command{
 				SaveLogs:         true,
 				WriteToStd:       true,
 				ForwardInterrupt: true,
-				LogFileSink:      true,
 				ProcessCallback:  processCallback,
 				Dir:              sessionDir,
 			})

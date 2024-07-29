@@ -421,8 +421,7 @@ var importCmd = &cobra.Command{
 		single, _ := cmd.Flags().GetBool("single")
 		dir := mustFlagString(cmd, "dir", false)
 
-		logger, closer := newLogger(cmd)
-		defer closer()
+		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[import]")
 
 		dataDir := getDataDir(cmd, logger)

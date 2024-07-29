@@ -37,9 +37,9 @@ type SystemStats struct {
 		FlushDuration float64
 		PendingEvents float64
 		TotalEvents   float64
-	}
-	Memory *mem.VirtualMemoryStat
-	Load   *load.AvgStat
+	} `json:"metrics"`
+	Memory *mem.VirtualMemoryStat `json:"memory"`
+	Load   *load.AvgStat          `json:"load"`
 }
 
 // collect calls the function for each metric associated with the Collector

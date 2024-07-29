@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -49,16 +50,20 @@ var forkCmd = &cobra.Command{
 		serverStarted := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		logger, closer := newLogger(cmd)
-		defer closer()
-		logger = logger.WithPrefix("[fork]")
+		logger := newLogger(cmd)
+		datadir := mustFlagString(cmd, "data-dir", true)
+		sink, err := newLogFileSink(filepath.Join(datadir, "logs"))
+		if err != nil {
+			logger.Error("error creating log file sink: %s", err)
+		}
+		defer sink.Close()
+		logger = newLoggerWithSink(logger, sink).WithPrefix("[fork]")
 
 		defer util.RecoverPanic(logger)
 
 		natsurl := mustFlagString(cmd, "server", true)
 		url := mustFlagString(cmd, "url", true)
 		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
-		datadir := mustFlagString(cmd, "data-dir", true)
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
@@ -140,6 +145,16 @@ var forkCmd = &cobra.Command{
 		http.HandleFunc("/control/shutdown", func(w http.ResponseWriter, r *http.Request) {
 			restart <- syscall.SIGTERM
 			w.WriteHeader(http.StatusOK)
+		})
+		http.HandleFunc("/control/logfile", func(w http.ResponseWriter, r *http.Request) {
+			fn, err := sink.Rotate()
+			if err != nil {
+				logger.Error("error rotating log file: %s", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fn))
 		})
 
 		go func() {
