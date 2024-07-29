@@ -129,6 +129,11 @@ func (p *kafkaDriver) Flush() error {
 	return nil
 }
 
+// Name is a unique name for the driver.
+func (p *kafkaDriver) Name() string {
+	return "Kafka"
+}
+
 // Description is the description of the driver.
 func (p *kafkaDriver) Description() string {
 	return "Supports streaming EDS messages to a Kafka topic."

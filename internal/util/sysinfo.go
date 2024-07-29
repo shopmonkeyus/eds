@@ -6,23 +6,27 @@ import (
 	"runtime"
 
 	"github.com/denisbrodbeck/machineid"
+	"github.com/shirou/gopsutil/v4/host"
 )
 
 // SystemInfo returns the operating system details
 type SystemInfo struct {
-	NumCPU       int64  `json:"num_cpu"`
-	OS           string `json:"os"`
-	Architecture string `json:"architecture"`
-	GoVersion    string `json:"go_version"`
+	Host      *host.InfoStat `json:"host"`
+	NumCPU    int64          `json:"num_cpu"`
+	GoVersion string         `json:"go_version"`
 }
 
 // GetSystemInfo returns info about the system
 func GetSystemInfo() (*SystemInfo, error) {
 	var s SystemInfo
-	s.OS = runtime.GOOS
+	var err error
+	s.Host, err = host.Info()
+	if err != nil {
+		return nil, err
+	}
 	s.NumCPU = int64(runtime.NumCPU())
-	s.Architecture = runtime.GOARCH
 	s.GoVersion = runtime.Version()[2:]
+
 	return &s, nil
 }
 

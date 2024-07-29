@@ -1,12 +1,16 @@
 package main
 
 import (
+	_ "embed"
 	"os"
 
 	"github.com/shopmonkeyus/eds-server/cmd"
 )
 
 var version = "dev"
+
+//go:embed shopmonkey.asc
+var shopmonkeyPublicPGPKey string
 
 func main() {
 	if version == "dev" {
@@ -15,5 +19,6 @@ func main() {
 		}
 	}
 	cmd.Version = version
+	cmd.ShopmonkeyPublicPGPKey = shopmonkeyPublicPGPKey
 	cmd.Execute()
 }

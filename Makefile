@@ -1,4 +1,4 @@
-.PHONY: all build lint release
+.PHONY: all build lint release test
 
 all: build
 
@@ -10,3 +10,6 @@ release:
 
 lint:
 	@go fmt ./...
+
+test:
+	@go test -v ./...

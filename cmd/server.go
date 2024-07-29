@@ -2,37 +2,49 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/consumer"
+	"github.com/shopmonkeyus/eds-server/internal/notification"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
+	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 )
 
-var Version string // set in main
+var Version string                // set in main
+var ShopmonkeyPublicPGPKey string // set in main
 
 const maxFailures = 5
 
+type driverMeta struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	URL         string `json:"url"` // this is masked since it can contain sensitive information
+}
+
 type sessionStart struct {
-	Version   string `json:"version"`
-	Hostname  string `json:"hostname"`
-	IPAddress string `json:"ipAddress"`
-	MachineId string `json:"machineId"`
-	OsInfo    any    `json:"osinfo"`
+	Version   string     `json:"version"`
+	Hostname  string     `json:"hostname"`
+	IPAddress string     `json:"ipAddress"`
+	MachineId string     `json:"machineId"`
+	OsInfo    any        `json:"osinfo"`
+	Driver    driverMeta `json:"driver"`
 }
 
 type edsSession struct {
@@ -77,7 +89,7 @@ func writeCredsToFile(data string, filename string) error {
 	return nil
 }
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -100,12 +112,28 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string) (*edsSession,
 	body.Hostname = hostname
 	body.Version = Version
 	body.OsInfo = osinfo
+
+	driverMeta, err := internal.GetDriverMetadataForURL(driverUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get driver metadata: %w", err)
+	}
+	body.Driver.Description = driverMeta.Description
+	body.Driver.Name = driverMeta.Name
+	body.Driver.ID = driverMeta.Scheme
+	body.Driver.URL, err = util.MaskURL(driverUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mask driver URL: %w", err)
+	}
+
+	logger.Trace("sending session start: %s", util.JSONStringify(body))
+
 	req, err := http.NewRequest("POST", apiURL+"/v3/eds", bytes.NewBuffer([]byte(util.JSONStringify(body))))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
 	}
@@ -133,7 +161,8 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return "", fmt.Errorf("failed to send session end: %w", err)
 	}
@@ -154,12 +183,13 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 }
 
 func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, nil)
+	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, strings.NewReader(util.JSONStringify(map[string]any{})))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send renew end: %w", err)
 	}
@@ -175,7 +205,7 @@ func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId str
 	if !s.Success {
 		return nil, fmt.Errorf("failed to renew session: %s", s.Message)
 	}
-	logger.Trace("session %s renew successfully: %s", sessionId)
+	logger.Trace("session %s renew successfully", sessionId)
 	return s.Data.Credential, nil
 }
 
@@ -191,7 +221,8 @@ func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
 	}
 	setHTTPHeader(req, "")
 	req.Header.Set("Content-Type", "application/x-tgz")
-	resp, err := http.DefaultClient.Do(req)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return fmt.Errorf("failed to upload logs: %w", err)
 	}
@@ -222,84 +253,184 @@ func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessio
 	}
 }
 
-func runHealthCheckServer(logger logger.Logger, port int, fwdport int) {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", fwdport))
+var serverIgnoreFlags = map[string]bool{
+	"--api-url":        true,
+	"--api-key":        true,
+	"--silent":         true,
+	"--port":           true,
+	"--health-port":    true,
+	"--renew-interval": true,
+	"--wrapper":        true,
+	"--parent":         true,
+}
+
+func collectCommandArgs() []string {
+	var skipping bool
+	var _args []string
+	for _, arg := range os.Args[2:] {
+		if skipping {
+			skipping = false
+			continue
+		}
+		tok := strings.Split(arg, "=")
+		_arg := tok[0]
+		if serverIgnoreFlags[_arg] {
+			skipping = true
+			continue
+		}
+		_args = append(_args, arg)
+	}
+	return _args
+}
+
+// runWrapperLoop will run the main parent process which will fork the child process (server)
+// which acts as a control mechanism for the fork process (which has all the real logic).
+// this loop is only responsible for waiting for a restart signal and then restarting the child process.
+func runWrapperLoop(logger logger.Logger) {
+	logger = logger.WithPrefix("[wrapper]")
+	logger.Trace("running the wrapper loop")
+	port, err := util.GetFreePort()
+	if err != nil {
+		logger.Fatal("failed to get free port: %s", err)
+	}
+
+	parentProcess := os.Args[0] // start of with the original process
+
+	logger.Trace("parent process port is: %d", port)
+
+	exitCode := -1
+	restart := make(chan bool, 1)
+	exited := make(chan bool, 1)
+	var waitGroup sync.WaitGroup
+	var inUpgrade bool
+
+	httphandler := &http.ServeMux{}
+	httpsrv := &http.Server{
+		Addr:           fmt.Sprintf("127.0.0.1:%d", port), // only bind to localhost so we don't expose externally
+		Handler:        httphandler,
+		ReadTimeout:    5 * time.Second,
+		WriteTimeout:   1 * time.Second,
+		IdleTimeout:    5 * time.Minute,
+		MaxHeaderBytes: 1 << 20,
+	}
+	httphandler.HandleFunc("/restart", func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("received restart request")
+		buf, err := io.ReadAll(r.Body)
 		if err != nil {
-			logger.Error("health check failed: %s", err)
-			w.WriteHeader(http.StatusServiceUnavailable)
+			logger.Error("failed to read body: %s", err)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if resp.StatusCode != http.StatusOK {
-			logger.Error("health check failed: %d", resp.StatusCode)
-		}
-		w.WriteHeader(resp.StatusCode)
+		r.Body.Close()
+		inUpgrade = true
+		tok := strings.Split(string(buf), ",") // format is: version,command
+		newVersion := tok[0]
+		newCmd := tok[1]
+		logger.Trace("received restart cmd: %s with expected version: %s", newCmd, newVersion)
+		// NOTE: we do this is a separate goroutine so we can respond to the request w/o blocking
+		// since we will need to shutdown the child process
+		go func() {
+			defer util.RecoverPanic(logger)
+			var output bytes.Buffer
+			cmd := exec.Command(newCmd, "version")
+			cmd.Stdout = &output
+			if err := cmd.Run(); err != nil {
+				logger.Error("failed to run new command: %s", err)
+			} else {
+				if newVersion != strings.TrimSpace(output.String()) {
+					logger.Error("new version does not match: %s != %s, not upgrading", newVersion, output.String())
+				} else {
+					logger.Debug("new version matches: %s", newVersion)
+					logger.Debug("swapping out old process: %s with new process: %s", parentProcess, newCmd)
+					parentProcess = newCmd
+				}
+			}
+			// TODO: in all failure cases we need to send back some kind of error response to our API
+			restart <- true
+		}()
+		w.WriteHeader(http.StatusAccepted)
 	})
+
 	go func() {
 		defer util.RecoverPanic(logger)
-		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("failed to start health check server: %s", err)
+		if err := httpsrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("failed to start wrapper server: %s", err)
 		}
 	}()
-}
 
-type notificationConsumer struct {
-	nc      *nats.Conn
-	sub     *nats.Subscription
-	logger  logger.Logger
-	natsurl string
+	args := os.Args[1:]
+	args = append(args, "--wrapper")
+	args = append(args, fmt.Sprintf("--parent=%d", port))
 
-	Notifications <-chan string
-}
-
-func (c *notificationConsumer) Start(sessionId string, credsFile string) error {
-	var err error
-	c.nc, _, err = consumer.NewNatsConnection(c.logger, c.natsurl, credsFile)
-	if err != nil {
-		return fmt.Errorf("failed to create nats connection: %w", err)
-	}
-	c.sub, err = c.nc.Subscribe(fmt.Sprintf("eds.notify.%s.>", sessionId), c.callback)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to eds.notify: %w", err)
-	}
-	return nil
-}
-
-func (c *notificationConsumer) callback(m *nats.Msg) {
-	c.logger.Trace("received message: %s", string(m.Data))
-}
-
-func (c *notificationConsumer) Stop() {
-	if c.sub != nil {
-		if err := c.sub.Unsubscribe(); err != nil {
-			c.logger.Error("failed to unsubscribe from nats: %s", err)
+	shutdownHTTP := func() {
+		defer util.RecoverPanic(logger)
+		logger.Info("initiating HTTP server shutdown")
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancelShutdown()
+		if err := httpsrv.Shutdown(shutdownCtx); err != nil {
+			logger.Error("HTTP server shutdown error: %s", err)
 		}
-		c.sub = nil
+		logger.Info("HTTP server successfully shutdown")
 	}
-	if c.nc != nil {
-		c.nc.Close()
-		c.nc = nil
+
+	var failures int
+	var completed bool
+
+	for failures < maxFailures && !completed {
+		logger.Trace("starting process: %s %s", parentProcess, strings.Join(args, " "))
+		cmd := exec.Command(parentProcess, args...)
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		cmd.Stdin = os.Stdin
+		if err := cmd.Start(); err != nil {
+			logger.Fatal("failed to start: %s", err)
+		}
+		waitGroup.Add(1)
+		go func() {
+			defer util.RecoverPanic(logger)
+			defer waitGroup.Done()
+			if err := cmd.Wait(); err != nil {
+				logger.Error("wrapper process exited: %s", err)
+			}
+			exitCode = cmd.ProcessState.ExitCode()
+			logger.Trace("wrapper process exited with exit code: %d", exitCode)
+			if !completed {
+				exited <- true
+			}
+		}()
+		select {
+		case <-restart:
+			logger.Trace("restarting process")
+			cmd.Process.Signal(syscall.SIGINT)
+		case <-sys.CreateShutdownChannel():
+			logger.Trace("SIGINT received")
+			cmd.Process.Signal(syscall.SIGINT)
+			exitCode = 0
+			completed = true
+		case <-exited:
+			logger.Trace("exit received: %d", exitCode)
+			if inUpgrade && exitCode != 0 {
+				inUpgrade = false
+				failures++
+				parentProcess = os.Args[0] // reset to the original process since the upgrade failed
+				logger.Trace("upgrade failed, resetting to original process and restarting")
+				continue
+			}
+			if exitCode == 0 || exitCode == 1 {
+				completed = true
+			} else {
+				failures++
+				time.Sleep(time.Second * time.Duration(failures))
+			}
+		}
 	}
-}
 
-func (c *notificationConsumer) Restart(sessionId string, credsFile string) error {
-	c.Stop()
-	return c.Start(sessionId, credsFile)
-}
-
-func newNotificationConsumer(logger logger.Logger, natsurl string) *notificationConsumer {
-	return &notificationConsumer{
-		logger:        logger,
-		natsurl:       natsurl,
-		Notifications: make(chan string),
-	}
-}
-
-var serverIgnoreFlags = map[string]bool{
-	"--api-url":     true,
-	"--api-key":     true,
-	"--silent":      true,
-	"--health-port": true,
+	logger.Trace("waiting for child processes to exit")
+	waitGroup.Wait()
+	logger.Trace("child process exited")
+	shutdownHTTP()
+	logger.Trace("exit with exit code: %d", exitCode)
+	os.Exit(exitCode)
 }
 
 var serverCmd = &cobra.Command{
@@ -314,71 +445,139 @@ var serverCmd = &cobra.Command{
 
 		defer util.RecoverPanic(logger)
 
+		wrapper := mustFlagBool(cmd, "wrapper", false)
+		if !wrapper {
+			runWrapperLoop(logger)
+			return
+		}
+
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
+		url := mustFlagString(cmd, "url", true)
+		server := mustFlagString(cmd, "server", true)
+		dataDir := getDataDir(cmd, logger)
+
 		var credsFile string
+		var sessionDir string
 
-		defer os.Remove(credsFile) // make sure we remove the temporary credential
-
-		var skipping bool
-		var _args []string
-		for _, arg := range os.Args[2:] {
-			if skipping {
-				skipping = false
-				continue
+		// must be in a defer to make sure we pick up credsFile variable
+		defer func() {
+			// make sure we remove the temporary credential
+			os.Remove(credsFile)
+			// if this is the last file in the directory, go ahead and remove it too
+			if files, _ := os.ReadDir(sessionDir); len(files) == 0 {
+				os.RemoveAll(sessionDir)
 			}
-			if serverIgnoreFlags[arg] {
-				skipping = true
-				continue
-			}
-			_args = append(_args, arg)
-		}
+		}()
 
-		// setup health check server
-		fwdPort, err := util.GetFreePort()
-		if err != nil {
-			logger.Fatal("failed to get free port: %s", err)
+		port := mustFlagInt(cmd, "port", true)
+		oldHealthPort := mustFlagInt(cmd, "health-port", false)
+		if oldHealthPort > 0 {
+			port = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
 		}
-		healthPort := mustFlagInt(cmd, "health-port", true)
-		runHealthCheckServer(logger, healthPort, fwdPort)
-		_args = append(_args, "--health-port", fmt.Sprintf("%d", fwdPort))
+		parentPort := mustFlagInt(cmd, "parent", true)
 
-		var currentProcess *os.Process
+		_args := collectCommandArgs()
+		_args = append(_args, "--port", fmt.Sprintf("%d", port))
+		_args = append(_args, "--data-dir", dataDir)
+		_args = append(_args, "--server", server)
+
 		var sessionId string
 
 		processCallback := func(p *os.Process) {
-			currentProcess = p
+			logger.Debug("fork process started with pid: %d", p.Pid)
+		}
+
+		restart := func() {
+			logger.Info("need to restart")
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", port))
+			if err != nil {
+				logger.Error("restart failed: %s", err)
+			} else {
+				logger.Debug("restart response: %d", resp.StatusCode)
+			}
+		}
+
+		shutdown := func(msg string) {
+			logger.Info("shutdown requested: %s", msg)
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", port))
+			if err != nil {
+				logger.Fatal("shutdown failed: %s", err)
+			} else {
+				logger.Debug("shutdown response: %d", resp.StatusCode)
+			}
+		}
+
+		renew := func() {
+			creds, err := sendRenew(logger, apiurl, apikey, sessionId)
+			if err != nil {
+				logger.Fatal("failed to renew session: %s", err)
+			}
+			if creds != nil {
+				if err := writeCredsToFile(*creds, credsFile); err != nil {
+					logger.Fatal("failed to write creds to file: %s", err)
+				}
+				restart()
+			} else {
+				logger.Trace("no new credentials to renew")
+			}
+		}
+
+		pause := func() {
+			logger.Info("server pause requested")
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/pause", port))
+			if err != nil {
+				logger.Error("pause failed: %s", err)
+			} else {
+				logger.Debug("pause response: %d", resp.StatusCode)
+			}
+		}
+
+		unpause := func() {
+			logger.Info("server unpause requested")
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/unpause", port))
+			if err != nil {
+				logger.Error("unpause failed: %s", err)
+			} else {
+				logger.Debug("unpause response: %d", resp.StatusCode)
+			}
+		}
+
+		upgrade := func(version string, url string) {
+			logger.Info("server upgrade requested to version: %s from url: %s", version, url)
+			pause()
+			// TODO - run the upgrade and when completed and ready, exit with special exit code for force a restart
+			// to the new binary
+			var body bytes.Buffer
+			body.WriteString(version)
+			body.WriteString(",")
+			body.WriteString(os.Args[0]) /// FIXME: change this to the new binary
+			resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/restart", parentPort), "text/plain", &body)
+			if err != nil {
+				logger.Error("restart failed: %s", err)
+			} else {
+				logger.Debug("restart response: %d", resp.StatusCode)
+			}
 		}
 
 		natsurl := mustFlagString(cmd, "server", true)
-		notificationConsumer := newNotificationConsumer(logger, natsurl)
+
+		// create a notification consumer that will listen for notification actions and handle them here
+		notificationConsumer := notification.New(logger, natsurl, notification.NotificationHandler{
+			Restart:  restart,
+			Renew:    renew,
+			Shutdown: shutdown,
+			Pause:    pause,
+			Unpause:  unpause,
+			Upgrade:  upgrade,
+		})
 
 		go func() {
 			defer util.RecoverPanic(logger)
-			ticker := time.NewTicker(time.Hour * 24 * 6)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					creds, err := sendRenew(logger, apiurl, apikey, sessionId)
-					if err != nil {
-						logger.Fatal("failed to renew session: %s", err)
-					}
-					if creds != nil {
-						if err := writeCredsToFile(*creds, credsFile); err != nil {
-							logger.Fatal("failed to write creds to file: %s", err)
-						}
-						if currentProcess != nil {
-							currentProcess.Signal(syscall.SIGHUP) // tell the child to restart
-						} else {
-							logger.Fatal("no child process to signal on credentials renew")
-						}
-					} else {
-						logger.Trace("no new credentials to renew")
-					}
-				case action := <-notificationConsumer.Notifications:
-					logger.Info("received notification: %s", action)
-				}
+			duration, _ := cmd.Flags().GetDuration("renew-interval")
+			logger.Trace("will renew session every %v", duration)
+			for range time.Tick(duration) {
+				renew()
 			}
 		}()
 
@@ -388,15 +587,19 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey)
+			session, err := sendStart(logger, apiurl, apikey, url)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
+			sessionDir = filepath.Join(dataDir, sessionId)
+			if err := os.MkdirAll(sessionDir, 0700); err != nil {
+				logger.Fatal("failed to create session directory: %s", err)
+			}
 			if credsFile == "" && session.Credential != nil {
 				// write credential to file
-				credsFile = filepath.Join(os.TempDir(), fmt.Sprintf("eds-%s.creds", session.SessionId))
+				credsFile = filepath.Join(sessionDir, "nats.creds")
 				if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
 					logger.Fatal("failed to write creds to file: %s", err)
 				}
@@ -418,8 +621,8 @@ var serverCmd = &cobra.Command{
 				ForwardInterrupt: true,
 				LogFileSink:      true,
 				ProcessCallback:  processCallback,
+				Dir:              sessionDir,
 			})
-			currentProcess = nil
 			notificationConsumer.Stop()
 			if err != nil && result == nil {
 				logger.Error("failed to fork: %s", err)
@@ -430,6 +633,9 @@ var serverCmd = &cobra.Command{
 					sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, result.LogFileBundle)
 				}
 				if ec == 0 {
+					// on success, remove the logs
+					os.Remove(filepath.Join(sessionDir, "server_stderr.txt"))
+					os.Remove(filepath.Join(sessionDir, "server_stdout.txt"))
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
@@ -508,15 +714,43 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverHelpCmd)
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("couldn't get current working directory: ", err)
+		os.Exit(1)
+	}
+
 	// NOTE: sync these with forkCmd
-	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
-	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().String("url", "", "provider connection string")
-	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
+	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
+	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
+
+	// deprecated but left for backwards compatibility
+	serverCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
+	serverCmd.Flags().MarkDeprecated("health-port", "use --port instead")
+
+	// internal use only
 	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
+	serverCmd.Flags().MarkHidden("schema")
 	serverCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
+	serverCmd.Flags().MarkHidden("tables")
+	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	serverCmd.Flags().MarkHidden("api-url")
+	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
+	serverCmd.Flags().MarkHidden("server")
+	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
+	serverCmd.Flags().MarkHidden("consumer-suffix")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
+	serverCmd.Flags().MarkHidden("maxAckPending")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
-	serverCmd.Flags().Int("health-port", getOSInt("PORT", 8080), "the port to listen for health checks")
+	serverCmd.Flags().MarkHidden("maxPendingBuffer")
+	serverCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
+	serverCmd.Flags().MarkHidden("restart")
+	serverCmd.Flags().Duration("renew-interval", time.Hour*24, "the interval to renew the session")
+	serverCmd.Flags().MarkHidden("renew-interval")
+	serverCmd.Flags().Bool("wrapper", false, "running in wrapper mode")
+	serverCmd.Flags().MarkHidden("wrapper")
+	serverCmd.Flags().Int("parent", -1, "the parent pid")
+	serverCmd.Flags().MarkHidden("parent")
 }

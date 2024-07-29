@@ -33,6 +33,7 @@ var _ internal.Driver = (*snowflakeDriver)(nil)
 var _ internal.DriverLifecycle = (*snowflakeDriver)(nil)
 var _ internal.Importer = (*snowflakeDriver)(nil)
 var _ internal.DriverSessionHandler = (*snowflakeDriver)(nil)
+var _ internal.DriverHelp = (*snowflakeDriver)(nil)
 
 func (p *snowflakeDriver) SetSessionID(sessionID string) {
 	if sessionID != "" {
@@ -111,6 +112,11 @@ func (p *snowflakeDriver) Process(event internal.DBChangeEvent) (bool, error) {
 	p.logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
+	if _, ok := p.schema[event.Table]; !ok {
+		// NOTE: remove this once we have schema evolution reimplemented
+		p.logger.Warn("skipping event: %s because table was not found in schema: %s", event.String(), event.Table)
+		return false, nil
+	}
 	object, err := event.GetObject()
 	if err != nil {
 		return false, fmt.Errorf("error getting json object: %w", err)
@@ -133,29 +139,70 @@ func (p *snowflakeDriver) Flush() error {
 	records := p.batcher.Records()
 	count := len(records)
 	p.batcher.Clear()
-	p.logger.Debug("flush: %v", count)
 	if count > 0 {
+		p.logger.Debug("flush: %d / %d", count, sequence+1)
 		sequence++
 		tag := fmt.Sprintf("eds-server-%s/%d/%d", p.sessionID, sequence, count)
 		ctx := sf.WithQueryTag(context.Background(), tag)
-		execCTX, err := sf.WithMultiStatement(ctx, count) // for the transaction below
-		if err != nil {
-			return fmt.Errorf("error creating exec context: %w", err)
-		}
 		var query strings.Builder
-		for _, record := range records {
-			q, err := toSQL(record, p.schema)
-			if err != nil {
-				return fmt.Errorf("error creating sql query: %w for %s", err, record)
+		var statementCount int
+		var cachekeys []string
+		var deletekeys []string
+		for i, record := range records {
+			var force bool
+			var key string
+			switch record.Operation {
+			case "INSERT":
+				key = fmt.Sprintf("snowflake:%s:%s", record.Table, record.Id)
+				ok, _, err := p.config.Tracker.GetKey(key)
+				if err != nil {
+					return fmt.Errorf("error getting cache key %s from tracker: %w", key, err)
+				}
+				force = ok
+				if force {
+					p.logger.Trace("forcing delete before insert because we've seen an insert for %s/%s", record.Table, record.Id)
+				}
+			case "UPDATE":
+				if len(record.Diff) == 1 && record.Diff[0] == "updatedDate" {
+					// slight optimization to skip records that just have an updatedDate and nothing else
+					p.logger.Trace("skipping update because only updatedDate changed for %s/%s", record.Table, record.Id)
+					continue
+				}
+			case "DELETE":
+				key = fmt.Sprintf("snowflake:%s:%s", record.Table, record.Id)
+				deletekeys = append(deletekeys, key)
 			}
-			query.WriteString(q)
+			sql, c := toSQL(record, p.schema, force)
+			statementCount += c
+			p.logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i+1, count, strings.TrimRight(sql, "\n"))
+			query.WriteString(sql)
+			if key != "" {
+				cachekeys = append(cachekeys, key)
+			}
 		}
-		ts := time.Now()
-		p.logger.Trace("executing query (%s): %s", tag, query.String())
-		if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
-			return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
+		if statementCount > 0 {
+			execCTX, err := sf.WithMultiStatement(ctx, statementCount)
+			if err != nil {
+				return fmt.Errorf("error creating exec context: %w", err)
+			}
+			ts := time.Now()
+			p.logger.Trace("executing query (%s/%d)", tag, statementCount)
+			if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
+				return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
+			}
+			p.logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
 		}
-		p.logger.Trace("executed query (%s) in %v", tag, time.Since(ts))
+		if len(cachekeys) > 0 {
+			// cache keys seen for the past 24 hours ... might want to make it configurable at some point but this is good enough for now
+			if err := p.config.Tracker.SetKeys(cachekeys, tag, time.Hour*24); err != nil {
+				return fmt.Errorf("error setting cache keys: %s in tracker: %w", cachekeys, err)
+			}
+		}
+		if len(deletekeys) > 0 {
+			if err := p.config.Tracker.DeleteKey(deletekeys...); err != nil {
+				return fmt.Errorf("error deleting cache keys from tracker: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -257,6 +304,11 @@ done:
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// Name is a unique name for the driver.
+func (p *snowflakeDriver) Name() string {
+	return "Snowflake"
 }
 
 // Description is the description of the driver.

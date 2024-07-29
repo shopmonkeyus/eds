@@ -232,6 +232,11 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	return nil
 }
 
+// Name is a unique name for the driver.
+func (p *mysqlDriver) Name() string {
+	return "MySQL"
+}
+
 // Description is the description of the driver.
 func (p *mysqlDriver) Description() string {
 	return "Supports streaming EDS messages to a MySQL database."

@@ -231,6 +231,11 @@ func (p *postgresqlDriver) Import(config internal.ImporterConfig) error {
 	return nil
 }
 
+// Name is a unique name for the driver.
+func (p *postgresqlDriver) Name() string {
+	return "PostgreSQL"
+}
+
 // Description is the description of the driver.
 func (p *postgresqlDriver) Description() string {
 	return "Supports streaming EDS messages to a PostgreSQL database."

@@ -183,6 +183,11 @@ func (p *s3Driver) Flush() error {
 	return nil
 }
 
+// Name is a unique name for the driver.
+func (p *s3Driver) Name() string {
+	return "AWS S3"
+}
+
 // Description is the description of the driver.
 func (p *s3Driver) Description() string {
 	return "Supports streaming EDS messages to a AWS S3 compatible destination."
