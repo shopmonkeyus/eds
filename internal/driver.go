@@ -121,7 +121,7 @@ func GetDriverMetadataForURL(urlString string) (*DriverMetadata, error) {
 	}
 	proto := u.Scheme
 	for scheme, driver := range driverRegistry {
-		if scheme == proto {
+		if scheme == proto || driverAliasRegistry[proto] == scheme {
 			if help, ok := driver.(DriverHelp); ok {
 				return &DriverMetadata{
 					Scheme:         scheme,

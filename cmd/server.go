@@ -117,6 +117,9 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	if err != nil {
 		return nil, fmt.Errorf("failed to get driver metadata: %w", err)
 	}
+	if driverMeta == nil {
+		return nil, fmt.Errorf("invalid driver URL: %s", driverUrl)
+	}
 	body.Driver.Description = driverMeta.Description
 	body.Driver.Name = driverMeta.Name
 	body.Driver.ID = driverMeta.Scheme
@@ -507,6 +510,7 @@ var serverCmd = &cobra.Command{
 		_args = append(_args, "--port", fmt.Sprintf("%d", port))
 		_args = append(_args, "--data-dir", dataDir)
 		_args = append(_args, "--server", server)
+		_args = append(_args, "--api-url", apiurl)
 
 		var sessionId string
 
