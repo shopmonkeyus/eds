@@ -56,8 +56,8 @@ type ConsumerConfig struct {
 	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
 	ExportTableTimestamps map[string]*time.Time
 
-	// Restart the consumer from the beginning of the stream
-	Restart bool
+	// DeliverAll will configure the consumer to read from the beginning of the stream, this only works if the consumer is new
+	DeliverAll bool
 }
 
 type Consumer struct {
@@ -528,26 +528,52 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		MaxAckPending:     config.MaxAckPending,
 		MaxDeliver:        20,
 		AckWait:           time.Minute * 5,
-		DeliverPolicy:     jetstream.DeliverNewPolicy,
 		MaxRequestBatch:   config.MaxPendingBuffer,
 		FilterSubjects:    subjects,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		InactiveThreshold: time.Hour * 24 * 3, // expire if unused 3 days from first creating
 	}
-	if config.Restart {
-		jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
-	} else if startAt != nil {
-		jsConfig.DeliverPolicy = jetstream.DeliverByStartTimePolicy
-		jsConfig.OptStartTime = startAt
-	}
-	createConsumerContext, cancelCreate := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
-	defer cancelCreate()
-	c, err := js.CreateOrUpdateConsumer(createConsumerContext, "dbchange", jsConfig)
+
+	// create a context with a longer deadline for creating the consumer
+	configConsumerCtx, cancelConfig := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
+	defer cancelConfig()
+
+	// setup the consumer
+	c, err := js.Consumer(configConsumerCtx, "dbchange", jsConfig.Durable)
 	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
+		if !errors.Is(err, jetstream.ErrConsumerNotFound) {
+			nc.Close()
+			return nil, fmt.Errorf("error getting jetstream consumer: %w", err)
+		}
+		// consumer not found, create it
+
+		// only set the deliver policy if we are creating a new consumer, it will error if we try to update it
+		if config.DeliverAll {
+			jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
+		} else if startAt != nil {
+			jsConfig.DeliverPolicy = jetstream.DeliverByStartTimePolicy
+			jsConfig.OptStartTime = startAt
+		} else {
+			jsConfig.DeliverPolicy = jetstream.DeliverNewPolicy
+		}
+		c, err = js.CreateConsumer(configConsumerCtx, "dbchange", jsConfig)
+		if err != nil {
+			nc.Close()
+			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
+		}
+	} else {
+		consumer.logger.Debug("consumer found")
+
+		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
+		// consumer found, update it
+		// TODO: we should check if the consumer is already in the correct state and skip this
+		c, err = js.UpdateConsumer(configConsumerCtx, "dbchange", jsConfig)
+		if err != nil {
+			nc.Close()
+			return nil, fmt.Errorf("error updating jetstream consumer: %w", err)
+		}
 	}
-	cancelCreate()
+	cancelConfig()
 
 	consumer.jsconn = c
 
