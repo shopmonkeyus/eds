@@ -30,8 +30,8 @@ type NotificationHandler struct {
 	// Upgrade action is called to upgrade the server version.
 	Upgrade func(version string, url string)
 
-	// SendLogs action is called to send logs to the server.
-	SendLogs func()
+	// SendLogs action is called to send logs to the server, should return the storage path.
+	SendLogs func() string
 }
 
 type Notification struct {
@@ -143,7 +143,18 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		}
 		c.handler.Upgrade(version, url)
 	case "sendlogs":
-		c.handler.SendLogs()
+		path := c.handler.SendLogs()
+		if path == "" {
+			c.logger.Warn("sendlogs handler returned empty path")
+			return
+		}
+		if m.Reply == "" {
+			msg := nats.NewMsg(m.Reply)
+			msg.Data = []byte(path)
+			if err := c.nc.PublishMsg(msg); err != nil {
+				c.logger.Error("error sending logs response: %s", err)
+			}
+		}
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

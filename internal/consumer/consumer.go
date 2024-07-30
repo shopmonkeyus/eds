@@ -314,7 +314,7 @@ func (c *Consumer) heartbeat() error {
 		return fmt.Errorf("error getting system stats: %w", err)
 	}
 
-	subject := fmt.Sprintf("eds.heartbeat.%s", c.sessionID)
+	subject := fmt.Sprintf("eds.client.%s.heartbeat", c.sessionID)
 
 	hb := heartbeat{
 		SessionId: c.sessionID,

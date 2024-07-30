@@ -33,10 +33,10 @@ var FlushCount = promauto.NewHistogram(prometheus.HistogramOpts{
 // SystemStats contains the metrics and system stats
 type SystemStats struct {
 	Metrics struct {
-		FlushCount    float64
-		FlushDuration float64
-		PendingEvents float64
-		TotalEvents   float64
+		FlushCount    float64 `json:"flushCount"`
+		FlushDuration float64 `json:"flushDuration"`
+		PendingEvents float64 `json:"pendingEvents"`
+		TotalEvents   float64 `json:"totalEvents"`
 	} `json:"metrics"`
 	Memory *mem.VirtualMemoryStat `json:"memory"`
 	Load   *load.AvgStat          `json:"load"`
