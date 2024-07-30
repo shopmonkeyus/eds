@@ -82,10 +82,21 @@ var forkCmd = &cobra.Command{
 		}
 		defer tracker.Close()
 
-		registry, err := registry.NewFileRegistry(schemaFile)
-		if err != nil {
-			logger.Error("error creating registry: %s", err)
-			os.Exit(3)
+		var schemaRegistry internal.SchemaRegistry
+
+		if util.Exists(schemaFile) {
+			schemaRegistry, err = registry.NewFileRegistry(schemaFile)
+			if err != nil {
+				logger.Error("error creating registry: %s", err)
+				os.Exit(3)
+			}
+		} else {
+			apiUrl := mustFlagString(cmd, "api-url", true)
+			schemaRegistry, err = registry.NewAPIRegistry(apiUrl)
+			if err != nil {
+				logger.Error("error creating registry: %s", err)
+				os.Exit(3)
+			}
 		}
 
 		// TODO: move these into the tracker
@@ -109,7 +120,7 @@ var forkCmd = &cobra.Command{
 			}
 		}
 
-		driver, err := internal.NewDriver(ctx, logger, url, registry, tracker)
+		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(3)
@@ -267,6 +278,7 @@ func init() {
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "driver connection string")
+	forkCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
