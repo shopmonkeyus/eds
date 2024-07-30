@@ -44,6 +44,7 @@ type sessionStart struct {
 	IPAddress string     `json:"ipAddress"`
 	MachineId string     `json:"machineId"`
 	OsInfo    any        `json:"osinfo"`
+	Code      string     `json:"code"`
 	Driver    driverMeta `json:"driver"`
 }
 
@@ -89,7 +90,7 @@ func writeCredsToFile(data string, filename string) error {
 	return nil
 }
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string) (*edsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, code string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -112,6 +113,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Hostname = hostname
 	body.Version = Version
 	body.OsInfo = osinfo
+	body.Code = code
 
 	driverMeta, err := internal.GetDriverMetadataForURL(driverUrl)
 	if err != nil {
@@ -121,6 +123,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Driver.Name = driverMeta.Name
 	body.Driver.ID = driverMeta.Scheme
 	body.Driver.URL, err = util.MaskURL(driverUrl)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to mask driver URL: %w", err)
 	}
@@ -453,6 +456,7 @@ var serverCmd = &cobra.Command{
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
+		code := mustFlagString(cmd, "code", true)
 		url := mustFlagString(cmd, "url", true)
 		server := mustFlagString(cmd, "server", true)
 		dataDir := getDataDir(cmd, logger)
@@ -587,7 +591,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, url)
+			session, err := sendStart(logger, apiurl, apikey, url, code)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}

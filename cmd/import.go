@@ -347,10 +347,10 @@ func isCancelled(ctx context.Context) bool {
 	}
 }
 
-func createEDSSession(ctx context.Context, logger logger.Logger, serverURL string, apiURL string, apiKey string, suffix string, driverUrl string) error {
+func createEDSSession(ctx context.Context, logger logger.Logger, serverURL string, apiURL string, apiKey string, suffix string, driverUrl string, code string) error {
 	logger.Info("Creating EDS Checkpoint...")
 	// TODO: just get the cred instead of starting a session?
-	session, err := sendStart(logger, apiURL, apiKey, driverUrl)
+	session, err := sendStart(logger, apiURL, apiKey, driverUrl, code)
 	if err != nil {
 		return fmt.Errorf("error creating EDS session: %s", err)
 	}
@@ -417,6 +417,7 @@ var importCmd = &cobra.Command{
 		parallel := mustFlagInt(cmd, "parallel", false)
 		apiURL := mustFlagString(cmd, "api-url", true)
 		apiKey := mustFlagString(cmd, "api-key", true)
+		code := mustFlagString(cmd, "code", true)
 		jobID := mustFlagString(cmd, "job-id", false)
 		single, _ := cmd.Flags().GetBool("single")
 		dir := mustFlagString(cmd, "dir", false)
@@ -491,7 +492,7 @@ var importCmd = &cobra.Command{
 		if !noEDSSession {
 			serverURL := mustFlagString(cmd, "server", true)
 			suffix := mustFlagString(cmd, "consumer-suffix", false)
-			if err := createEDSSession(ctx, logger, serverURL, apiURL, apiKey, suffix, driverUrl); err != nil {
+			if err := createEDSSession(ctx, logger, serverURL, apiURL, apiKey, suffix, driverUrl, code); err != nil {
 				logger.Error("error creating EDS session: %s", err)
 				logger.Info("If you do not intend to run EDS server after the import then you may use --no-eds-session to skip this")
 				os.Exit(1)
