@@ -672,6 +672,7 @@ func init() {
 	importCmd.Flags().String("url", "", "driver connection string")
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
 	importCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
+	importCmd.Flags().String("code", cwd, "the short code for auth")
 
 	// helpful flags
 	importCmd.Flags().String("job-id", "", "resume an existing job")

@@ -456,7 +456,7 @@ var serverCmd = &cobra.Command{
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
-		code := mustFlagString(cmd, "code", true)
+		code := mustFlagString(cmd, "code", false)
 		url := mustFlagString(cmd, "url", true)
 		server := mustFlagString(cmd, "server", true)
 		dataDir := getDataDir(cmd, logger)
