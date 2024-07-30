@@ -460,6 +460,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	ctx, cancel := context.WithCancel(config.Context)
 
+	var startAt *time.Time
 	var consumer Consumer
 	started := time.Now()
 	consumer.started = &started
@@ -472,8 +473,16 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
-	consumer.tableTimestamps = config.ExportTableTimestamps
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
+	if config.ExportTableTimestamps != nil {
+		consumer.tableTimestamps = config.ExportTableTimestamps
+		// get the earliest timestamp
+		for _, ts := range config.ExportTableTimestamps {
+			if ts != nil && (startAt == nil || ts.Before(*startAt)) {
+				startAt = ts
+			}
+		}
+	}
 
 	if config.Driver != nil {
 		if p, ok := config.Driver.(internal.DriverSessionHandler); ok {
@@ -527,6 +536,9 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	}
 	if config.Restart {
 		jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
+	} else if startAt != nil {
+		jsConfig.DeliverPolicy = jetstream.DeliverByStartTimePolicy
+		jsConfig.OptStartTime = startAt
 	}
 	createConsumerContext, cancelCreate := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
 	defer cancelCreate()
