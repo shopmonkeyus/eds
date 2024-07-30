@@ -565,6 +565,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		consumer.logger.Debug("consumer found")
 
 		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
+		jsConfig.OptStartTime = c.CachedInfo().Config.OptStartTime
 		// consumer found, update it
 		// TODO: we should check if the consumer is already in the correct state and skip this
 		c, err = js.UpdateConsumer(configConsumerCtx, "dbchange", jsConfig)

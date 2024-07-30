@@ -3,6 +3,7 @@ package notification
 import (
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
@@ -31,7 +32,12 @@ type NotificationHandler struct {
 	Upgrade func(version string, url string)
 
 	// SendLogs action is called to send logs to the server, should return the storage path.
-	SendLogs func() string
+	SendLogs func() *SendLogsResponse
+}
+
+type SendLogsResponse struct {
+	Path      string `json:"path"`
+	SessionId string `json:"sessionId"`
 }
 
 type Notification struct {
@@ -96,6 +102,28 @@ func (c *NotificationConsumer) Restart(sessionId string, credsFile string) error
 	return c.Start(sessionId, credsFile)
 }
 
+func (c *NotificationConsumer) publishResponse(sessionId string, action string, data []byte) error {
+	msg := nats.NewMsg(fmt.Sprintf("eds.client.%s.%s-response", sessionId, action))
+	msg.Data = data
+	msg.Header.Add(nats.MsgIdHdr, uuid.NewString())
+	c.logger.Trace("sending response: %s", msg.Subject)
+	if err := c.nc.PublishMsg(msg); err != nil {
+		return fmt.Errorf("error sending response: %w", err)
+	}
+	return nil
+}
+
+func (c *NotificationConsumer) CallSendLogs() {
+	response := c.handler.SendLogs()
+	if response == nil {
+		c.logger.Warn("sendlogs handler returned nothing")
+		return
+	}
+	if err := c.publishResponse(response.SessionId, "sendlogs", []byte(util.JSONStringify(response))); err != nil {
+		c.logger.Error("failed to send sendlogs response: %s", err)
+	}
+}
+
 func (c *NotificationConsumer) callback(m *nats.Msg) {
 	var notification Notification
 	if err := util.DecodeNatsMsg(m, &notification); err != nil {
@@ -143,18 +171,7 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		}
 		c.handler.Upgrade(version, url)
 	case "sendlogs":
-		path := c.handler.SendLogs()
-		if path == "" {
-			c.logger.Warn("sendlogs handler returned empty path")
-			return
-		}
-		if m.Reply == "" {
-			msg := nats.NewMsg(m.Reply)
-			msg.Data = []byte(path)
-			if err := c.nc.PublishMsg(msg); err != nil {
-				c.logger.Error("error sending logs response: %s", err)
-			}
-		}
+		c.CallSendLogs()
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

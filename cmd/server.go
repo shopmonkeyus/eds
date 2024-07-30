@@ -587,47 +587,47 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		sendLogs := func() string {
+		sendLogs := func() *notification.SendLogsResponse {
 			// TODO: lock this so we don't rotate the logs while we are uploading them!
 			logger.Info("server logfile requested")
 			if sessionId == "" {
 				logger.Error("no session ID to rotate logs")
-				return ""
+				return nil
 			}
 			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/logfile", port))
 			if err != nil {
 				logger.Error("logfile failed: %s", err)
-				return ""
+				return nil
 			}
 			logger.Debug("logfile response: %d", resp.StatusCode)
 			if resp.StatusCode != http.StatusOK {
 				logger.Error("logfile failed: %d", resp.StatusCode)
-				return ""
+				return nil
 			}
 			defer resp.Body.Close()
 
 			buf, err := io.ReadAll(resp.Body)
 			if err != nil {
 				logger.Error("failed to read body: %s", err)
-				return ""
+				return nil
 			}
 			logFile := string(buf)
 			logger.Debug("uploading logfile: %s", logFile)
 			// gzip the log file, do this first in case we get an error!
 			if err := util.GzipFile(logFile); err != nil {
 				logger.Error("failed to compress log file: %s", err)
-				return ""
+				return nil
 			}
 			compressedLogFile := logFile + ".gz"
 			defer os.Remove(compressedLogFile)
 			uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 			if err != nil {
 				logger.Error("failed to get upload URL: %s", err)
-				return ""
+				return nil
 			}
 			if err := uploadLogs(logger, uploadURL, compressedLogFile); err != nil {
 				logger.Error("failed to upload logs to %s: %s", uploadURL, err)
-				return ""
+				return nil
 			}
 			// fork will be done writing to the file, so we can remove it
 			logger.Debug("removing old logfile: %s", logFile)
@@ -636,9 +636,12 @@ var serverCmd = &cobra.Command{
 			parsedURL, err := url.Parse(uploadURL)
 			if err != nil {
 				logger.Error("failed to parse upload URL: %s", err)
-				return ""
+				return nil
 			}
-			return parsedURL.Path
+			return &notification.SendLogsResponse{
+				Path:      parsedURL.Path,
+				SessionId: sessionId,
+			}
 		}
 
 		natsurl := mustFlagString(cmd, "server", true)
@@ -666,7 +669,9 @@ var serverCmd = &cobra.Command{
 			for {
 				select {
 				case <-logSenderTicker.C:
-					sendLogs()
+
+					// ask the notification consumer to send the logs so it can report the success/failure
+					notificationConsumer.CallSendLogs()
 				case <-renewTicker.C:
 					renew()
 				}
