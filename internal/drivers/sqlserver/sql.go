@@ -203,7 +203,7 @@ func createSQL(s *internal.Schema) string {
 
 func parseURLToDSN(urlstr string) (string, error) {
 	// Example input: "sqlserver://sa:eds@localhost:11433/database=eds"
-	// Desired output: "sqlserver://sa:eds@localhost:11433/database=eds&multiStatements=true"
+	// Desired output: "sqlserver://sa:eds@localhost:11433/database=eds?multiStatements=true"
 	u, err := url.Parse(urlstr)
 	if err != nil {
 		return "", fmt.Errorf("error parsing url: %w", err)
