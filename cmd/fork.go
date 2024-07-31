@@ -55,6 +55,7 @@ var forkCmd = &cobra.Command{
 		sink, err := newLogFileSink(filepath.Join(datadir, "logs"))
 		if err != nil {
 			logger.Error("error creating log file sink: %s", err)
+			os.Exit(3)
 		}
 		defer sink.Close()
 		logger = newLoggerWithSink(logger, sink).WithPrefix("[fork]")
