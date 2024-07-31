@@ -240,7 +240,7 @@ func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
 }
 
 func (p *sqlserverDriver) Name() string {
-	return "SQL Server"
+	return "Microsoft SQL Server"
 }
 
 // Description is the description of the driver.

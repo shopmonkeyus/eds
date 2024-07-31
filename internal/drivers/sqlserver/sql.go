@@ -228,7 +228,7 @@ func parseURLToDSN(urlstr string) (string, error) {
 	}
 
 	if encoded := vals.Encode(); encoded != "" {
-		dsn.WriteString("/")
+		dsn.WriteString("?")
 		dsn.WriteString(encoded)
 	}
 

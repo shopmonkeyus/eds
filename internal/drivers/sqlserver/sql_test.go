@@ -55,5 +55,5 @@ func TestDBChanges(t *testing.T) {
 func TestParseDSN(t *testing.T) {
 	dsn, err := parseURLToDSN("sqlserver://root:password@localhost:3306/dbname")
 	assert.NoError(t, err)
-	assert.Equal(t, "sqlserver://root:password@localhost:3306/dbname/multiStatements=true", dsn)
+	assert.Equal(t, "sqlserver://root:password@localhost:3306/dbname?multiStatements=true", dsn)
 }
