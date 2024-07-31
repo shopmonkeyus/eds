@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +23,7 @@ type enrollResponse struct {
 	Data    enrollTokenData `json:"data"`
 }
 
-func getApiUrl(firstLetter string) (*string, error) {
+func getAPIURL(firstLetter string) (*string, error) {
 	apiUrls := map[string]string{
 		"P": "https://api.shopmonkey.cloud/",
 		"S": "https://sandbox-api.shopmonkey.cloud/",
@@ -33,11 +34,11 @@ func getApiUrl(firstLetter string) (*string, error) {
 	if url, exists := apiUrls[firstLetter]; exists {
 		return &url, nil
 	}
-	return nil, errors.New("invalid first letter")
+	return nil, errors.New("invalid code")
 }
 
 var enrollCmd = &cobra.Command{
-	Use:   "enroll code",
+	Use:   "enroll [code]",
 	Short: "Enroll a new server and get api key",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -50,52 +51,47 @@ var enrollCmd = &cobra.Command{
 		if apiURL == "" {
 			logger.Debug("Getting api from prefix")
 			firstLetter := code[0:1]
-			maybeApiURL, err := getApiUrl(firstLetter)
+			maybeApiURL, err := getAPIURL(firstLetter)
 			if err != nil {
-				logger.Error("error getting api url: %s", err)
-				os.Exit(1)
+				logger.Fatal("error getting api url: %s", err)
 			}
 			apiURL = *maybeApiURL
 		}
 
 		req, err := http.NewRequest("GET", apiURL+"/v3/eds/internal/enroll/"+code, nil)
 		if err != nil {
-			logger.Error("error creating request: %s", err)
-			os.Exit(1)
+			logger.Fatal("error creating request: %s", err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+
+		retry := util.NewHTTPRetry(req)
+		resp, err := retry.Do()
 		if err != nil {
-			logger.Error("failed to enroll server: %w", err)
-			os.Exit(1)
+			logger.Fatal("failed to enroll server: %w", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			buf, _ := io.ReadAll(resp.Body)
-			logger.Error("failed to enroll server. status code=%d. %s", resp.StatusCode, string(buf))
-			os.Exit(1)
+			logger.Fatal("failed to enroll server. status code=%d. %s", resp.StatusCode, string(buf))
 		}
 
 		var enrollResp enrollResponse
 		if err := json.NewDecoder(resp.Body).Decode(&enrollResp); err != nil {
-			logger.Error("failed to decode response: %w", err)
-			os.Exit(1)
+			logger.Fatal("failed to decode response: %w", err)
 		}
 		if !enrollResp.Success {
-			logger.Error("failed to start enroll: %s", enrollResp.Message)
+			logger.Fatal("failed to start enroll: %s", enrollResp.Message)
 		}
 
 		tokenFile := filepath.Join(dataDir, "token.json")
 		file, err := os.Create(tokenFile)
 		if err != nil {
-			logger.Error("failed to create token file: %w", err)
-			os.Exit(1)
+			logger.Fatal("failed to create token file: %w", err)
 		}
 		_, err = file.WriteString(enrollResp.Data.Token)
 		if err != nil {
-			logger.Error("failed to write to token file: %w", err)
-			os.Exit(1)
+			logger.Fatal("failed to write to token file: %w", err)
 		}
-		defer file.Close()
+		file.Close()
 
 	},
 }
