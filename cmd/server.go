@@ -131,13 +131,16 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 
 	logger.Trace("sending session start: %s", util.JSONStringify(body))
 
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds", bytes.NewBuffer([]byte(util.JSONStringify(body))))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
+	resp, err := withPathRewrite(apiURL, "", func(urlPath string) (*http.Response, error) {
+		fmt.Println(urlPath)
+		req, err := http.NewRequest("POST", urlPath, bytes.NewBuffer([]byte(util.JSONStringify(body))))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
 	}
@@ -158,15 +161,17 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 }
 
 func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId string, errored bool) (string, error) {
-	var body sessionEnd
-	body.Errored = errored
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/"+sessionId, bytes.NewBuffer([]byte(util.JSONStringify(body))))
-	if err != nil {
-		return "", fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
+	resp, err := withPathRewrite(apiURL, "/"+sessionId, func(urlPath string) (*http.Response, error) {
+		var body sessionEnd
+		body.Errored = errored
+		req, err := http.NewRequest("POST", urlPath, bytes.NewBuffer([]byte(util.JSONStringify(body))))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to send session end: %w", err)
 	}
@@ -186,14 +191,29 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 	return s.Data.URL, nil
 }
 
-func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, strings.NewReader("{}"))
+func withPathRewrite(apiURL string, edsPath string, cb func(string) (*http.Response, error)) (*http.Response, error) {
+	resp, err := cb(apiURL + "/v3/eds/internal" + edsPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Println(color.YellowString("WARNING: using old EDS API path"))
+		// rewrite the path to the old path
+		return cb(apiURL + "/v3/eds" + edsPath)
+	}
+	return resp, nil
+}
+
+func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
+	resp, err := withPathRewrite(apiURL, "/renew/"+sessionId, func(urlPath string) (*http.Response, error) {
+		req, err := http.NewRequest("POST", urlPath, strings.NewReader("{}"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to send renew end: %w", err)
 	}
@@ -258,13 +278,15 @@ func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessio
 }
 
 func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, sessionId string) (string, error) {
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/v3/eds/%s/log", apiURL, sessionId), strings.NewReader("{}"))
-	if err != nil {
-		return "", fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
+	resp, err := withPathRewrite(apiURL, fmt.Sprintf("/%s/log", sessionId), func(urlPath string) (*http.Response, error) {
+		req, err := http.NewRequest("POST", urlPath, strings.NewReader("{}"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to get log upload url: %w", err)
 	}
@@ -673,7 +695,6 @@ var serverCmd = &cobra.Command{
 			for {
 				select {
 				case <-logSenderTicker.C:
-
 					// ask the notification consumer to send the logs so it can report the success/failure
 					notificationConsumer.CallSendLogs()
 				case <-renewTicker.C:

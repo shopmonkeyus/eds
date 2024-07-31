@@ -84,18 +84,27 @@ type logFileSink struct {
 }
 
 func (s *logFileSink) Write(buf []byte) (int, error) {
+	if s == nil {
+		return 0, nil
+	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	return s.f.Write(buf)
 }
 
 func (s *logFileSink) Close() error {
+	if s == nil {
+		return nil
+	}
 	return s.f.Close()
 }
 
 // Rotate creates a new log file and closes the old one
 // returns the old file name
 func (s *logFileSink) Rotate() (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("sink not initialized")
+	}
 	var old string
 	s.lock.Lock()
 	defer s.lock.Unlock()
