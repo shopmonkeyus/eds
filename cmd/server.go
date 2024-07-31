@@ -132,7 +132,6 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	logger.Trace("sending session start: %s", util.JSONStringify(body))
 
 	resp, err := withPathRewrite(apiURL, "", func(urlPath string) (*http.Response, error) {
-		fmt.Println(urlPath)
 		req, err := http.NewRequest("POST", urlPath, bytes.NewBuffer([]byte(util.JSONStringify(body))))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
