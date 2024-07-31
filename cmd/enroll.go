@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -31,30 +32,34 @@ func getApiUrl(firstLetter string) (*string, error) {
 	if url, exists := apiUrls[firstLetter]; exists {
 		return &url, nil
 	}
-	return nil, errors.New("Invalid first letter")
+	return nil, errors.New("invalid first letter")
 }
 
 var enrollCmd = &cobra.Command{
-	Use:   "enroll",
+	Use:   "enroll code",
 	Short: "Enroll a new server and get api key",
+	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[enroll]")
-		code := mustFlagString(cmd, "code", true)
+		code := args[0]
+		apiURL := mustFlagString(cmd, "api-url", false)
 
-		firstLetter := code[0:1]
-		apiURL, err := getApiUrl(firstLetter)
-
-		if err != nil {
-			logger.Error("error getting api url: %s", err)
-			os.Exit(1)
+		if apiURL == "" {
+			logger.Debug("Getting api from prefix")
+			firstLetter := code[0:1]
+			maybeApiURL, err := getApiUrl(firstLetter)
+			if err != nil {
+				logger.Error("error getting api url: %s", err)
+				os.Exit(1)
+			}
+			apiURL = *maybeApiURL
 		}
 
-		req, err := http.NewRequest("GET", *apiURL+"/v3/eds/internal/enroll/"+code, nil)
+		req, err := http.NewRequest("GET", apiURL+"/v3/eds/internal/enroll/"+code, nil)
 		if err != nil {
 			logger.Error("error creating request: %s", err)
 			os.Exit(1)
-
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -98,6 +103,5 @@ var enrollCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(enrollCmd)
-	enrollCmd.Flags().String("code", "", "the enrollment code from HQ")
-
+	enrollCmd.Flags().String("api-url", "", "the for testing again preview environment")
 }
