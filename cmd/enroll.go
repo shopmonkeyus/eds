@@ -80,7 +80,7 @@ var enrollCmd = &cobra.Command{
 			os.Mkdir("dataDir", 0755)
 		}
 
-		tokenFile := "dataDir/token.json"
+		tokenFile := filepath.Join("dataDir", "token.json")
 		file, err := os.Create(tokenFile)
 		if err != nil {
 			logger.Error("failed to create token file: %w", err)
