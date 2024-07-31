@@ -31,7 +31,7 @@ func getApiUrl(firstLetter string) (*string, error) {
 	if url, exists := apiUrls[firstLetter]; exists {
 		return &url, nil
 	}
-	return nil, fmt.Errorf("Invalid first letter")
+	return nil, errors.New("Invalid first letter")
 }
 
 var enrollCmd = &cobra.Command{
