@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -44,6 +45,7 @@ var enrollCmd = &cobra.Command{
 		logger = logger.WithPrefix("[enroll]")
 		code := args[0]
 		apiURL := mustFlagString(cmd, "api-url", false)
+		dataDir := getDataDir(cmd, logger)
 
 		if apiURL == "" {
 			logger.Debug("Getting api from prefix")
@@ -81,11 +83,8 @@ var enrollCmd = &cobra.Command{
 		if !enrollResp.Success {
 			logger.Error("failed to start enroll: %s", enrollResp.Message)
 		}
-		if _, err := os.Stat("dataDir"); os.IsNotExist(err) {
-			os.Mkdir("dataDir", 0755)
-		}
 
-		tokenFile := filepath.Join("dataDir", "token.json")
+		tokenFile := filepath.Join(dataDir, "token.json")
 		file, err := os.Create(tokenFile)
 		if err != nil {
 			logger.Error("failed to create token file: %w", err)
@@ -102,6 +101,12 @@ var enrollCmd = &cobra.Command{
 }
 
 func init() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("couldn't get current working directory: ", err)
+		os.Exit(1)
+	}
 	rootCmd.AddCommand(enrollCmd)
 	enrollCmd.Flags().String("api-url", "", "the for testing again preview environment")
+	enrollCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
 }
