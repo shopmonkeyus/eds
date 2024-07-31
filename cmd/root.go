@@ -108,7 +108,7 @@ func (s *logFileSink) Rotate() (string, error) {
 	if err := os.MkdirAll(s.logDir, 0755); err != nil {
 		return "", err
 	}
-	f, err := os.Create(filepath.Join(s.logDir, fmt.Sprintf("eds-server-%s.log", time.Now().UTC().Format(time.RFC3339))))
+	f, err := os.Create(filepath.Join(s.logDir, fmt.Sprintf("eds-server-%d.log", time.Now().UnixMilli())))
 	if err != nil {
 		return "", err
 	}
