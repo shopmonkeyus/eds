@@ -42,7 +42,6 @@ var enrollCmd = &cobra.Command{
 		logger = logger.WithPrefix("[enroll]")
 		code := mustFlagString(cmd, "code", true)
 
-		//get first letter of code
 		firstLetter := code[0:1]
 		apiURL, err := getApiUrl(firstLetter)
 
@@ -63,7 +62,6 @@ var enrollCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		defer resp.Body.Close()
-
 		if resp.StatusCode != http.StatusOK {
 			buf, _ := io.ReadAll(resp.Body)
 			logger.Error("failed to enroll server. status code=%d. %s", resp.StatusCode, string(buf))
@@ -78,7 +76,9 @@ var enrollCmd = &cobra.Command{
 		if !enrollResp.Success {
 			logger.Error("failed to start enroll: %s", enrollResp.Message)
 		}
-		logger.Trace("session %s started successfully", enrollResp.Data.Token)
+		if _, err := os.Stat("dataDir"); os.IsNotExist(err) {
+			os.Mkdir("dataDir", 0755)
+		}
 
 		tokenFile := "dataDir/token.json"
 		file, err := os.Create(tokenFile)
