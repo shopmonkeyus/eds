@@ -190,7 +190,7 @@ var forkCmd = &cobra.Command{
 						MaxPendingBuffer:      maxPendingBuffer,
 						Driver:                driver,
 						ExportTableTimestamps: exportTableTimestamps,
-						Restart:               restartFlag,
+						DeliverAll:            restartFlag,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)

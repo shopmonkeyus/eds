@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -482,7 +483,7 @@ var serverCmd = &cobra.Command{
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
-		url := mustFlagString(cmd, "url", true)
+		driverURL := mustFlagString(cmd, "url", true)
 		server := mustFlagString(cmd, "server", true)
 		dataDir := getDataDir(cmd, logger)
 
@@ -590,51 +591,61 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		sendLogs := func() {
+		sendLogs := func() *notification.SendLogsResponse {
 			// TODO: lock this so we don't rotate the logs while we are uploading them!
 			logger.Info("server logfile requested")
 			if sessionId == "" {
 				logger.Error("no session ID to rotate logs")
-				return
+				return nil
 			}
 			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/logfile", port))
 			if err != nil {
 				logger.Error("logfile failed: %s", err)
-				return
+				return nil
 			}
 			logger.Debug("logfile response: %d", resp.StatusCode)
 			if resp.StatusCode != http.StatusOK {
 				logger.Error("logfile failed: %d", resp.StatusCode)
-				return
+				return nil
 			}
 			defer resp.Body.Close()
 
 			buf, err := io.ReadAll(resp.Body)
 			if err != nil {
 				logger.Error("failed to read body: %s", err)
-				return
+				return nil
 			}
 			logFile := string(buf)
 			logger.Debug("uploading logfile: %s", logFile)
 			// gzip the log file, do this first in case we get an error!
 			if err := util.GzipFile(logFile); err != nil {
 				logger.Error("failed to compress log file: %s", err)
-				return
+				return nil
 			}
 			compressedLogFile := logFile + ".gz"
 			defer os.Remove(compressedLogFile)
-			url, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
+			uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 			if err != nil {
 				logger.Error("failed to get upload URL: %s", err)
-				return
+				return nil
 			}
-			if err := uploadLogs(logger, url, compressedLogFile); err != nil {
-				logger.Error("failed to upload logs to %s: %s", url, err)
-				return
+			if err := uploadLogs(logger, uploadURL, compressedLogFile); err != nil {
+				logger.Error("failed to upload logs to %s: %s", uploadURL, err)
+				return nil
 			}
 			// fork will be done writing to the file, so we can remove it
 			logger.Debug("removing old logfile: %s", logFile)
 			os.Remove(logFile)
+
+			parsedURL, err := url.Parse(uploadURL)
+			if err != nil {
+				logger.Error("failed to parse upload URL: %s", err)
+				return nil
+			}
+			return &notification.SendLogsResponse{
+				Path:      parsedURL.Path,
+				SessionId: sessionId,
+			}
 		}
 
 		natsurl := mustFlagString(cmd, "server", true)
@@ -662,7 +673,9 @@ var serverCmd = &cobra.Command{
 			for {
 				select {
 				case <-logSenderTicker.C:
-					sendLogs()
+
+					// ask the notification consumer to send the logs so it can report the success/failure
+					notificationConsumer.CallSendLogs()
 				case <-renewTicker.C:
 					renew()
 				}
@@ -675,7 +688,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, url)
+			session, err := sendStart(logger, apiurl, apikey, driverURL)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
@@ -808,7 +821,7 @@ func init() {
 	}
 
 	// NOTE: sync these with forkCmd
-	serverCmd.Flags().String("url", "", "provider connection string")
+	serverCmd.Flags().String("url", "", "driver connection string")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
 	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")

@@ -19,7 +19,6 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/registry"
 	"github.com/shopmonkeyus/eds-server/internal/tracker"
 	"github.com/shopmonkeyus/eds-server/internal/util"
@@ -347,44 +346,6 @@ func isCancelled(ctx context.Context) bool {
 	}
 }
 
-func createEDSSession(ctx context.Context, logger logger.Logger, serverURL string, apiURL string, apiKey string, suffix string, driverUrl string) error {
-	logger.Info("Creating EDS Checkpoint...")
-	// TODO: just get the cred instead of starting a session?
-	session, err := sendStart(logger, apiURL, apiKey, driverUrl)
-	if err != nil {
-		return fmt.Errorf("error creating EDS session: %s", err)
-	}
-	logger.Trace("EDS session created: %s", session.SessionId)
-	if session.Credential == nil {
-		return fmt.Errorf("no credential found in session")
-	}
-	credsFile := filepath.Join(os.TempDir(), fmt.Sprintf("eds-%s.creds", session.SessionId))
-	if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
-		logger.Fatal("failed to write creds to file: %s", err)
-	}
-	logger.Trace("credential saved to: %s", credsFile)
-	defer os.Remove(credsFile)
-	consumerContext, cancel := context.WithCancel(ctx)
-	defer cancel() // cancel the consumer context to close the nats connections etc
-	con, err := consumer.CreateConsumer(consumer.ConsumerConfig{
-		Logger:      logger,
-		Context:     consumerContext,
-		URL:         serverURL,
-		Credentials: credsFile,
-		Suffix:      suffix,
-	})
-	if err != nil {
-		return fmt.Errorf("error creating consumer: %s", err)
-	}
-	logger.Trace("consumer created: %s", con.Name())
-	// stop the session
-	if _, err := sendEnd(logger, apiURL, apiKey, session.SessionId, false); err != nil {
-		return fmt.Errorf("error ending session: %s", err)
-	}
-	logger.Trace("EDS session ended: %s", session.SessionId)
-	return nil
-}
-
 func tableNames(tableData []TableExportInfo) []string {
 	var tables []string
 	for _, table := range tableData {
@@ -484,20 +445,6 @@ var importCmd = &cobra.Command{
 				return
 			}
 		}()
-
-		// create eds session
-		noEDSSession, _ := cmd.Flags().GetBool("no-eds-session")
-		if !noEDSSession {
-			serverURL := mustFlagString(cmd, "server", true)
-			suffix := mustFlagString(cmd, "consumer-suffix", false)
-			if err := createEDSSession(ctx, logger, serverURL, apiURL, apiKey, suffix, driverUrl); err != nil {
-				logger.Error("error creating EDS session: %s", err)
-				logger.Info("If you do not intend to run EDS server after the import then you may use --no-eds-session to skip this")
-				os.Exit(1)
-			}
-		} else {
-			logger.Warn("Skipping EDS session, this may cause data loss if you run EDS after the import")
-		}
 
 		only, _ := cmd.Flags().GetStringSlice("only")
 		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
@@ -675,7 +622,6 @@ func init() {
 	importCmd.Flags().String("job-id", "", "resume an existing job")
 	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make changes")
 	importCmd.Flags().Bool("no-confirm", false, "skip the confirmation prompt")
-	importCmd.Flags().Bool("no-eds-session", false, "skip creating an EDS session")
 	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
 	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
 
@@ -689,8 +635,4 @@ func init() {
 	// internal flags
 	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	importCmd.Flags().MarkHidden("api-url")
-	importCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
-	importCmd.Flags().MarkHidden("server")
-	importCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
-	importCmd.Flags().MarkHidden("consumer-suffix")
 }
