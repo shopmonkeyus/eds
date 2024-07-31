@@ -191,14 +191,13 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 }
 
 func withPathRewrite(apiURL string, edsPath string, cb func(string) (*http.Response, error)) (*http.Response, error) {
-	resp, err := cb(apiURL + "/v3/eds/internal" + edsPath)
+	resp, err := cb(apiURL + "/v3/eds" + edsPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		fmt.Println(color.YellowString("WARNING: using old EDS API path"))
-		// rewrite the path to the old path
-		return cb(apiURL + "/v3/eds" + edsPath)
+		// rewrite the path to internal
+		return cb(apiURL + "/v3/eds/internal" + edsPath)
 	}
 	return resp, nil
 }
