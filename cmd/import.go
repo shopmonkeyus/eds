@@ -433,7 +433,14 @@ var importCmd = &cobra.Command{
 
 		if cmd.Flags().Changed("api-url") {
 			logger.Info("using alternative API url: %s", apiURL)
+		} else {
+			url, err := util.GetAPIURLFromJWT(apiKey)
+			if err != nil {
+				logger.Fatal("invalid API key. %s", err)
+			}
+			apiURL = url
 		}
+
 		var err error
 
 		// load the schema from the api fresh

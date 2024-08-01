@@ -552,6 +552,16 @@ var serverCmd = &cobra.Command{
 		server := mustFlagString(cmd, "server", true)
 		dataDir := getDataDir(cmd, logger)
 
+		if cmd.Flags().Changed("api-url") {
+			logger.Info("using alternative API url: %s", apiurl)
+		} else {
+			url, err := util.GetAPIURLFromJWT(apikey)
+			if err != nil {
+				logger.Fatal("invalid API key. %s", err)
+			}
+			apiurl = url
+		}
+
 		var credsFile string
 		var sessionDir string
 
