@@ -138,10 +138,7 @@ func handleSchemaProperty(prop internal.SchemaProperty, v string) string {
 	switch prop.Type {
 	case "object":
 		if prop.AdditionalProperties != nil && *prop.AdditionalProperties {
-			//Double up on any single quotes
-			//v = strings.Replace(v, "'", "''", -1)
 			return v
-
 		}
 	case "boolean":
 		if strings.ToLower(v) == "true" || v == "1" {
@@ -151,7 +148,15 @@ func handleSchemaProperty(prop internal.SchemaProperty, v string) string {
 			return "0"
 
 		}
-
+	case "integer":
+		if v == "NULL" {
+			return "0"
+		}
+	case "array":
+		//Arrays are stored as varchar
+		if !prop.Nullable && v == "NULL" {
+			return "''"
+		}
 	default:
 		return v
 	}
@@ -202,7 +207,7 @@ func createSQL(s *internal.Schema) string {
 }
 
 func parseURLToDSN(urlstr string) (string, error) {
-	// Example input: "sqlserver://sa:eds@localhost:11433/database=eds"
+	// Example input: "sqlserver://sa:eds@localhost:11433/eds"
 	// Desired output: "sqlserver://sa:eds@localhost:11433/database=eds?multiStatements=true"
 	u, err := url.Parse(urlstr)
 	if err != nil {
