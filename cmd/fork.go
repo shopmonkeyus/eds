@@ -122,7 +122,7 @@ var forkCmd = &cobra.Command{
 			}
 		}
 
-		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker)
+		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker, datadir)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(3)

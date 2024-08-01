@@ -480,6 +480,7 @@ var importCmd = &cobra.Command{
 
 		var success bool
 		defer func() {
+			defer util.RecoverPanic(logger)
 			logger.Trace("exit success: %v", success)
 			var filesRemoved bool
 			if success {
@@ -500,6 +501,7 @@ var importCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		}()
+		defer util.RecoverPanic(logger) // panic recover needs to happen after the defer above
 
 		if dir == "" {
 			if jobID == "" {

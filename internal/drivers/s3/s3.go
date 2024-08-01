@@ -3,10 +3,12 @@ package s3
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/importer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
@@ -50,12 +53,13 @@ func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 type s3Driver struct {
-	config       internal.DriverConfig
-	logger       logger.Logger
-	bucket       string
-	prefix       string
-	s3           *awss3.Client
-	importConfig internal.ImporterConfig
+	config          internal.DriverConfig
+	logger          logger.Logger
+	bucket          string
+	prefix          string
+	s3              *awss3.Client
+	importConfig    internal.ImporterConfig
+	schemaValidator *util.SchemaValidator
 }
 
 var _ internal.Driver = (*s3Driver)(nil)
@@ -65,7 +69,7 @@ var _ internal.Importer = (*s3Driver)(nil)
 var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
-func (p *s3Driver) connect(ctx context.Context, urlString string) error {
+func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, dataDir string, urlString string) error {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
@@ -87,6 +91,16 @@ func (p *s3Driver) connect(ctx context.Context, urlString string) error {
 			if !strings.HasSuffix(p.prefix, "/") {
 				p.prefix += "/"
 			}
+		}
+	}
+
+	qs := u.Query()
+	sv := qs.Get("schema-validator")
+	if sv != "" {
+		fp := filepath.Join(dataDir, sv)
+		p.schemaValidator, err = util.NewSchemaValidator(fp)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -121,7 +135,10 @@ func (p *s3Driver) connect(ctx context.Context, urlString string) error {
 	if u.Query().Get("region") != "" {
 		region = u.Query().Get("region")
 	} else if region == "" {
-		region = "us-west-2"
+		region = os.Getenv("AWS_DEFAULT_REGION")
+		if region == "" {
+			region = "us-west-2"
+		}
 	}
 
 	var cfg aws.Config
@@ -148,6 +165,18 @@ func (p *s3Driver) connect(ctx context.Context, urlString string) error {
 		o.UsePathStyle = true
 	})
 
+	if _, err := p.s3.ListObjects(ctx, &awss3.ListObjectsInput{Bucket: aws.String(p.bucket), MaxKeys: aws.Int32(1)}); err != nil {
+		var bnf *types.NoSuchBucket
+		if errors.As(err, &bnf) {
+			if _, err := p.s3.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(p.bucket)}); err != nil {
+				return fmt.Errorf("bucket not found and unable to create bucket %s: %w", p.bucket, err)
+			}
+			logger.Info("created bucket %s", p.bucket)
+			return nil // we created the bucket ok
+		}
+		return fmt.Errorf("unable to verify bucket %s: %w", p.bucket, bnf)
+	}
+
 	return nil
 }
 
@@ -155,7 +184,7 @@ func (p *s3Driver) connect(ctx context.Context, urlString string) error {
 func (p *s3Driver) Start(pc internal.DriverConfig) error {
 	p.config = pc
 	p.logger = pc.Logger.WithPrefix("[s3]")
-	if err := p.connect(pc.Context, pc.URL); err != nil {
+	if err := p.connect(pc.Context, p.logger, pc.DataDir, pc.URL); err != nil {
 		return err
 	}
 	return nil
@@ -172,13 +201,29 @@ func (p *s3Driver) MaxBatchSize() int {
 	return 1
 }
 
-func (p *s3Driver) process(logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
+func (p *s3Driver) process(ctx context.Context, logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
 	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
+	if p.schemaValidator != nil {
+		found, valid, path, err := p.schemaValidator.Validate(event)
+		if err != nil {
+			return true, fmt.Errorf("error validating schema: %w", err)
+		}
+		if !found {
+			logger.Trace("skipping %s, no schema found for event: %s", event.Table, util.JSONStringify(event))
+			return false, nil
+		}
+		if !valid {
+			logger.Trace("skipping %s, schema did not validate for event: %s", event.Table, util.JSONStringify(event))
+			return false, nil
+		}
+		key = path
+		logger.Trace("schema validated %s", path)
+	}
 	if dryRun {
 		logger.Trace("would store %s:%s", p.bucket, key)
 	} else {
 		buf := []byte(util.JSONStringify(event))
-		_, err := p.s3.PutObject(p.config.Context, &awss3.PutObjectInput{
+		_, err := p.s3.PutObject(ctx, &awss3.PutObjectInput{
 			Bucket:        aws.String(p.bucket),
 			Key:           aws.String(key),
 			ContentType:   aws.String("application/json"),
@@ -195,7 +240,7 @@ func (p *s3Driver) process(logger logger.Logger, event internal.DBChangeEvent, d
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
 func (p *s3Driver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
-	return p.process(logger, event, false)
+	return p.process(p.config.Context, logger, event, false)
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
@@ -236,7 +281,7 @@ func (p *s3Driver) CreateDatasource(schema internal.SchemaMap) error {
 
 // ImportEvent allows the handler to process the event.
 func (p *s3Driver) ImportEvent(event internal.DBChangeEvent, schema *internal.Schema) error {
-	_, err := p.process(p.logger, event, p.importConfig.DryRun)
+	_, err := p.process(p.importConfig.Context, p.logger, event, p.importConfig.DryRun)
 	return err
 }
 
@@ -248,7 +293,7 @@ func (p *s3Driver) ImportCompleted() error {
 func (p *s3Driver) Import(config internal.ImporterConfig) error {
 	p.logger = config.Logger.WithPrefix("[s3]")
 	p.importConfig = config
-	if err := p.connect(config.Context, config.URL); err != nil {
+	if err := p.connect(config.Context, p.logger, filepath.Dir(config.DataDir), config.URL); err != nil {
 		return err
 	}
 	return importer.Run(p.logger, config, p)

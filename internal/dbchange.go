@@ -15,6 +15,7 @@ type DBChangeEvent struct {
 	ModelVersion  string          `json:"modelVersion"`
 	CompanyID     *string         `json:"companyId,omitempty"`
 	LocationID    *string         `json:"locationId,omitempty"`
+	UserID        *string         `json:"userId,omitempty"`
 	Before        json.RawMessage `json:"before,omitempty"`
 	After         json.RawMessage `json:"after,omitempty"`
 	Diff          []string        `json:"diff,omitempty"`

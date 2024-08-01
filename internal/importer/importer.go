@@ -70,6 +70,19 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 				return fmt.Errorf("unable to decode JSON: %w", err)
 			}
 			event.Key = []string{event.GetPrimaryKey()}
+			o, err := event.GetObject()
+			if err != nil {
+				return fmt.Errorf("unable to get object: %w", err)
+			}
+			if id, ok := o["locationId"].(string); ok {
+				event.LocationID = &id
+			}
+			if id, ok := o["companyId"].(string); ok {
+				event.LocationID = &id
+			}
+			if id, ok := o["userId"].(string); ok {
+				event.UserID = &id
+			}
 			event.Imported = true
 			count++
 			if err := handler.ImportEvent(event, data); err != nil {

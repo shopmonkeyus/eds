@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Shopmonkey Labor Message",
+  "type": "object",
+  "allOf": [{ "$ref": "file:///base/message.json" }],
+  "properties": {
+    "table": {
+      "description": "The type of message we received from SM",
+      "type": "string",
+      "const": "labor"
+    }
+  },
+
+  "required": ["table"],
+
+  "anyOf": [
+    {
+      "properties": {
+        "before": {
+          "$ref": "file:///models/labor.json"
+        },
+        "after": {
+          "allOf": [
+            { "$ref": "file:///models/labor.json" },
+            { "properties": { "completed": { "const": true } } }
+          ]
+        },
+        "diff": {
+          "description": "A list of modified fields within an UPDATE operation",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "contains": {
+            "anyOf": [{ "const": "completed" }]
+          }
+        }
+      },
+      "required": ["before", "after", "diff"]
+    }
+  ]
+}
