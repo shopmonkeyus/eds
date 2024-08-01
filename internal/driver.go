@@ -55,7 +55,7 @@ type Driver interface {
 	MaxBatchSize() int
 
 	// Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-	Process(event DBChangeEvent) (bool, error)
+	Process(logger logger.Logger, event DBChangeEvent) (bool, error)
 
 	// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 	Flush() error

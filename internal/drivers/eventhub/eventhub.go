@@ -80,7 +80,7 @@ func strWithDef(val *string, def string) string {
 var contentType = "application/json"
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *eventHubDriver) Process(event internal.DBChangeEvent) (bool, error) {
+func (p *eventHubDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	object, err := event.GetObject()
