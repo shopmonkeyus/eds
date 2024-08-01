@@ -179,13 +179,14 @@ func (c *Consumer) flush() bool {
 }
 
 func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent) bool {
-	if c.tableTimestamps == nil {
-		return false
-	}
-	eventTimestamp := time.UnixMilli(evt.Timestamp)
-	// check if we have a timestamp for this table and only process if its newer
-	if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
-		return eventTimestamp.Before(*tableTimestamp)
+	if c.tableTimestamps != nil {
+		eventTimestamp := time.UnixMilli(evt.Timestamp)
+		// check if we have a timestamp for this table and only process if its newer
+		if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
+			if eventTimestamp.Before(*tableTimestamp) {
+				return true
+			}
+		}
 	}
 	if c.validator != nil {
 		found, valid, path, err := c.validator.Validate(*evt)
@@ -249,7 +250,7 @@ func (c *Consumer) bufferer() {
 				return
 			}
 			if c.shouldSkip(log, &evt) {
-				log.Trace("skipping event due to timestamp %d", evt.Timestamp)
+				log.Debug("skipping event")
 				if err := msg.Ack(); err != nil {
 					// not much we can do here, just log it
 					log.Error("error acking skipped msg: %s", err)
@@ -508,6 +509,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
 	consumer.validator = config.SchemaValidator
+
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
 	if config.ExportTableTimestamps != nil {
 		consumer.tableTimestamps = config.ExportTableTimestamps

@@ -84,6 +84,25 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 				event.UserID = &id
 			}
 			event.Imported = true
+
+			if config.SchemaValidator != nil {
+				found, valid, path, err := config.SchemaValidator.Validate(event)
+				if err != nil {
+					return fmt.Errorf("error validating schema: %w", err)
+				}
+				if !found {
+					logger.Trace("skipping %s, no schema found for event: %s", event.Table, util.JSONStringify(event))
+					continue
+				}
+				if !valid {
+					logger.Trace("skipping %s, schema did not validate for event: %s", event.Table, util.JSONStringify(event))
+					continue
+				}
+				if path != "" {
+					event.SchemaValidatedPath = &path
+					logger.Trace("schema validated %s", path)
+				}
+			}
 			count++
 			if err := handler.ImportEvent(event, data); err != nil {
 				return err
