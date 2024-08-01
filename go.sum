@@ -249,12 +249,10 @@ github.com/shoenig/go-m1cpu v0.1.6 h1:nxdKQNcEB6vzgA2E2bvzKIYRuNj7XNJ4S/aRSwKzFt
 github.com/shoenig/go-m1cpu v0.1.6/go.mod h1:1JJMcUBvfNwpq05QDQVAnx3gUHr9IYF7GNg9SUEw2VQ=
 github.com/shoenig/test v0.6.4 h1:kVTaSd7WLz5WZ2IaoM0RSzRsUD+m8wRR+5qvntpn4LU=
 github.com/shoenig/test v0.6.4/go.mod h1:byHiCGXqrVaflBLAMq/srcZIHynQPQgeyvkvXnjqq0k=
-github.com/shopmonkeyus/go-common v0.0.68 h1:TaIz9nxgYa+0cdJKCuyiH5ZKjRHkZXvXvSS1UvwGido=
-github.com/shopmonkeyus/go-common v0.0.68/go.mod h1:YOSV3UmAG1D8T7rb1+sK2ktIVtJQ35FAFzn2+MqhToM=
+github.com/shopmonkeyus/go-common v0.0.69 h1:TTR0pVnXD27cDVOyCOVSHCfOGsv0gKW3aImMpBNaJhI=
+github.com/shopmonkeyus/go-common v0.0.69/go.mod h1:YOSV3UmAG1D8T7rb1+sK2ktIVtJQ35FAFzn2+MqhToM=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
-github.com/snowflakedb/gosnowflake v1.10.1 h1:VGeQxsQj5s3hP0cRmtNYozhUvs2Y7Reu5Pk5pKuRGpI=
-github.com/snowflakedb/gosnowflake v1.10.1/go.mod h1:hvc58mU03qg78mSz5z17/qnzI56hOdYYK2txWbM0hN0=
 github.com/snowflakedb/gosnowflake v1.11.0 h1:qyqunGCVyq/Qyx40KQT+6sJ1CAGuuG2qv3WiCTLTctI=
 github.com/snowflakedb/gosnowflake v1.11.0/go.mod h1:WFe+8mpsapDaQjHX6BqJBKtfQCGlGD3lHKeDsKfpx2A=
 github.com/spf13/cobra v1.8.1 h1:e5/vxKd/rZsfSJMUX1agtjeTDf+qv1/JdBF8gg5k9ZM=

@@ -113,13 +113,17 @@ func (c *NotificationConsumer) publishResponse(sessionId string, action string, 
 	return nil
 }
 
+func (c *NotificationConsumer) PublishSendLogsResponse(response *SendLogsResponse) error {
+	return c.publishResponse(response.SessionId, "sendlogs", []byte(util.JSONStringify(response)))
+}
+
 func (c *NotificationConsumer) CallSendLogs() {
 	response := c.handler.SendLogs()
 	if response == nil {
 		c.logger.Warn("sendlogs handler returned nothing")
 		return
 	}
-	if err := c.publishResponse(response.SessionId, "sendlogs", []byte(util.JSONStringify(response))); err != nil {
+	if err := c.PublishSendLogsResponse(response); err != nil {
 		c.logger.Error("failed to send sendlogs response: %s", err)
 	}
 }

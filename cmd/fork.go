@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -52,12 +51,14 @@ var forkCmd = &cobra.Command{
 		defer cancel()
 		logger := newLogger(cmd)
 		datadir := mustFlagString(cmd, "data-dir", true)
-		sink, err := newLogFileSink(filepath.Join(datadir, "logs"))
+		logDir := mustFlagString(cmd, "logs-dir", true)
+		sink, err := newLogFileSink(logDir)
 		if err != nil {
 			logger.Error("error creating log file sink: %s", err)
 			os.Exit(3)
 		}
 		defer sink.Close()
+		logger.Trace("using log file sink: %s", logDir)
 		logger = newLoggerWithSink(logger, sink).WithPrefix("[fork]")
 
 		defer util.RecoverPanic(logger)
@@ -169,6 +170,7 @@ var forkCmd = &cobra.Command{
 			w.Write([]byte(fn))
 		})
 
+		var exitCode int
 		go func() {
 			defer util.RecoverPanic(logger)
 			defer func() {
@@ -214,6 +216,7 @@ var forkCmd = &cobra.Command{
 					if err := localConsumer.Stop(); err != nil {
 						logger.Error("error stopping consumer: %s", err)
 					}
+					exitCode = 1
 					return
 				case sig := <-restart:
 					switch sig {
@@ -266,6 +269,7 @@ var forkCmd = &cobra.Command{
 
 		logger.Trace("server was up for %v", time.Since(serverStarted))
 		logger.Info("👋 Bye")
+		os.Exit(exitCode)
 	},
 }
 
@@ -274,7 +278,8 @@ func init() {
 	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
 
 	// NOTE: sync these with serverCmd
-	forkCmd.Flags().String("data-dir", "", "the data directory for storing logs and other data")
+	forkCmd.Flags().String("data-dir", "", "the data directory for storing state, logs, and other data")
+	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
 	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
