@@ -163,8 +163,10 @@ func (c *Consumer) flush() bool {
 		internal.PendingEvents.Dec()
 		count++
 	}
-	processingDuration := time.Since(*c.pendingStarted)
-	internal.ProcessingDuration.Observe(processingDuration.Seconds())
+	if c.pendingStarted != nil {
+		processingDuration := time.Since(*c.pendingStarted)
+		internal.ProcessingDuration.Observe(processingDuration.Seconds())
+	}
 	internal.FlushDuration.Observe(time.Since(started).Seconds())
 	internal.FlushCount.Observe(count)
 	c.pending = nil
