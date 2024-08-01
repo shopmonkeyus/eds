@@ -25,9 +25,9 @@ type enrollResponse struct {
 
 func getAPIURL(firstLetter string) (*string, error) {
 	apiUrls := map[string]string{
-		"P": "https://api.shopmonkey.cloud/",
-		"S": "https://sandbox-api.shopmonkey.cloud/",
-		"E": "https://edge-api.shopmonkey.cloud/",
+		"P": "https://api.shopmonkey.cloud",
+		"S": "https://sandbox-api.shopmonkey.cloud",
+		"E": "https://edge-api.shopmonkey.cloud",
 		"L": "http://localhost:3101",
 	}
 
