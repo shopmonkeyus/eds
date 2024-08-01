@@ -22,12 +22,12 @@ func (r *Record) String() string {
 	return JSONStringify(r)
 }
 
-// Records returns the array of records
+// Records returns the array of records.
 func (b *Batcher) Records() []*Record {
 	return b.records
 }
 
-// Add will add a record to the batcher
+// Add will add a record to the batcher.
 func (b *Batcher) Add(table string, id string, operation string, diff []string, payload map[string]any, event *internal.DBChangeEvent) {
 	var primaryKey string
 	if val, ok := payload["id"].(string); ok {
@@ -68,18 +68,18 @@ func (b *Batcher) Add(table string, id string, operation string, diff []string, 
 	}
 }
 
-// Clear will clear the batcher and reset the internal state
+// Clear will clear the batcher and reset the internal state.
 func (b *Batcher) Clear() {
 	b.records = nil
 	b.pks = make(map[string]uint)
 }
 
-// Clear will clear the batcher and reset the internal state
+// Len will return the number of records pending in the batcher.
 func (b *Batcher) Len() int {
 	return len(b.records)
 }
 
-// NewBatcher creates a new batcher instance
+// NewBatcher creates a new batcher instance.
 func NewBatcher() *Batcher {
 	return &Batcher{
 		pks: make(map[string]uint),
