@@ -30,13 +30,20 @@ var FlushCount = promauto.NewHistogram(prometheus.HistogramOpts{
 	Buckets: []float64{1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000},
 })
 
+var ProcessingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+	Name:    "eds_processing_duration_seconds",
+	Help:    "The latency in duration of processing events from receving them to flushing them",
+	Buckets: []float64{1, 2, 3, 5, 10, 60, 300, 600, 1800, 3600},
+})
+
 // SystemStats contains the metrics and system stats
 type SystemStats struct {
 	Metrics struct {
-		FlushCount    float64
-		FlushDuration float64
-		PendingEvents float64
-		TotalEvents   float64
+		FlushCount         float64 `json:"flushCount"`
+		FlushDuration      float64 `json:"flushDuration"`
+		ProcessingDuration float64 `json:"processingDuration"`
+		PendingEvents      float64 `json:"pendingEvents"`
+		TotalEvents        float64 `json:"totalEvents"`
 	} `json:"metrics"`
 	Memory *mem.VirtualMemoryStat `json:"memory"`
 	Load   *load.AvgStat          `json:"load"`
@@ -79,6 +86,7 @@ func GetSystemStats() (*SystemStats, error) {
 	s.Metrics.FlushDuration = getMetricValue(FlushDuration)
 	s.Metrics.PendingEvents = getMetricValue(PendingEvents)
 	s.Metrics.TotalEvents = getMetricValue(TotalEvents)
+	s.Metrics.ProcessingDuration = getMetricValue(ProcessingDuration)
 	s.Memory, err = mem.VirtualMemory()
 	if err != nil {
 		return nil, err

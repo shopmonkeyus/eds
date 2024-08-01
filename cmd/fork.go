@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -52,11 +51,14 @@ var forkCmd = &cobra.Command{
 		defer cancel()
 		logger := newLogger(cmd)
 		datadir := mustFlagString(cmd, "data-dir", true)
-		sink, err := newLogFileSink(filepath.Join(datadir, "logs"))
+		logDir := mustFlagString(cmd, "logs-dir", true)
+		sink, err := newLogFileSink(logDir)
 		if err != nil {
 			logger.Error("error creating log file sink: %s", err)
+			os.Exit(3)
 		}
 		defer sink.Close()
+		logger.Trace("using log file sink: %s", logDir)
 		logger = newLoggerWithSink(logger, sink).WithPrefix("[fork]")
 
 		defer util.RecoverPanic(logger)
@@ -82,10 +84,21 @@ var forkCmd = &cobra.Command{
 		}
 		defer tracker.Close()
 
-		registry, err := registry.NewFileRegistry(schemaFile)
-		if err != nil {
-			logger.Error("error creating registry: %s", err)
-			os.Exit(3)
+		var schemaRegistry internal.SchemaRegistry
+
+		if util.Exists(schemaFile) {
+			schemaRegistry, err = registry.NewFileRegistry(schemaFile)
+			if err != nil {
+				logger.Error("error creating registry: %s", err)
+				os.Exit(3)
+			}
+		} else {
+			apiUrl := mustFlagString(cmd, "api-url", true)
+			schemaRegistry, err = registry.NewAPIRegistry(apiUrl)
+			if err != nil {
+				logger.Error("error creating registry: %s", err)
+				os.Exit(3)
+			}
 		}
 
 		// TODO: move these into the tracker
@@ -109,7 +122,7 @@ var forkCmd = &cobra.Command{
 			}
 		}
 
-		driver, err := internal.NewDriver(ctx, logger, url, registry, tracker)
+		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(3)
@@ -157,6 +170,7 @@ var forkCmd = &cobra.Command{
 			w.Write([]byte(fn))
 		})
 
+		var exitCode int
 		go func() {
 			defer util.RecoverPanic(logger)
 			defer func() {
@@ -179,7 +193,7 @@ var forkCmd = &cobra.Command{
 						MaxPendingBuffer:      maxPendingBuffer,
 						Driver:                driver,
 						ExportTableTimestamps: exportTableTimestamps,
-						Restart:               restartFlag,
+						DeliverAll:            restartFlag,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)
@@ -202,6 +216,7 @@ var forkCmd = &cobra.Command{
 					if err := localConsumer.Stop(); err != nil {
 						logger.Error("error stopping consumer: %s", err)
 					}
+					exitCode = 1
 					return
 				case sig := <-restart:
 					switch sig {
@@ -254,6 +269,7 @@ var forkCmd = &cobra.Command{
 
 		logger.Trace("server was up for %v", time.Since(serverStarted))
 		logger.Info("👋 Bye")
+		os.Exit(exitCode)
 	},
 }
 
@@ -262,11 +278,13 @@ func init() {
 	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
 
 	// NOTE: sync these with serverCmd
-	forkCmd.Flags().String("data-dir", "", "the data directory for storing logs and other data")
+	forkCmd.Flags().String("data-dir", "", "the data directory for storing state, logs, and other data")
+	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
 	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "driver connection string")
+	forkCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")

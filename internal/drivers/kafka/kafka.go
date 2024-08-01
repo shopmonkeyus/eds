@@ -100,7 +100,7 @@ func strWithDef(val *string, def string) string {
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *kafkaDriver) Process(event internal.DBChangeEvent) (bool, error) {
+func (p *kafkaDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	key := fmt.Sprintf("dbchange.%s.%s.%s.%s.%s", event.Table, event.Operation, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), event.ID)

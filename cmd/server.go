@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -62,12 +64,15 @@ type sessionEnd struct {
 	Errored bool `json:"errored"`
 }
 
+type sessionEndURLs struct {
+	URL      string `json:"url"`
+	ErrorURL string `json:"errorUrl"`
+}
+
 type sessionEndResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
-		URL string `json:"url"`
-	} `json:"data"`
+	Success bool           `json:"success"`
+	Message string         `json:"message"`
+	Data    sessionEndURLs `json:"data"`
 }
 
 type sessionRenewResponse struct {
@@ -117,6 +122,9 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	if err != nil {
 		return nil, fmt.Errorf("failed to get driver metadata: %w", err)
 	}
+	if driverMeta == nil {
+		return nil, fmt.Errorf("invalid driver URL: %s", driverUrl)
+	}
 	body.Driver.Description = driverMeta.Description
 	body.Driver.Name = driverMeta.Name
 	body.Driver.ID = driverMeta.Scheme
@@ -127,13 +135,15 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 
 	logger.Trace("sending session start: %s", util.JSONStringify(body))
 
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds", bytes.NewBuffer([]byte(util.JSONStringify(body))))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
+	resp, err := withPathRewrite(apiURL, "", func(urlPath string) (*http.Response, error) {
+		req, err := http.NewRequest("POST", urlPath, bytes.NewBuffer([]byte(util.JSONStringify(body))))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
 	}
@@ -153,43 +163,59 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	return &sessionResp.Data, nil
 }
 
-func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId string, errored bool) (string, error) {
-	var body sessionEnd
-	body.Errored = errored
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/"+sessionId, bytes.NewBuffer([]byte(util.JSONStringify(body))))
+func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId string, errored bool) (*sessionEndURLs, error) {
+	resp, err := withPathRewrite(apiURL, "/"+sessionId, func(urlPath string) (*http.Response, error) {
+		var body sessionEnd
+		body.Errored = errored
+		req, err := http.NewRequest("POST", urlPath, bytes.NewBuffer([]byte(util.JSONStringify(body))))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
-		return "", fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
-	if err != nil {
-		return "", fmt.Errorf("failed to send session end: %w", err)
+		return nil, fmt.Errorf("failed to send session end: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to send session end. status code=%d. %s", resp.StatusCode, string(buf))
+		return nil, fmt.Errorf("failed to send session end. status code=%d. %s", resp.StatusCode, string(buf))
 	}
 	var s sessionEndResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	if !s.Success {
-		return "", fmt.Errorf("failed to end session: %s", s.Message)
+		return nil, fmt.Errorf("failed to end session: %s", s.Message)
 	}
 	logger.Trace("session %s ended successfully: %s", sessionId, s.Data.URL)
-	return s.Data.URL, nil
+	return &s.Data, nil
+}
+
+func withPathRewrite(apiURL string, edsPath string, cb func(string) (*http.Response, error)) (*http.Response, error) {
+	resp, err := cb(apiURL + "/v3/eds" + edsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		// rewrite the path to internal
+		return cb(apiURL + "/v3/eds/internal" + edsPath)
+	}
+	return resp, nil
 }
 
 func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/renew/"+sessionId, strings.NewReader("{}"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
+	resp, err := withPathRewrite(apiURL, "/renew/"+sessionId, func(urlPath string) (*http.Response, error) {
+		req, err := http.NewRequest("POST", urlPath, strings.NewReader("{}"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to send renew end: %w", err)
 	}
@@ -209,7 +235,7 @@ func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId str
 	return s.Data.Credential, nil
 }
 
-func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
+func uploadFile(logger logger.Logger, url string, logFileBundle string) error {
 	of, err := os.Open(logFileBundle)
 	if err != nil {
 		return fmt.Errorf("failed to open log file bundle: %w", err)
@@ -235,32 +261,80 @@ func uploadLogs(logger logger.Logger, url string, logFileBundle string) error {
 	return nil
 }
 
-func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessionId string, errored bool, logfile string) {
-	logger.Info("uploading logs for session: %s", sessionId)
-	if !errored {
-		defer os.Remove(logfile)
+func uploadLogFile(logger logger.Logger, uploadURL string, logFile string) (string, error) {
+	logger.Debug("uploading logfile: %s", logFile)
+	// gzip the log file, do this first in case we get an error!
+	if err := util.GzipFile(logFile); err != nil {
+		return "", fmt.Errorf("failed to compress log file: %w", err)
 	}
-	url, err := sendEnd(logger, apiurl, apikey, sessionId, errored)
+	compressedLogFile := logFile + ".gz"
+	defer os.Remove(compressedLogFile)
+
+	if err := uploadFile(logger, uploadURL, compressedLogFile); err != nil {
+		return "", fmt.Errorf("failed to upload logs to %s: %s", uploadURL, err)
+	}
+	parsedURL, err := url.Parse(uploadURL)
 	if err != nil {
-		logger.Fatal("failed to send session end: %s", err)
+		return "", fmt.Errorf("failed to parse upload URL: %w", err)
 	}
-	if err := uploadLogs(logger, url, logfile); err != nil {
-		logger.Fatal("failed to upload logs: %s", err)
+	return parsedURL.Path, nil
+}
+
+func getRemainingLog(logsDir string) (string, error) {
+	files, err := util.ListDir(logsDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to list directory: %w", err)
+	}
+	if len(files) == 0 {
+		return "", nil
+	}
+	sort.Strings(files)
+
+	var last string
+	for _, file := range files {
+		if !strings.HasSuffix(file, ".log") {
+			continue
+		}
+		last = file
+	}
+	return last, nil
+}
+
+func sendEndAndUpload(logger logger.Logger, apiurl string, apikey string, sessionId string, errored bool, logfile string, stderrFile string) (string, error) {
+	logger.Info("uploading logs for session: %s", sessionId)
+	urls, err := sendEnd(logger, apiurl, apikey, sessionId, errored)
+	if err != nil {
+		return "", fmt.Errorf("failed to send session end: %w", err)
+	}
+	var logFileStoragePath string
+	if logfile != "" {
+		logFileStoragePath, err = uploadLogFile(logger, urls.URL, logfile)
+		if err != nil {
+			return "", fmt.Errorf("failed to upload logs: %w", err)
+		}
+	}
+	if urls.ErrorURL != "" && stderrFile != "" {
+		if _, err := uploadLogFile(logger, urls.ErrorURL, stderrFile); err != nil {
+			return "", fmt.Errorf("failed to upload error logs: %w", err)
+		}
 	}
 	logger.Trace("logs uploaded successfully for session: %s", sessionId)
 	if errored {
 		logger.Info("error log files saved to %s for session: %s", logfile, sessionId)
 	}
+	return logFileStoragePath, nil
 }
 
 func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, sessionId string) (string, error) {
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/v3/eds/%s/log", apiURL, sessionId), strings.NewReader("{}"))
-	if err != nil {
-		return "", fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
+	resp, err := withPathRewrite(apiURL, fmt.Sprintf("/%s/log", sessionId), func(urlPath string) (*http.Response, error) {
+		req, err := http.NewRequest("POST", urlPath, strings.NewReader("{}"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		setHTTPHeader(req, apiKey)
+		retry := util.NewHTTPRetry(req)
+		return retry.Do()
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to get log upload url: %w", err)
 	}
@@ -479,7 +553,7 @@ var serverCmd = &cobra.Command{
 
 		apiurl := mustFlagString(cmd, "api-url", true)
 		apikey := mustFlagString(cmd, "api-key", true)
-		url := mustFlagString(cmd, "url", true)
+		driverURL := mustFlagString(cmd, "url", true)
 		server := mustFlagString(cmd, "server", true)
 		dataDir := getDataDir(cmd, logger)
 
@@ -507,6 +581,7 @@ var serverCmd = &cobra.Command{
 		_args = append(_args, "--port", fmt.Sprintf("%d", port))
 		_args = append(_args, "--data-dir", dataDir)
 		_args = append(_args, "--server", server)
+		_args = append(_args, "--api-url", apiurl)
 
 		var sessionId string
 
@@ -586,51 +661,52 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		sendLogs := func() {
-			// TODO: lock this so we don't rotate the logs while we are uploading them!
+		var logsLock sync.Mutex
+		sendLogs := func() *notification.SendLogsResponse {
 			logger.Info("server logfile requested")
+			logsLock.Lock()
+			defer logsLock.Unlock()
 			if sessionId == "" {
 				logger.Error("no session ID to rotate logs")
-				return
+				return nil
 			}
 			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/logfile", port))
 			if err != nil {
 				logger.Error("logfile failed: %s", err)
-				return
+				return nil
 			}
 			logger.Debug("logfile response: %d", resp.StatusCode)
 			if resp.StatusCode != http.StatusOK {
 				logger.Error("logfile failed: %d", resp.StatusCode)
-				return
+				return nil
 			}
 			defer resp.Body.Close()
 
 			buf, err := io.ReadAll(resp.Body)
 			if err != nil {
 				logger.Error("failed to read body: %s", err)
-				return
+				return nil
 			}
 			logFile := string(buf)
-			logger.Debug("uploading logfile: %s", logFile)
-			// gzip the log file, do this first in case we get an error!
-			if err := util.GzipFile(logFile); err != nil {
-				logger.Error("failed to compress log file: %s", err)
-				return
-			}
-			compressedLogFile := logFile + ".gz"
-			defer os.Remove(compressedLogFile)
-			url, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
+			uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 			if err != nil {
 				logger.Error("failed to get upload URL: %s", err)
-				return
+				return nil
 			}
-			if err := uploadLogs(logger, url, compressedLogFile); err != nil {
-				logger.Error("failed to upload logs to %s: %s", url, err)
-				return
+			path, err := uploadLogFile(logger, uploadURL, logFile)
+			if err != nil {
+				logger.Error("failed to upload logfile: %s", err)
+				return nil
 			}
+
 			// fork will be done writing to the file, so we can remove it
 			logger.Debug("removing old logfile: %s", logFile)
 			os.Remove(logFile)
+
+			return &notification.SendLogsResponse{
+				Path:      path,
+				SessionId: sessionId,
+			}
 		}
 
 		natsurl := mustFlagString(cmd, "server", true)
@@ -658,7 +734,8 @@ var serverCmd = &cobra.Command{
 			for {
 				select {
 				case <-logSenderTicker.C:
-					sendLogs()
+					// ask the notification consumer to send the logs so it can report the success/failure
+					notificationConsumer.CallSendLogs()
 				case <-renewTicker.C:
 					renew()
 				}
@@ -671,7 +748,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, url)
+			session, err := sendStart(logger, apiurl, apikey, driverURL)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
@@ -694,40 +771,58 @@ var serverCmd = &cobra.Command{
 			if err := notificationConsumer.Start(sessionId, credsFile); err != nil {
 				logger.Fatal("failed to start notification consumer: %s", err)
 			}
-			args := append(_args, "--creds", credsFile)
+			sessionLogsDir := filepath.Join(sessionDir, "logs")
+			args := append(_args,
+				"--creds", credsFile,
+				"--logs-dir", sessionLogsDir,
+			)
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
 				Command:          "fork",
 				Args:             args,
 				LogFilenameLabel: "server",
 				SaveLogs:         true,
+				LogFileSink:      true,
 				WriteToStd:       true,
 				ForwardInterrupt: true,
 				ProcessCallback:  processCallback,
 				Dir:              sessionDir,
 			})
-			notificationConsumer.Stop()
 			if err != nil && result == nil {
 				logger.Error("failed to fork: %s", err)
 				failures++
 			} else {
 				ec := result.ProcessState.ExitCode()
 				if ec != 3 {
-					sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, result.LogFileBundle)
+					logFile, err := getRemainingLog(sessionLogsDir)
+					if err != nil {
+						logger.Error("failed to get remaining log: %s", err)
+					}
+					logsLock.Lock()
+					logPath, err := sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, logFile, filepath.Join(sessionDir, "server_stderr.txt"))
+					logsLock.Unlock()
+					if err != nil {
+						logger.Error("failed to send end and upload logs: %s", err)
+					} else {
+						if err := notificationConsumer.PublishSendLogsResponse(&notification.SendLogsResponse{Path: logPath, SessionId: sessionId}); err != nil {
+							logger.Error("failed to publish send logs response: %s", err)
+						}
+					}
 				}
 				if ec == 0 {
 					// on success, remove the logs
-					os.Remove(filepath.Join(sessionDir, "server_stderr.txt"))
-					os.Remove(filepath.Join(sessionDir, "server_stdout.txt"))
+					os.RemoveAll(sessionDir)
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
 				if ec == 3 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
+					notificationConsumer.Stop()
 					os.Exit(ec)
 				}
 				failures++
 				logger.Error("server exited with code %d", ec)
 			}
+			notificationConsumer.Stop()
 		}
 	},
 }
@@ -804,7 +899,7 @@ func init() {
 	}
 
 	// NOTE: sync these with forkCmd
-	serverCmd.Flags().String("url", "", "provider connection string")
+	serverCmd.Flags().String("url", "", "driver connection string")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
 	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")

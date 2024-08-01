@@ -10,18 +10,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 
 	// Register all drivers
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/eventhub"
+	_ "github.com/shopmonkeyus/eds-server/internal/drivers/file"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/kafka"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/mysql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/postgresql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/s3"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/snowflake"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/sqlserver"
-	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
@@ -85,18 +86,27 @@ type logFileSink struct {
 }
 
 func (s *logFileSink) Write(buf []byte) (int, error) {
+	if s == nil {
+		return 0, nil
+	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	return s.f.Write(buf)
 }
 
 func (s *logFileSink) Close() error {
+	if s == nil {
+		return nil
+	}
 	return s.f.Close()
 }
 
 // Rotate creates a new log file and closes the old one
 // returns the old file name
 func (s *logFileSink) Rotate() (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("sink not initialized")
+	}
 	var old string
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -109,7 +119,7 @@ func (s *logFileSink) Rotate() (string, error) {
 	if err := os.MkdirAll(s.logDir, 0755); err != nil {
 		return "", err
 	}
-	f, err := os.Create(filepath.Join(s.logDir, fmt.Sprintf("eds-server-%s.log", time.Now().UTC().Format(time.RFC3339))))
+	f, err := os.Create(filepath.Join(s.logDir, fmt.Sprintf("eds-server-%d.log", time.Now().UnixMilli())))
 	if err != nil {
 		return "", err
 	}
@@ -153,7 +163,6 @@ func newLogger(cmd *cobra.Command) logger.Logger {
 
 func newLoggerWithSink(log logger.Logger, sink logger.Sink) logger.Logger {
 	if sink != nil {
-		log.Trace("using log file sink: %s", sink)
 		return logger.NewMultiLogger(log, logger.NewJSONLoggerWithSink(sink, logger.LevelTrace))
 	}
 	return log
@@ -174,7 +183,8 @@ func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
 	dataDir, _ = filepath.Abs(filepath.Clean(dataDir))
 
 	if !util.Exists(dataDir) {
-		logger.Fatal("data directory %s does not exist. please create the directory and retry again.", dataDir)
+		os.MkdirAll(dataDir, 0700)
+		logger.Debug("making data directory: %s", dataDir)
 	}
 	if ok, err := util.IsDirWritable(dataDir); !ok {
 		logger.Fatal("%s", err)

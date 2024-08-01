@@ -2,6 +2,8 @@ package internal
 
 import (
 	"encoding/json"
+
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // DBChangeEvent represents a change record from the database.
@@ -18,6 +20,8 @@ type DBChangeEvent struct {
 	Diff          []string        `json:"diff,omitempty"`
 	Timestamp     int64           `json:"timestamp"`
 	MVCCTimestamp string          `json:"mvccTimestamp"`
+
+	NatsMsg jetstream.Msg `json:"-"` // could be nil
 }
 
 func (c *DBChangeEvent) String() string {

@@ -56,8 +56,8 @@ type ConsumerConfig struct {
 	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
 	ExportTableTimestamps map[string]*time.Time
 
-	// Restart the consumer from the beginning of the stream
-	Restart bool
+	// DeliverAll will configure the consumer to read from the beginning of the stream, this only works if the consumer is new
+	DeliverAll bool
 }
 
 type Consumer struct {
@@ -163,12 +163,15 @@ func (c *Consumer) flush() bool {
 		internal.PendingEvents.Dec()
 		count++
 	}
-	c.pending = nil
-	c.pendingStarted = nil
+	processingDuration := time.Since(*c.pendingStarted)
+	internal.ProcessingDuration.Observe(processingDuration.Seconds())
 	internal.FlushDuration.Observe(time.Since(started).Seconds())
 	internal.FlushCount.Observe(count)
+	c.pending = nil
+	c.pendingStarted = nil
 	return c.stopping
 }
+
 func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) bool {
 	if c.tableTimestamps == nil {
 		return false
@@ -198,13 +201,18 @@ func (c *Consumer) bufferer() {
 			c.nackEverything()
 			return
 		case msg := <-c.buffer:
+			m, err := msg.Metadata()
+			if err != nil {
+				c.handleError(err)
+				return
+			}
 			log := c.logger.With(map[string]any{
 				"msgId":   msg.Headers().Get(nats.MsgIdHdr),
 				"subject": msg.Subject(),
+				"seq":     m.Sequence.Consumer,
+				"sid":     m.Sequence.Stream,
 			})
-			if m, err := msg.Metadata(); err == nil {
-				log.Trace("msg received - deliveries=%d,consumer=%d,stream=%d,pending=%d", m.NumDelivered, m.Sequence.Consumer, m.Sequence.Stream, len(c.pending))
-			}
+			log.Trace("msg received - deliveries=%d,pending=%d", m.NumDelivered, len(c.pending))
 			c.pending = append(c.pending, msg)
 			buf := msg.Data()
 			md, _ := msg.Metadata()
@@ -231,7 +239,8 @@ func (c *Consumer) bufferer() {
 				internal.PendingEvents.Dec()
 				continue
 			}
-			flush, err := c.driver.Process(evt)
+			evt.NatsMsg = msg // in case the driver wants to get specific information from it for logging, etc
+			flush, err := c.driver.Process(log, evt)
 			if err != nil {
 				internal.PendingEvents.Dec()
 				c.handleError(err)
@@ -314,7 +323,7 @@ func (c *Consumer) heartbeat() error {
 		return fmt.Errorf("error getting system stats: %w", err)
 	}
 
-	subject := fmt.Sprintf("eds.heartbeat.%s", c.sessionID)
+	subject := fmt.Sprintf("eds.client.%s.heartbeat", c.sessionID)
 
 	hb := heartbeat{
 		SessionId: c.sessionID,
@@ -460,6 +469,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	ctx, cancel := context.WithCancel(config.Context)
 
+	var startAt *time.Time
 	var consumer Consumer
 	started := time.Now()
 	consumer.started = &started
@@ -472,8 +482,16 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
-	consumer.tableTimestamps = config.ExportTableTimestamps
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
+	if config.ExportTableTimestamps != nil {
+		consumer.tableTimestamps = config.ExportTableTimestamps
+		// get the earliest timestamp
+		for _, ts := range config.ExportTableTimestamps {
+			if ts != nil && (startAt == nil || ts.Before(*startAt)) {
+				startAt = ts
+			}
+		}
+	}
 
 	if config.Driver != nil {
 		if p, ok := config.Driver.(internal.DriverSessionHandler); ok {
@@ -519,23 +537,53 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		MaxAckPending:     config.MaxAckPending,
 		MaxDeliver:        20,
 		AckWait:           time.Minute * 5,
-		DeliverPolicy:     jetstream.DeliverNewPolicy,
 		MaxRequestBatch:   config.MaxPendingBuffer,
 		FilterSubjects:    subjects,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		InactiveThreshold: time.Hour * 24 * 3, // expire if unused 3 days from first creating
 	}
-	if config.Restart {
-		jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
-	}
-	createConsumerContext, cancelCreate := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
-	defer cancelCreate()
-	c, err := js.CreateOrUpdateConsumer(createConsumerContext, "dbchange", jsConfig)
+
+	// create a context with a longer deadline for creating the consumer
+	configConsumerCtx, cancelConfig := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
+	defer cancelConfig()
+
+	// setup the consumer
+	c, err := js.Consumer(configConsumerCtx, "dbchange", jsConfig.Durable)
 	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
+		if !errors.Is(err, jetstream.ErrConsumerNotFound) {
+			nc.Close()
+			return nil, fmt.Errorf("error getting jetstream consumer: %w", err)
+		}
+		// consumer not found, create it
+
+		// only set the deliver policy if we are creating a new consumer, it will error if we try to update it
+		if config.DeliverAll {
+			jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
+		} else if startAt != nil {
+			jsConfig.DeliverPolicy = jetstream.DeliverByStartTimePolicy
+			jsConfig.OptStartTime = startAt
+		} else {
+			jsConfig.DeliverPolicy = jetstream.DeliverNewPolicy
+		}
+		c, err = js.CreateConsumer(configConsumerCtx, "dbchange", jsConfig)
+		if err != nil {
+			nc.Close()
+			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
+		}
+	} else {
+		consumer.logger.Debug("consumer found")
+
+		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
+		jsConfig.OptStartTime = c.CachedInfo().Config.OptStartTime
+		// consumer found, update it
+		// TODO: we should check if the consumer is already in the correct state and skip this
+		c, err = js.UpdateConsumer(configConsumerCtx, "dbchange", jsConfig)
+		if err != nil {
+			nc.Close()
+			return nil, fmt.Errorf("error updating jetstream consumer: %w", err)
+		}
 	}
-	cancelCreate()
+	cancelConfig()
 
 	consumer.jsconn = c
 
