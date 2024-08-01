@@ -161,7 +161,6 @@ func newLogger(cmd *cobra.Command) logger.Logger {
 
 func newLoggerWithSink(log logger.Logger, sink logger.Sink) logger.Logger {
 	if sink != nil {
-		log.Trace("using log file sink: %s", sink)
 		return logger.NewMultiLogger(log, logger.NewJSONLoggerWithSink(sink, logger.LevelTrace))
 	}
 	return log

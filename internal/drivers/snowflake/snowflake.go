@@ -163,8 +163,10 @@ func (p *snowflakeDriver) Flush() error {
 					p.logger.Trace("forcing delete before insert because we've seen an insert for %s/%s", record.Table, record.Id)
 				}
 			case "UPDATE":
-				if len(record.Diff) == 1 && record.Diff[0] == "updatedDate" {
-					// slight optimization to skip records that just have an updatedDate and nothing else
+				// slight optimization to skip records that just have an updatedDate and nothing else
+				justUpdatedDate := len(record.Diff) == 1 && record.Diff[0] == "updatedDate"
+				noUpdates := len(record.Diff) == 0
+				if justUpdatedDate || noUpdates {
 					p.logger.Trace("skipping update because only updatedDate changed for %s/%s", record.Table, record.Id)
 					continue
 				}
