@@ -1,6 +1,8 @@
 package util
 
-import "github.com/shopmonkeyus/eds-server/internal"
+import (
+	"github.com/shopmonkeyus/eds-server/internal"
+)
 
 type Batcher struct {
 	records []*Record
@@ -70,6 +72,11 @@ func (b *Batcher) Add(table string, id string, operation string, diff []string, 
 func (b *Batcher) Clear() {
 	b.records = nil
 	b.pks = make(map[string]uint)
+}
+
+// Clear will clear the batcher and reset the internal state
+func (b *Batcher) Len() int {
+	return len(b.records)
 }
 
 // NewBatcher creates a new batcher instance

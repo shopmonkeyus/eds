@@ -366,29 +366,25 @@ var importCmd = &cobra.Command{
 
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[import]")
+		defer util.RecoverPanic(logger)
 
 		dataDir := getDataDir(cmd, logger)
 		schemaFile, _ := getSchemaAndTableFiles(dataDir)
 
 		if !dryRun && !noconfirm {
 
-			u, err := url.Parse(driverUrl)
+			meta, err := internal.GetDriverMetadataForURL(driverUrl)
 			if err != nil {
-				logger.Fatal("error parsing url: %s", err)
+				logger.Fatal("error getting driver metadata: %s", err)
 			}
 
-			// present a nicer looking provider
-			name := u.Scheme
-			if u.Path != "" {
-				name = name + ":" + u.Path[1:]
-			}
 			var confirmed bool
 			form := huh.NewForm(
 				huh.NewGroup(
 					huh.NewNote().
 						Title("\n🚨 WARNING 🚨"),
 					huh.NewConfirm().
-						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s", name)).
+						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s", meta.Name)).
 						Affirmative("Confirm").
 						Negative("Cancel").
 						Value(&confirmed),

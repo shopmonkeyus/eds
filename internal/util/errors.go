@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"os"
 	"runtime/pprof"
 	"strings"
@@ -18,6 +19,7 @@ var depth = 3
 
 func RecoverPanic(logger logger.Logger) {
 	if r := recover(); r != nil {
+		fmt.Println("PANIC", r)
 		v := panicError(depth, r)
 		var str strings.Builder
 		pprof.Lookup("goroutine").WriteTo(&str, 2)
