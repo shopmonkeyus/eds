@@ -94,15 +94,15 @@ func (p *sqlserverDriver) MaxBatchSize() int {
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *sqlserverDriver) Process(event internal.DBChangeEvent) (bool, error) {
-	p.logger.Trace("processing event: %s", event.String())
+func (p *sqlserverDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql, err := toSQL(event, p.schema)
 	if err != nil {
 		return false, err
 	}
-	p.logger.Trace("sql: %s", sql)
+	logger.Trace("sql: %s", sql)
 	if _, err := p.pending.WriteString(sql); err != nil {
 		return false, fmt.Errorf("error writing sql to pending buffer: %w", err)
 	}
