@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/importer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -17,20 +18,24 @@ import (
 const maxBytesSizeInsert = 5_000_000
 
 type mysqlDriver struct {
-	ctx       context.Context
-	logger    logger.Logger
-	db        *sql.DB
-	schema    internal.SchemaMap
-	waitGroup sync.WaitGroup
-	once      sync.Once
-	pending   strings.Builder
-	count     int
+	ctx          context.Context
+	logger       logger.Logger
+	db           *sql.DB
+	schema       internal.SchemaMap
+	waitGroup    sync.WaitGroup
+	once         sync.Once
+	pending      strings.Builder
+	count        int
+	executor     func(string) error
+	importConfig internal.ImporterConfig
+	size         int
 }
 
 var _ internal.Driver = (*mysqlDriver)(nil)
 var _ internal.DriverLifecycle = (*mysqlDriver)(nil)
 var _ internal.Importer = (*mysqlDriver)(nil)
 var _ internal.DriverHelp = (*mysqlDriver)(nil)
+var _ importer.Handler = (*mysqlDriver)(nil)
 
 func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
 	dsn, err := parseURLToDSN(urlstr)
@@ -139,6 +144,51 @@ func (p *mysqlDriver) Flush() error {
 	return nil
 }
 
+// CreateDatasource allows the handler to create the datasource before importing data.
+func (p *mysqlDriver) CreateDatasource(schema internal.SchemaMap) error {
+	// create all the tables
+	for _, table := range p.importConfig.Tables {
+		data := schema[table]
+		p.logger.Debug("creating table %s", table)
+		if err := p.executor(createSQL(data)); err != nil {
+			return fmt.Errorf("error creating table: %s. %w", table, err)
+		}
+		p.logger.Debug("created table %s", table)
+	}
+	return nil
+}
+
+// ImportEvent allows the handler to process the event.
+func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.Schema) error {
+	sql, err := toSQLFromObject("INSERT", data, event.Table, event, nil)
+	if err != nil {
+		return err
+	}
+	p.pending.WriteString(sql)
+	p.count++
+	p.size += len(sql)
+	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
+		if err := p.executor(p.pending.String()); err != nil {
+			p.logger.Trace("offending sql: %s", p.pending.String())
+			return fmt.Errorf("unable to execute sql: %w", err)
+		}
+		p.pending.Reset()
+		p.size = 0
+	}
+	return nil
+}
+
+// ImportCompleted is called when all events have been processed.
+func (p *mysqlDriver) ImportCompleted() error {
+	if p.size > 0 {
+		if err := p.executor(p.pending.String()); err != nil {
+			p.logger.Trace("offending sql: %s", p.pending.String())
+			return fmt.Errorf("unable to execute sql: %w", err)
+		}
+	}
+	return nil
+}
+
 // Import is called to import data from the source.
 func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
@@ -147,89 +197,14 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	}
 	defer db.Close()
 
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		return err
-	}
+	p.importConfig = config
+	p.logger = config.Logger.WithPrefix("[mysql]")
+	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
+	p.pending = strings.Builder{}
+	p.count = 0
+	p.size = 0
 
-	logger := config.Logger.WithPrefix("[mysql]")
-	started := time.Now()
-	executeSQL := util.SQLExecuter(config.Context, logger, db, config.DryRun)
-
-	// create all the tables
-	for _, table := range config.Tables {
-		data := schema[table]
-		logger.Debug("creating table %s", table)
-		if err := executeSQL(createSQL(data)); err != nil {
-			return fmt.Errorf("error creating table: %s. %w", table, err)
-		}
-		logger.Debug("created table %s", table)
-	}
-
-	files, err := util.ListDir(config.DataDir)
-	if err != nil {
-		return fmt.Errorf("unable to list dir: %w", err)
-	}
-
-	var total int
-
-	// NOTE: these files should automatically be sorted by the filesystem
-	// so we need to do them in order and not in parallel
-	for _, file := range files {
-		table, _, ok := util.ParseCRDBExportFile(file)
-		if !ok {
-			logger.Debug("skipping file: %s", file)
-			continue
-		}
-		if !util.SliceContains(config.Tables, table) {
-			continue
-		}
-		data := schema[table]
-		if data == nil {
-			return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, file)
-		}
-		logger.Debug("processing file: %s, table: %s", file, table)
-		dec, err := util.NewNDJSONDecoder(file)
-		if err != nil {
-			return fmt.Errorf("unable to create JSON decoder for %s: %w", file, err)
-		}
-		defer dec.Close()
-		var count int
-		var size int
-		var pending strings.Builder
-		tstarted := time.Now()
-		for dec.More() {
-			var obj map[string]interface{}
-			if err := dec.Decode(&obj); err != nil {
-				return fmt.Errorf("unable to decode JSON: %w", err)
-			}
-			sql := toSQLFromObject("INSERT", data, table, obj, nil)
-			pending.WriteString(sql)
-			count++
-			size += len(sql)
-			if size >= maxBytesSizeInsert || config.Single {
-				if err := executeSQL(pending.String()); err != nil {
-					logger.Trace("offending sql: %s", pending.String())
-					return fmt.Errorf("unable to execute %s sql: %w", table, err)
-				}
-				pending.Reset()
-				size = 0
-			}
-		}
-		if size > 0 {
-			if err := executeSQL(pending.String()); err != nil {
-				logger.Trace("offending sql: %s", pending.String())
-				return fmt.Errorf("unable to execute %s sql: %w", table, err)
-			}
-		}
-		dec.Close()
-		total += count
-		logger.Debug("imported %d %s records in %s", count, table, time.Since(tstarted))
-	}
-
-	logger.Info("imported %d records from %d files in %s", total, len(files), time.Since(started))
-
-	return nil
+	return importer.Run(p.logger, config, p)
 }
 
 // Name is a unique name for the driver.

@@ -284,7 +284,7 @@ func init() {
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "driver connection string")
-	forkCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
+	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")

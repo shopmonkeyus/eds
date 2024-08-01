@@ -59,20 +59,20 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-func (e *errorResponse) Parse(buf []byte, statusCode int) error {
+func (e *errorResponse) Parse(buf []byte, statusCode int, context string) error {
 	if err := json.Unmarshal(buf, e); err == nil {
-		return fmt.Errorf(e.Message)
+		return fmt.Errorf("%s: %s", context, e.Message)
 	}
-	return fmt.Errorf("API error: %s (status code=%d)", string(buf), statusCode)
+	return fmt.Errorf("%s: %s (status code=%d)", context, string(buf), statusCode)
 }
 
-func handleAPIError(resp *http.Response) error {
+func handleAPIError(resp *http.Response, context string) error {
 	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("error reading response: %w", err)
+		return fmt.Errorf("%s: error reading response: %w", context, err)
 	}
 	var errResponse errorResponse
-	return errResponse.Parse(buf, resp.StatusCode)
+	return errResponse.Parse(buf, resp.StatusCode, context)
 }
 
 func createExportJob(ctx context.Context, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
@@ -93,7 +93,7 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", handleAPIError(resp)
+		return "", handleAPIError(resp, "import")
 	}
 	job, err := decodeAPIResponse[exportJobCreateResponse](resp)
 	if err != nil {
@@ -159,6 +159,9 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("error fetching bulk export status: %s", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, handleAPIError(resp, "import")
 	}
 	job, err := decodeAPIResponse[exportJobResponse](resp)
 	if err != nil {
@@ -366,48 +369,10 @@ var importCmd = &cobra.Command{
 
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[import]")
+		defer util.RecoverPanic(logger)
 
 		dataDir := getDataDir(cmd, logger)
 		schemaFile, _ := getSchemaAndTableFiles(dataDir)
-
-		if !dryRun && !noconfirm {
-
-			u, err := url.Parse(driverUrl)
-			if err != nil {
-				logger.Fatal("error parsing url: %s", err)
-			}
-
-			// present a nicer looking provider
-			name := u.Scheme
-			if u.Path != "" {
-				name = name + ":" + u.Path[1:]
-			}
-			var confirmed bool
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewNote().
-						Title("\n🚨 WARNING 🚨"),
-					huh.NewConfirm().
-						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s", name)).
-						Affirmative("Confirm").
-						Negative("Cancel").
-						Value(&confirmed),
-				),
-			)
-			custom := huh.ThemeBase()
-			form.WithTheme(custom)
-
-			if err := form.Run(); err != nil {
-				if !errors.Is(err, huh.ErrUserAborted) {
-					logger.Error("error running form: %s", err)
-					logger.Info("You may use --confirm to skip this prompt")
-					os.Exit(1)
-				}
-			}
-			if !confirmed {
-				os.Exit(0)
-			}
-		}
 
 		if dryRun {
 			logger.Info("🚨 Dry run enabled")
@@ -434,7 +399,14 @@ var importCmd = &cobra.Command{
 
 		if cmd.Flags().Changed("api-url") {
 			logger.Info("using alternative API url: %s", apiURL)
+		} else {
+			url, err := util.GetAPIURLFromJWT(apiKey)
+			if err != nil {
+				logger.Fatal("invalid API key. %s", err)
+			}
+			apiURL = url
 		}
+
 		var err error
 
 		// load the schema from the api fresh
@@ -455,6 +427,47 @@ var importCmd = &cobra.Command{
 		importer, err := internal.NewImporter(ctx, logger, driverUrl, registry)
 		if err != nil {
 			logger.Fatal("error creating importer: %s", err)
+		}
+
+		var skipDeleteConfirm bool
+
+		// check to see if the importer supports delete
+		if importerHelp, ok := importer.(internal.ImporterHelp); ok {
+			skipDeleteConfirm = !importerHelp.SupportsDelete()
+		}
+
+		if !dryRun && !noconfirm && !skipDeleteConfirm {
+
+			meta, err := internal.GetDriverMetadataForURL(driverUrl)
+			if err != nil {
+				logger.Fatal("error getting driver metadata: %s", err)
+			}
+
+			var confirmed bool
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewNote().
+						Title("\n🚨 WARNING 🚨"),
+					huh.NewConfirm().
+						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s", meta.Name)).
+						Affirmative("Confirm").
+						Negative("Cancel").
+						Value(&confirmed),
+				),
+			)
+			custom := huh.ThemeBase()
+			form.WithTheme(custom)
+
+			if err := form.Run(); err != nil {
+				if !errors.Is(err, huh.ErrUserAborted) {
+					logger.Error("error running form: %s", err)
+					logger.Info("You may use --confirm to skip this prompt")
+					os.Exit(1)
+				}
+			}
+			if !confirmed {
+				os.Exit(0)
+			}
 		}
 
 		noCleanup, _ := cmd.Flags().GetBool("no-cleanup")
@@ -608,7 +621,7 @@ func init() {
 	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
 
 	// tuning and testing flags
-	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
+	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks (if supported by driver)")
 	importCmd.Flags().Bool("single", false, "run one insert at a time instead of batching")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")

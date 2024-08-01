@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,9 +25,9 @@ type enrollResponse struct {
 
 func getAPIURL(firstLetter string) (*string, error) {
 	apiUrls := map[string]string{
-		"P": "https://api.shopmonkey.cloud/",
-		"S": "https://sandbox-api.shopmonkey.cloud/",
-		"E": "https://edge-api.shopmonkey.cloud/",
+		"P": "https://api.shopmonkey.cloud",
+		"S": "https://sandbox-api.shopmonkey.cloud",
+		"E": "https://edge-api.shopmonkey.cloud",
 		"L": "http://localhost:3101",
 	}
 
@@ -71,8 +70,7 @@ var enrollCmd = &cobra.Command{
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			buf, _ := io.ReadAll(resp.Body)
-			logger.Fatal("failed to enroll server. status code=%d. %s", resp.StatusCode, string(buf))
+			logger.Fatal("%s", handleAPIError(resp, "enroll"))
 		}
 
 		var enrollResp enrollResponse
@@ -108,5 +106,6 @@ func init() {
 	}
 	rootCmd.AddCommand(enrollCmd)
 	enrollCmd.Flags().String("api-url", "", "the for testing again preview environment")
+	enrollCmd.Flags().MarkHidden("api-url")
 	enrollCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
 }

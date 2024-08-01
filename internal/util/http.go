@@ -38,7 +38,7 @@ func (r *HTTPRetry) Do() (*http.Response, error) {
 	r.attempts++
 	resp, err := http.DefaultClient.Do(r.req)
 	if r.shouldRetry(resp, err) {
-		jitter := time.Duration(rand.Int63n(int64(r.attempts * 250)))
+		jitter := time.Duration(time.Millisecond*100 + time.Millisecond*time.Duration(rand.Int63n(int64(500*r.attempts))))
 		time.Sleep(jitter)
 		return r.Do()
 	}
