@@ -88,11 +88,11 @@ var enrollCmd = &cobra.Command{
 		if err != nil {
 			logger.Fatal("failed to create token file: %w", err)
 		}
-		jsonData, _ := json.Marshal(enrollResp.Data)
+		jsonData, err := json.Marshal(enrollResp.Data)
 		if err != nil {
 			logger.Fatal("Error converting to JSON: %v", err)
 		}
-		_, err = file.WriteString(string(jsonData))
+		_, err = file.Write(jsonData)
 		if err != nil {
 			logger.Fatal("failed to write to token file: %w", err)
 		}
