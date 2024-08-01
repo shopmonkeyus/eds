@@ -2,6 +2,7 @@ package s3
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/importer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -48,23 +50,23 @@ func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 type s3Driver struct {
-	config internal.DriverConfig
-	logger logger.Logger
-	bucket string
-	prefix string
-	s3     *awss3.Client
+	config       internal.DriverConfig
+	logger       logger.Logger
+	bucket       string
+	prefix       string
+	s3           *awss3.Client
+	importConfig internal.ImporterConfig
 }
 
 var _ internal.Driver = (*s3Driver)(nil)
 var _ internal.DriverLifecycle = (*s3Driver)(nil)
 var _ internal.DriverHelp = (*s3Driver)(nil)
+var _ internal.Importer = (*s3Driver)(nil)
+var _ internal.ImporterHelp = (*s3Driver)(nil)
+var _ importer.Handler = (*s3Driver)(nil)
 
-// Start the driver. This is called once at the beginning of the driver's lifecycle.
-func (p *s3Driver) Start(pc internal.DriverConfig) error {
-	p.config = pc
-	p.logger = pc.Logger.WithPrefix("[s3]")
-
-	u, err := url.Parse(pc.URL)
+func (p *s3Driver) connect(ctx context.Context, urlString string) error {
+	u, err := url.Parse(urlString)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
 	}
@@ -125,14 +127,14 @@ func (p *s3Driver) Start(pc internal.DriverConfig) error {
 	var cfg aws.Config
 
 	if strings.Contains(host, "googleapis.com") {
-		cfg, err = config.LoadDefaultConfig(pc.Context,
+		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion("auto"),
 			config.WithEndpointResolverWithOptions(customResolver))
 		if err == nil {
 			cfg.HTTPClient = &http.Client{Transport: &RecalculateV4Signature{http.DefaultTransport, v4.NewSigner(), cfg}}
 		}
 	} else {
-		cfg, err = config.LoadDefaultConfig(pc.Context,
+		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion(region),
 			config.WithEndpointResolverWithOptions(customResolver),
 		)
@@ -149,6 +151,16 @@ func (p *s3Driver) Start(pc internal.DriverConfig) error {
 	return nil
 }
 
+// Start the driver. This is called once at the beginning of the driver's lifecycle.
+func (p *s3Driver) Start(pc internal.DriverConfig) error {
+	p.config = pc
+	p.logger = pc.Logger.WithPrefix("[s3]")
+	if err := p.connect(pc.Context, pc.URL); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Stop the driver. This is called once at the end of the driver's lifecycle.
 func (p *s3Driver) Stop() error {
 	return nil
@@ -160,22 +172,30 @@ func (p *s3Driver) MaxBatchSize() int {
 	return 1
 }
 
+func (p *s3Driver) process(logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
+	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
+	if dryRun {
+		logger.Trace("would store %s:%s", p.bucket, key)
+	} else {
+		buf := []byte(util.JSONStringify(event))
+		_, err := p.s3.PutObject(p.config.Context, &awss3.PutObjectInput{
+			Bucket:        aws.String(p.bucket),
+			Key:           aws.String(key),
+			ContentType:   aws.String("application/json"),
+			Body:          bytes.NewReader(buf),
+			ContentLength: aws.Int64(int64(len(buf))),
+		})
+		if err != nil {
+			return true, fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, key, err)
+		}
+		logger.Trace("stored %s:%s", p.bucket, key)
+	}
+	return false, nil
+}
+
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
 func (p *s3Driver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
-	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
-	buf := []byte(util.JSONStringify(event))
-	_, err := p.s3.PutObject(p.config.Context, &awss3.PutObjectInput{
-		Bucket:        aws.String(p.bucket),
-		Key:           aws.String(key),
-		ContentType:   aws.String("application/json"),
-		Body:          bytes.NewReader(buf),
-		ContentLength: aws.Int64(int64(len(buf))),
-	})
-	if err != nil {
-		return true, fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, key, err)
-	}
-	logger.Trace("stored %s:%s", p.bucket, key)
-	return false, nil
+	return p.process(logger, event, false)
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
@@ -209,6 +229,37 @@ func (p *s3Driver) Help() string {
 	return help.String()
 }
 
+// CreateDatasource allows the handler to create the datasource before importing data.
+func (p *s3Driver) CreateDatasource(schema internal.SchemaMap) error {
+	return nil
+}
+
+// ImportEvent allows the handler to process the event.
+func (p *s3Driver) ImportEvent(event internal.DBChangeEvent, schema *internal.Schema) error {
+	_, err := p.process(p.logger, event, p.importConfig.DryRun)
+	return err
+}
+
+// ImportCompleted is called when all events have been processed.
+func (p *s3Driver) ImportCompleted() error {
+	return nil
+}
+
+func (p *s3Driver) Import(config internal.ImporterConfig) error {
+	p.logger = config.Logger.WithPrefix("[s3]")
+	p.importConfig = config
+	if err := p.connect(config.Context, config.URL); err != nil {
+		return err
+	}
+	return importer.Run(p.logger, config, p)
+}
+
+// SupportsDelete returns true if the importer supports deleting data.
+func (p *s3Driver) SupportsDelete() bool {
+	return false
+}
+
 func init() {
 	internal.RegisterDriver("s3", &s3Driver{})
+	internal.RegisterImporter("s3", &s3Driver{})
 }

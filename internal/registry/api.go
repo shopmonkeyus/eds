@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
 type APIRegistry struct {
@@ -66,16 +67,30 @@ func (r *APIRegistry) Save(filename string) error {
 	return save(filename, r.schema)
 }
 
+type errorResponse struct {
+	Message string `json:"message"`
+}
+
 // NewAPIRegistry creates a new schema registry from the API. This implementation doesn't support versioning.
 func NewAPIRegistry(apiURL string) (internal.SchemaRegistry, error) {
 	var registry APIRegistry
-	resp, err := http.Get(apiURL + "/v3/schema")
+	req, err := http.NewRequest("GET", apiURL+"/v3/schema", nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %s", err)
+	}
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("error fetching schema: %s", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		var errResponse errorResponse
 		buf, _ := io.ReadAll(resp.Body)
+		json.Unmarshal(buf, &errResponse)
+		if errResponse.Message != "" {
+			return nil, fmt.Errorf("error fetching schema: %s", errResponse.Message)
+		}
 		return nil, fmt.Errorf("error fetching schema: %d: %s", resp.StatusCode, string(buf))
 	}
 	registry.apiURL = apiURL

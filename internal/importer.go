@@ -50,6 +50,12 @@ type Importer interface {
 	Import(config ImporterConfig) error
 }
 
+// ImporterHelp is the interface that is optionally implemented by importers to provide additional help.
+type ImporterHelp interface {
+	// SupportsDelete returns true if the importer supports deleting data.
+	SupportsDelete() bool
+}
+
 var importerRegistry = map[string]Importer{}
 var importerAliasRegistry = map[string]string{}
 

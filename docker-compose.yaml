@@ -55,3 +55,19 @@ services:
       - MSSQL_BACKUP_DIR=/var/opt/mssql/backup
     volumes:
       - ./sqlserver-data:/var/opt/mssql
+  init-kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      # blocks until kafka is reachable
+      kafka-topics --bootstrap-server kafka:9092 --list
+
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic eds --replication-factor 1 --partitions 1
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "

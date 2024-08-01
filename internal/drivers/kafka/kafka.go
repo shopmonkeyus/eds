@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -8,11 +9,15 @@ import (
 
 	gokafka "github.com/segmentio/kafka-go"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/importer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-const edsPartitionKeyHeader = "eds-partitionkey"
+const (
+	edsPartitionKeyHeader = "eds-partitionkey"
+	maxImportBatchSize    = 1_000
+)
 
 type messageBalancer struct {
 }
@@ -30,24 +35,25 @@ func (b *messageBalancer) Balance(msg gokafka.Message, partitions ...int) int {
 }
 
 type kafkaDriver struct {
-	config    internal.DriverConfig
-	logger    logger.Logger
-	writer    *gokafka.Writer
-	pending   []gokafka.Message
-	waitGroup sync.WaitGroup
-	once      sync.Once
+	config       internal.DriverConfig
+	ctx          context.Context
+	logger       logger.Logger
+	writer       *gokafka.Writer
+	pending      []gokafka.Message
+	waitGroup    sync.WaitGroup
+	once         sync.Once
+	importConfig internal.ImporterConfig
 }
 
 var _ internal.Driver = (*kafkaDriver)(nil)
 var _ internal.DriverLifecycle = (*kafkaDriver)(nil)
 var _ internal.DriverHelp = (*kafkaDriver)(nil)
+var _ internal.Importer = (*kafkaDriver)(nil)
+var _ internal.ImporterHelp = (*kafkaDriver)(nil)
+var _ importer.Handler = (*kafkaDriver)(nil)
 
-// Start the driver. This is called once at the beginning of the driver's lifecycle.
-func (p *kafkaDriver) Start(pc internal.DriverConfig) error {
-	p.config = pc
-	p.logger = pc.Logger.WithPrefix("[kafka]")
-
-	u, err := url.Parse(pc.URL)
+func (p *kafkaDriver) connect(urlString string) error {
+	u, err := url.Parse(urlString)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
 	}
@@ -59,11 +65,23 @@ func (p *kafkaDriver) Start(pc internal.DriverConfig) error {
 	topic := u.Path[1:] // trim slash
 
 	p.writer = &gokafka.Writer{
-		Addr:     gokafka.TCP(host),
-		Topic:    topic,
-		Balancer: &messageBalancer{},
+		Addr:                   gokafka.TCP(host),
+		Topic:                  topic,
+		Balancer:               &messageBalancer{},
+		AllowAutoTopicCreation: true,
 	}
 
+	return nil
+}
+
+// Start the driver. This is called once at the beginning of the driver's lifecycle.
+func (p *kafkaDriver) Start(pc internal.DriverConfig) error {
+	p.config = pc
+	p.ctx = pc.Context
+	p.logger = pc.Logger.WithPrefix("[kafka]")
+	if err := p.connect(pc.URL); err != nil {
+		return err
+	}
 	p.logger.Info("started")
 	return nil
 }
@@ -93,26 +111,41 @@ func (p *kafkaDriver) MaxBatchSize() int {
 }
 
 func strWithDef(val *string, def string) string {
-	if val == nil {
+	if val == nil || *val == "" {
 		return def
 	}
 	return *val
+}
+
+func (p *kafkaDriver) process(event internal.DBChangeEvent, dryRun bool) error {
+	key := fmt.Sprintf("dbchange.%s.%s.%s.%s.%s", event.Table, event.Operation, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), event.ID)
+	pk := event.GetPrimaryKey()
+	partitionkey := fmt.Sprintf("%s.%s.%s.%s", event.Table, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), pk)
+	if dryRun {
+		p.logger.Trace("would store key: %s, partition key: %s", key, partitionkey)
+		return nil
+	} else {
+		p.pending = append(p.pending, gokafka.Message{
+			Key:   []byte(key),
+			Value: []byte(util.JSONStringify(event)),
+			Headers: []gokafka.Header{
+				{Key: edsPartitionKeyHeader, Value: []byte(partitionkey)},
+			},
+		})
+	}
+	if len(p.pending) >= maxImportBatchSize {
+		return p.Flush()
+	}
+	return nil
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
 func (p *kafkaDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	key := fmt.Sprintf("dbchange.%s.%s.%s.%s.%s", event.Table, event.Operation, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), event.ID)
-	pk := event.Key[len(event.Key)-1]
-	partitionkey := fmt.Sprintf("%s.%s.%s.%s", event.Table, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), pk)
-	p.pending = append(p.pending, gokafka.Message{
-		Key:   []byte(key),
-		Value: []byte(util.JSONStringify(event)),
-		Headers: []gokafka.Header{
-			{Key: edsPartitionKeyHeader, Value: []byte(partitionkey)},
-		},
-	})
+	if err := p.process(event, false); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 
@@ -121,7 +154,7 @@ func (p *kafkaDriver) Flush() error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if len(p.pending) > 0 {
-		if err := p.writer.WriteMessages(p.config.Context, p.pending...); err != nil {
+		if err := p.writer.WriteMessages(p.ctx, p.pending...); err != nil {
 			return fmt.Errorf("error publishing message. %w", err)
 		}
 		p.pending = nil
@@ -155,6 +188,40 @@ func (p *kafkaDriver) Help() string {
 	return help.String()
 }
 
+// CreateDatasource allows the handler to create the datasource before importing data.
+func (p *kafkaDriver) CreateDatasource(schema internal.SchemaMap) error {
+	return nil
+}
+
+// ImportEvent allows the handler to process the event.
+func (p *kafkaDriver) ImportEvent(event internal.DBChangeEvent, schema *internal.Schema) error {
+	return p.process(event, p.importConfig.DryRun)
+}
+
+// ImportCompleted is called when all events have been processed.
+func (p *kafkaDriver) ImportCompleted() error {
+	if err := p.Flush(); err != nil {
+		return err
+	}
+	return p.writer.Close()
+}
+
+func (p *kafkaDriver) Import(config internal.ImporterConfig) error {
+	p.logger = config.Logger.WithPrefix("[kafka]")
+	p.ctx = config.Context
+	p.importConfig = config
+	if err := p.connect(config.URL); err != nil {
+		return err
+	}
+	return importer.Run(p.logger, config, p)
+}
+
+// SupportsDelete returns true if the importer supports deleting data.
+func (p *kafkaDriver) SupportsDelete() bool {
+	return false
+}
+
 func init() {
 	internal.RegisterDriver("kafka", &kafkaDriver{})
+	internal.RegisterImporter("kafka", &kafkaDriver{})
 }

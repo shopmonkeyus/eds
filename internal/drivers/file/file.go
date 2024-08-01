@@ -9,20 +9,24 @@ import (
 	"time"
 
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/importer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
 type fileDriver struct {
-	config internal.DriverConfig
-	logger logger.Logger
-	dir    string
+	config       internal.DriverConfig
+	logger       logger.Logger
+	dir          string
+	importConfig internal.ImporterConfig
 }
 
 var _ internal.Driver = (*fileDriver)(nil)
 var _ internal.DriverLifecycle = (*fileDriver)(nil)
 var _ internal.DriverHelp = (*fileDriver)(nil)
 var _ internal.Importer = (*fileDriver)(nil)
+var _ internal.ImporterHelp = (*fileDriver)(nil)
+var _ importer.Handler = (*fileDriver)(nil)
 
 func (p *fileDriver) GetPathFromURL(urlString string) (string, error) {
 	u, err := url.Parse(urlString)
@@ -131,61 +135,33 @@ func (p *fileDriver) Help() string {
 	return help.String()
 }
 
+// CreateDatasource allows the handler to create the datasource before importing data.
+func (p *fileDriver) CreateDatasource(schema internal.SchemaMap) error {
+	return nil
+}
+
+// ImportEvent allows the handler to process the event.
+func (p *fileDriver) ImportEvent(event internal.DBChangeEvent, schema *internal.Schema) error {
+	return p.writeEvent(p.logger, event, p.importConfig.DryRun)
+}
+
+// ImportCompleted is called when all events have been processed.
+func (p *fileDriver) ImportCompleted() error {
+	return nil
+}
+
 func (p *fileDriver) Import(config internal.ImporterConfig) error {
-	logger := config.Logger.WithPrefix("[file]")
+	p.logger = config.Logger.WithPrefix("[file]")
 	if _, err := p.GetPathFromURL(config.URL); err != nil {
 		return err
 	}
-	files, err := util.ListDir(config.DataDir)
-	if err != nil {
-		return fmt.Errorf("unable to list files in directory: %w", err)
-	}
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		return fmt.Errorf("unable to get schema: %w", err)
-	}
-	started := time.Now()
-	var total int
-	for _, file := range files {
-		table, _, ok := util.ParseCRDBExportFile(file)
-		if !ok {
-			logger.Debug("skipping file: %s", file)
-			continue
-		}
-		if !util.SliceContains(config.Tables, table) {
-			continue
-		}
-		data := schema[table]
-		if data == nil {
-			return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, file)
-		}
-		logger.Debug("processing file: %s, table: %s", file, table)
-		dec, err := util.NewNDJSONDecoder(file)
-		if err != nil {
-			return fmt.Errorf("unable to create JSON decoder for %s: %w", file, err)
-		}
-		defer dec.Close()
-		var count int
-		tstarted := time.Now()
-		for dec.More() {
-			var event internal.DBChangeEvent
-			if err := dec.Decode(&event); err != nil {
-				return fmt.Errorf("unable to decode JSON: %w", err)
-			}
-			count++
-			if err := p.writeEvent(logger, event, config.DryRun); err != nil {
-				return err
-			}
-		}
-		if err := dec.Close(); err != nil {
-			return err
-		}
-		total += count
-		logger.Debug("imported %d %s records in %s", count, table, time.Since(tstarted))
-	}
+	p.importConfig = config
+	return importer.Run(p.logger, config, p)
+}
 
-	logger.Info("imported %d records from %d files in %s", total, len(files), time.Since(started))
-	return nil
+// SupportsDelete returns true if the importer supports deleting data.
+func (p *fileDriver) SupportsDelete() bool {
+	return false
 }
 
 func init() {

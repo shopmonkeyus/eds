@@ -1,7 +1,6 @@
 package mysql
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -22,7 +21,11 @@ func quoteIdentifier(val string) string {
 	return val
 }
 
-func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string) string {
+func toSQLFromObject(operation string, model *internal.Schema, table string, event internal.DBChangeEvent, diff []string) (string, error) {
+	o, err := event.GetObject()
+	if err != nil {
+		return "", err
+	}
 	var sql strings.Builder
 	sql.WriteString("REPLACE INTO ")
 	sql.WriteString(quoteIdentifier(table))
@@ -72,7 +75,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	}
 	sql.WriteString(strings.Join(insertVals, ","))
 	sql.WriteString(");\n")
-	return sql.String()
+	return sql.String(), nil
 }
 
 func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) {
@@ -91,11 +94,7 @@ func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) 
 		sql.WriteString(";\n")
 		return sql.String(), nil
 	} else {
-		o := make(map[string]any)
-		if err := json.Unmarshal(c.After, &o); err != nil {
-			return "", err
-		}
-		return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff), nil
+		return toSQLFromObject(c.Operation, model, c.Table, c, c.Diff)
 	}
 }
 

@@ -21,7 +21,10 @@ type DBChangeEvent struct {
 	Timestamp     int64           `json:"timestamp"`
 	MVCCTimestamp string          `json:"mvccTimestamp"`
 
-	NatsMsg jetstream.Msg `json:"-"` // could be nil
+	Imported bool          `json:"imported"` // NOTE: this is not on the real dbchange but added during import
+	NatsMsg  jetstream.Msg `json:"-"`        // could be nil
+
+	object map[string]any
 }
 
 func (c *DBChangeEvent) String() string {
@@ -29,17 +32,37 @@ func (c *DBChangeEvent) String() string {
 }
 
 func (c *DBChangeEvent) GetPrimaryKey() string {
-	key := c.Key[len(c.Key)-1]
-	return key
+	if len(c.Key) >= 1 {
+		return c.Key[len(c.Key)-1]
+	}
+	o, err := c.GetObject()
+	if err == nil {
+		if id, ok := o["id"].(string); ok {
+			return id
+		}
+	}
+	return ""
 }
 
 func (c *DBChangeEvent) GetObject() (map[string]any, error) {
 	if c.After != nil {
-		res := make(map[string]any)
-		if err := json.Unmarshal(c.After, &res); err != nil {
-			return nil, err
+		if c.object == nil {
+			res := make(map[string]any)
+			if err := json.Unmarshal(c.After, &res); err != nil {
+				return nil, err
+			}
+			c.object = res
 		}
-		return res, nil
+		return c.object, nil
+	} else if c.Before != nil {
+		if c.object == nil {
+			res := make(map[string]any)
+			if err := json.Unmarshal(c.Before, &res); err != nil {
+				return nil, err
+			}
+			c.object = res
+		}
+		return c.object, nil
 	}
 	return nil, nil
 }
