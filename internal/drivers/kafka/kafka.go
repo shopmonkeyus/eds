@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -35,6 +36,7 @@ func (b *messageBalancer) Balance(msg gokafka.Message, partitions ...int) int {
 
 type kafkaDriver struct {
 	config       internal.DriverConfig
+	ctx          context.Context
 	logger       logger.Logger
 	writer       *gokafka.Writer
 	pending      []gokafka.Message
@@ -74,6 +76,7 @@ func (p *kafkaDriver) connect(urlString string) error {
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
 func (p *kafkaDriver) Start(pc internal.DriverConfig) error {
 	p.config = pc
+	p.ctx = pc.Context
 	p.logger = pc.Logger.WithPrefix("[kafka]")
 	if err := p.connect(pc.URL); err != nil {
 		return err
@@ -115,7 +118,7 @@ func strWithDef(val *string, def string) string {
 
 func (p *kafkaDriver) process(event internal.DBChangeEvent, dryRun bool) error {
 	key := fmt.Sprintf("dbchange.%s.%s.%s.%s.%s", event.Table, event.Operation, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), event.ID)
-	pk := event.Key[len(event.Key)-1]
+	pk := event.GetPrimaryKey()
 	partitionkey := fmt.Sprintf("%s.%s.%s.%s", event.Table, strWithDef(event.CompanyID, "NONE"), strWithDef(event.LocationID, "NONE"), pk)
 	if dryRun {
 		p.logger.Trace("would store key: %s, partition key: %s", key, partitionkey)
@@ -150,7 +153,7 @@ func (p *kafkaDriver) Flush() error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if len(p.pending) > 0 {
-		if err := p.writer.WriteMessages(p.config.Context, p.pending...); err != nil {
+		if err := p.writer.WriteMessages(p.ctx, p.pending...); err != nil {
 			return fmt.Errorf("error publishing message. %w", err)
 		}
 		p.pending = nil
@@ -204,6 +207,7 @@ func (p *kafkaDriver) ImportCompleted() error {
 
 func (p *kafkaDriver) Import(config internal.ImporterConfig) error {
 	p.logger = config.Logger.WithPrefix("[kafka]")
+	p.ctx = config.Context
 	p.importConfig = config
 	if err := p.connect(config.URL); err != nil {
 		return err
