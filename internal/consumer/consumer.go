@@ -212,6 +212,7 @@ func (c *Consumer) bufferer() {
 				"seq":     m.Sequence.Consumer,
 				"sid":     m.Sequence.Stream,
 			})
+			log.Trace("msg received - deliveries=%d,pending=%d", m.NumDelivered, len(c.pending))
 			c.pending = append(c.pending, msg)
 			buf := msg.Data()
 			md, _ := msg.Metadata()
