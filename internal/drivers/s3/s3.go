@@ -2,6 +2,7 @@ package s3
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -64,12 +65,8 @@ var _ internal.Importer = (*s3Driver)(nil)
 var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
-// Start the driver. This is called once at the beginning of the driver's lifecycle.
-func (p *s3Driver) Start(pc internal.DriverConfig) error {
-	p.config = pc
-	p.logger = pc.Logger.WithPrefix("[s3]")
-
-	u, err := url.Parse(pc.URL)
+func (p *s3Driver) connect(ctx context.Context, urlString string) error {
+	u, err := url.Parse(urlString)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
 	}
@@ -130,14 +127,14 @@ func (p *s3Driver) Start(pc internal.DriverConfig) error {
 	var cfg aws.Config
 
 	if strings.Contains(host, "googleapis.com") {
-		cfg, err = config.LoadDefaultConfig(pc.Context,
+		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion("auto"),
 			config.WithEndpointResolverWithOptions(customResolver))
 		if err == nil {
 			cfg.HTTPClient = &http.Client{Transport: &RecalculateV4Signature{http.DefaultTransport, v4.NewSigner(), cfg}}
 		}
 	} else {
-		cfg, err = config.LoadDefaultConfig(pc.Context,
+		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion(region),
 			config.WithEndpointResolverWithOptions(customResolver),
 		)
@@ -151,6 +148,16 @@ func (p *s3Driver) Start(pc internal.DriverConfig) error {
 		o.UsePathStyle = true
 	})
 
+	return nil
+}
+
+// Start the driver. This is called once at the beginning of the driver's lifecycle.
+func (p *s3Driver) Start(pc internal.DriverConfig) error {
+	p.config = pc
+	p.logger = pc.Logger.WithPrefix("[s3]")
+	if err := p.connect(pc.Context, pc.URL); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -241,6 +248,9 @@ func (p *s3Driver) ImportCompleted() error {
 func (p *s3Driver) Import(config internal.ImporterConfig) error {
 	p.logger = config.Logger.WithPrefix("[s3]")
 	p.importConfig = config
+	if err := p.connect(config.Context, config.URL); err != nil {
+		return err
+	}
 	return importer.Run(p.logger, config, p)
 }
 
