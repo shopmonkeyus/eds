@@ -57,7 +57,7 @@ func (p *eventHubDriver) Start(pc internal.DriverConfig) error {
 	p.logger = pc.Logger.WithPrefix("[eventhub]")
 
 	if err := p.connect(pc.URL); err != nil {
-		return nil
+		return err
 	}
 
 	p.logger.Info("started")
@@ -241,6 +241,11 @@ func (p *eventHubDriver) Import(config internal.ImporterConfig) error {
 	p.importConfig = config
 	p.batcher = util.NewBatcher()
 	return importer.Run(p.logger, config, p)
+}
+
+// SupportsDelete returns true if the importer supports deleting data.
+func (p *eventHubDriver) SupportsDelete() bool {
+	return false
 }
 
 func init() {

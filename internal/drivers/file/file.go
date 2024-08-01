@@ -158,6 +158,11 @@ func (p *fileDriver) Import(config internal.ImporterConfig) error {
 	return importer.Run(p.logger, config, p)
 }
 
+// SupportsDelete returns true if the importer supports deleting data.
+func (p *fileDriver) SupportsDelete() bool {
+	return false
+}
+
 func init() {
 	internal.RegisterDriver("file", &fileDriver{})
 	internal.RegisterImporter("file", &fileDriver{})

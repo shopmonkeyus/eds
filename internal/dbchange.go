@@ -49,6 +49,15 @@ func (c *DBChangeEvent) GetObject() (map[string]any, error) {
 			c.object = res
 		}
 		return c.object, nil
+	} else if c.Before != nil {
+		if c.object == nil {
+			res := make(map[string]any)
+			if err := json.Unmarshal(c.Before, &res); err != nil {
+				return nil, err
+			}
+			c.object = res
+		}
+		return c.object, nil
 	}
 	return nil, nil
 }

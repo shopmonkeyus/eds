@@ -110,7 +110,7 @@ func (p *kafkaDriver) MaxBatchSize() int {
 }
 
 func strWithDef(val *string, def string) string {
-	if val == nil {
+	if val == nil || *val == "" {
 		return def
 	}
 	return *val
@@ -213,6 +213,11 @@ func (p *kafkaDriver) Import(config internal.ImporterConfig) error {
 		return err
 	}
 	return importer.Run(p.logger, config, p)
+}
+
+// SupportsDelete returns true if the importer supports deleting data.
+func (p *kafkaDriver) SupportsDelete() bool {
+	return false
 }
 
 func init() {

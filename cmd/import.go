@@ -374,40 +374,6 @@ var importCmd = &cobra.Command{
 		dataDir := getDataDir(cmd, logger)
 		schemaFile, _ := getSchemaAndTableFiles(dataDir)
 
-		if !dryRun && !noconfirm {
-
-			meta, err := internal.GetDriverMetadataForURL(driverUrl)
-			if err != nil {
-				logger.Fatal("error getting driver metadata: %s", err)
-			}
-
-			var confirmed bool
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewNote().
-						Title("\n🚨 WARNING 🚨"),
-					huh.NewConfirm().
-						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s", meta.Name)).
-						Affirmative("Confirm").
-						Negative("Cancel").
-						Value(&confirmed),
-				),
-			)
-			custom := huh.ThemeBase()
-			form.WithTheme(custom)
-
-			if err := form.Run(); err != nil {
-				if !errors.Is(err, huh.ErrUserAborted) {
-					logger.Error("error running form: %s", err)
-					logger.Info("You may use --confirm to skip this prompt")
-					os.Exit(1)
-				}
-			}
-			if !confirmed {
-				os.Exit(0)
-			}
-		}
-
 		if dryRun {
 			logger.Info("🚨 Dry run enabled")
 		}
@@ -461,6 +427,47 @@ var importCmd = &cobra.Command{
 		importer, err := internal.NewImporter(ctx, logger, driverUrl, registry)
 		if err != nil {
 			logger.Fatal("error creating importer: %s", err)
+		}
+
+		var skipDeleteConfirm bool
+
+		// check to see if the importer supports delete
+		if importerHelp, ok := importer.(internal.ImporterHelp); ok {
+			skipDeleteConfirm = !importerHelp.SupportsDelete()
+		}
+
+		if !dryRun && !noconfirm && !skipDeleteConfirm {
+
+			meta, err := internal.GetDriverMetadataForURL(driverUrl)
+			if err != nil {
+				logger.Fatal("error getting driver metadata: %s", err)
+			}
+
+			var confirmed bool
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewNote().
+						Title("\n🚨 WARNING 🚨"),
+					huh.NewConfirm().
+						Title(fmt.Sprintf("YOU ARE ABOUT TO DELETE EVERYTHING IN %s", meta.Name)).
+						Affirmative("Confirm").
+						Negative("Cancel").
+						Value(&confirmed),
+				),
+			)
+			custom := huh.ThemeBase()
+			form.WithTheme(custom)
+
+			if err := form.Run(); err != nil {
+				if !errors.Is(err, huh.ErrUserAborted) {
+					logger.Error("error running form: %s", err)
+					logger.Info("You may use --confirm to skip this prompt")
+					os.Exit(1)
+				}
+			}
+			if !confirmed {
+				os.Exit(0)
+			}
 		}
 
 		noCleanup, _ := cmd.Flags().GetBool("no-cleanup")
@@ -614,7 +621,7 @@ func init() {
 	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
 
 	// tuning and testing flags
-	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks")
+	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks (if supported by driver)")
 	importCmd.Flags().Bool("single", false, "run one insert at a time instead of batching")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
 	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")

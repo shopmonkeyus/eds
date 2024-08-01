@@ -243,6 +243,11 @@ func (p *s3Driver) Import(config internal.ImporterConfig) error {
 	return importer.Run(p.logger, config, p)
 }
 
+// SupportsDelete returns true if the importer supports deleting data.
+func (p *s3Driver) SupportsDelete() bool {
+	return false
+}
+
 func init() {
 	internal.RegisterDriver("s3", &s3Driver{})
 	internal.RegisterImporter("s3", &s3Driver{})
