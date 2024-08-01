@@ -163,12 +163,15 @@ func (c *Consumer) flush() bool {
 		internal.PendingEvents.Dec()
 		count++
 	}
-	c.pending = nil
-	c.pendingStarted = nil
+	processingDuration := time.Since(*c.pendingStarted)
+	internal.ProcessingDuration.Observe(processingDuration.Seconds())
 	internal.FlushDuration.Observe(time.Since(started).Seconds())
 	internal.FlushCount.Observe(count)
+	c.pending = nil
+	c.pendingStarted = nil
 	return c.stopping
 }
+
 func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) bool {
 	if c.tableTimestamps == nil {
 		return false
