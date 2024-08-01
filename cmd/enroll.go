@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -71,8 +70,7 @@ var enrollCmd = &cobra.Command{
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			buf, _ := io.ReadAll(resp.Body)
-			logger.Fatal("failed to enroll server. status code=%d. %s", resp.StatusCode, string(buf))
+			logger.Fatal("%s", handleAPIError(resp, "enroll"))
 		}
 
 		var enrollResp enrollResponse

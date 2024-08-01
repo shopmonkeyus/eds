@@ -59,20 +59,20 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-func (e *errorResponse) Parse(buf []byte, statusCode int) error {
+func (e *errorResponse) Parse(buf []byte, statusCode int, context string) error {
 	if err := json.Unmarshal(buf, e); err == nil {
-		return fmt.Errorf(e.Message)
+		return fmt.Errorf("%s: %s", context, e.Message)
 	}
-	return fmt.Errorf("API error: %s (status code=%d)", string(buf), statusCode)
+	return fmt.Errorf("%s: %s (status code=%d)", context, string(buf), statusCode)
 }
 
-func handleAPIError(resp *http.Response) error {
+func handleAPIError(resp *http.Response, context string) error {
 	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("error reading response: %w", err)
+		return fmt.Errorf("%s: error reading response: %w", context, err)
 	}
 	var errResponse errorResponse
-	return errResponse.Parse(buf, resp.StatusCode)
+	return errResponse.Parse(buf, resp.StatusCode, context)
 }
 
 func createExportJob(ctx context.Context, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
@@ -93,7 +93,7 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", handleAPIError(resp)
+		return "", handleAPIError(resp, "import")
 	}
 	job, err := decodeAPIResponse[exportJobCreateResponse](resp)
 	if err != nil {
@@ -159,6 +159,9 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("error fetching bulk export status: %s", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, handleAPIError(resp, "import")
 	}
 	job, err := decodeAPIResponse[exportJobResponse](resp)
 	if err != nil {

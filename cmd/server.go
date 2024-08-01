@@ -149,8 +149,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		buf, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to send session start. status code=%d. %s", resp.StatusCode, string(buf))
+		return nil, handleAPIError(resp, "session start")
 	}
 	var sessionResp sessionStartResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sessionResp); err != nil {
@@ -180,8 +179,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		buf, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to send session end. status code=%d. %s", resp.StatusCode, string(buf))
+		return nil, handleAPIError(resp, "session end")
 	}
 	var s sessionEndResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
@@ -221,8 +219,7 @@ func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId str
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		buf, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to send session end. status code=%d. %s", resp.StatusCode, string(buf))
+		return nil, handleAPIError(resp, "session renew")
 	}
 	var s sessionRenewResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
@@ -253,9 +250,8 @@ func uploadFile(logger logger.Logger, url string, logFileBundle string) error {
 		return fmt.Errorf("failed to upload logs: %w", err)
 	}
 	defer resp.Body.Close()
-	buf, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to upload logs. status code=%d. %s", resp.StatusCode, string(buf))
+		return handleAPIError(resp, "upload logs")
 	}
 	logger.Trace("logs uploaded successfully: %s", logFileBundle)
 	return nil
@@ -340,8 +336,7 @@ func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, session
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		buf, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to get log upload url. status code=%d. %s", resp.StatusCode, string(buf))
+		return "", handleAPIError(resp, "log upload url")
 	}
 	var s sessionEndResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
