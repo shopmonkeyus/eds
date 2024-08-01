@@ -690,7 +690,6 @@ var serverCmd = &cobra.Command{
 			logFile := string(buf)
 			uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 			if err != nil {
-				// return "", fmt.Errorf("failed to get upload URL: %w", err)
 				logger.Error("failed to get upload URL: %s", err)
 				return nil
 			}
