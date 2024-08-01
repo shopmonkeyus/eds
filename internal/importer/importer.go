@@ -70,6 +70,7 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 				return fmt.Errorf("unable to decode JSON: %w", err)
 			}
 			event.Key = []string{event.GetPrimaryKey()}
+			event.Imported = true
 			count++
 			if err := handler.ImportEvent(event, data); err != nil {
 				return err
