@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -56,25 +55,24 @@ type exportJobCreateRequest struct {
 	Tables      []string `json:"tables,omitempty"`
 }
 
-func shouldRetryError(err error) bool {
-	msg := err.Error()
-	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "connection reset") {
-		return true
-	}
-	return false
+type errorResponse struct {
+	Message string `json:"message"`
 }
 
-func shouldRetryStatus(statusCode int) bool {
-	switch statusCode {
-	case http.StatusInternalServerError, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusTooManyRequests:
-		return true
-	default:
-		return false
+func (e *errorResponse) Parse(buf []byte, statusCode int) error {
+	if err := json.Unmarshal(buf, e); err == nil {
+		return fmt.Errorf(e.Message)
 	}
+	return fmt.Errorf("API error: %s (status code=%d)", string(buf), statusCode)
 }
 
-func backoffRetry(retryCount int) time.Duration {
-	return time.Duration(rand.Intn(1000*retryCount)) * time.Millisecond
+func handleAPIError(resp *http.Response) error {
+	buf, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("error reading response: %w", err)
+	}
+	var errResponse errorResponse
+	return errResponse.Parse(buf, resp.StatusCode)
 }
 
 func createExportJob(ctx context.Context, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
@@ -83,41 +81,25 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 	if err != nil {
 		return "", fmt.Errorf("error encoding request: %s", err)
 	}
-	var retryCount int
-	started := time.Now()
-	for time.Since(started) < time.Minute {
-		req, err := http.NewRequestWithContext(ctx, "POST", apiURL+"/v3/export/bulk", bytes.NewBuffer(body))
-		if err != nil {
-			return "", fmt.Errorf("error creating request: %s", err)
-		}
-		setHTTPHeader(req, apiKey)
-		retry := util.NewHTTPRetry(req)
-		resp, err := retry.Do()
-		if err != nil {
-			if shouldRetryError(err) {
-				retryCount++
-				backoffRetry(retryCount)
-				continue
-			}
-			return "", fmt.Errorf("error creating bulk export job: %s", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			buf, _ := io.ReadAll(resp.Body)
-			if shouldRetryStatus(resp.StatusCode) {
-				retryCount++
-				backoffRetry(retryCount)
-				continue
-			}
-			return "", fmt.Errorf("API error: %s (status code=%d)", string(buf), resp.StatusCode)
-		}
-		job, err := decodeAPIResponse[exportJobCreateResponse](resp)
-		if err != nil {
-			return "", fmt.Errorf("error decoding response: %s", err)
-		}
-		return job.JobID, nil
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL+"/v3/export/bulk", bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("error creating request: %s", err)
 	}
-	return "", fmt.Errorf("error creating export job: too many retries")
+	setHTTPHeader(req, apiKey)
+	retry := util.NewHTTPRetry(req)
+	resp, err := retry.Do()
+	if err != nil {
+		return "", fmt.Errorf("error creating bulk export job: %s", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", handleAPIError(resp)
+	}
+	job, err := decodeAPIResponse[exportJobCreateResponse](resp)
+	if err != nil {
+		return "", fmt.Errorf("error decoding response: %s", err)
+	}
+	return job.JobID, nil
 }
 
 type exportJobTableData struct {
@@ -498,7 +480,7 @@ var importCmd = &cobra.Command{
 					filesRemoved = true
 				}
 			}
-			if !filesRemoved {
+			if !filesRemoved && dir != "" {
 				logger.Info("downloaded files saved to: %s", dir)
 			}
 			if !success {

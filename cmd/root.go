@@ -10,17 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 
 	// Register all drivers
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/eventhub"
+	_ "github.com/shopmonkeyus/eds-server/internal/drivers/file"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/kafka"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/mysql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/postgresql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/s3"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/snowflake"
-	"github.com/shopmonkeyus/eds-server/internal/util"
 )
 
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
