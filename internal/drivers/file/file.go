@@ -101,8 +101,8 @@ func (p *fileDriver) writeEvent(logger logger.Logger, event internal.DBChangeEve
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *fileDriver) Process(event internal.DBChangeEvent) (bool, error) {
-	if err := p.writeEvent(p.logger, event, false); err != nil {
+func (p *fileDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+	if err := p.writeEvent(logger, event, false); err != nil {
 		return false, err
 	}
 	return false, nil

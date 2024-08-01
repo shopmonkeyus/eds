@@ -108,13 +108,13 @@ func (p *snowflakeDriver) MaxBatchSize() int {
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *snowflakeDriver) Process(event internal.DBChangeEvent) (bool, error) {
-	p.logger.Trace("processing event: %s", event.String())
+func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if _, ok := p.schema[event.Table]; !ok {
 		// NOTE: remove this once we have schema evolution reimplemented
-		p.logger.Warn("skipping event: %s because table was not found in schema: %s", event.String(), event.Table)
+		logger.Warn("skipping event: %s because table was not found in schema: %s", event.String(), event.Table)
 		return false, nil
 	}
 	object, err := event.GetObject()

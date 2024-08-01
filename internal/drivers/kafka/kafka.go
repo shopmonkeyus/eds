@@ -140,7 +140,7 @@ func (p *kafkaDriver) process(event internal.DBChangeEvent, dryRun bool) error {
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *kafkaDriver) Process(event internal.DBChangeEvent) (bool, error) {
+func (p *kafkaDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if err := p.process(event, false); err != nil {

@@ -172,10 +172,10 @@ func (p *s3Driver) MaxBatchSize() int {
 	return 1
 }
 
-func (p *s3Driver) process(event internal.DBChangeEvent, dryRun bool) (bool, error) {
+func (p *s3Driver) process(logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
 	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
 	if dryRun {
-		p.logger.Trace("would store %s:%s", p.bucket, key)
+		logger.Trace("would store %s:%s", p.bucket, key)
 	} else {
 		buf := []byte(util.JSONStringify(event))
 		_, err := p.s3.PutObject(p.config.Context, &awss3.PutObjectInput{
@@ -188,14 +188,14 @@ func (p *s3Driver) process(event internal.DBChangeEvent, dryRun bool) (bool, err
 		if err != nil {
 			return true, fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, key, err)
 		}
-		p.logger.Trace("stored %s:%s", p.bucket, key)
+		logger.Trace("stored %s:%s", p.bucket, key)
 	}
 	return false, nil
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *s3Driver) Process(event internal.DBChangeEvent) (bool, error) {
-	return p.process(event, false)
+func (p *s3Driver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+	return p.process(logger, event, false)
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
@@ -236,7 +236,7 @@ func (p *s3Driver) CreateDatasource(schema internal.SchemaMap) error {
 
 // ImportEvent allows the handler to process the event.
 func (p *s3Driver) ImportEvent(event internal.DBChangeEvent, schema *internal.Schema) error {
-	_, err := p.process(event, p.importConfig.DryRun)
+	_, err := p.process(p.logger, event, p.importConfig.DryRun)
 	return err
 }
 

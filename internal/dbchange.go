@@ -2,6 +2,8 @@ package internal
 
 import (
 	"encoding/json"
+
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // DBChangeEvent represents a change record from the database.
@@ -19,7 +21,8 @@ type DBChangeEvent struct {
 	Timestamp     int64           `json:"timestamp"`
 	MVCCTimestamp string          `json:"mvccTimestamp"`
 
-	Imported bool `json:"imported"` // NOTE: this is not on the real dbchange but added during import
+	Imported bool          `json:"imported"` // NOTE: this is not on the real dbchange but added during import
+	NatsMsg  jetstream.Msg `json:"-"`        // could be nil
 
 	object map[string]any
 }
