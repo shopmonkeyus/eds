@@ -43,3 +43,9 @@ type SchemaRegistry interface {
 	// Save the latest schema to a file.
 	Save(filename string) error
 }
+
+// SchemaValidator is the interface for a schema validator.
+type SchemaValidator interface {
+	// Validate the event against the schema.
+	Validate(event DBChangeEvent) (bool, bool, string, error)
+}

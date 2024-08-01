@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,13 +52,12 @@ func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 type s3Driver struct {
-	config          internal.DriverConfig
-	logger          logger.Logger
-	bucket          string
-	prefix          string
-	s3              *awss3.Client
-	importConfig    internal.ImporterConfig
-	schemaValidator *util.SchemaValidator
+	config       internal.DriverConfig
+	logger       logger.Logger
+	bucket       string
+	prefix       string
+	s3           *awss3.Client
+	importConfig internal.ImporterConfig
 }
 
 var _ internal.Driver = (*s3Driver)(nil)
@@ -69,7 +67,7 @@ var _ internal.Importer = (*s3Driver)(nil)
 var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
-func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, dataDir string, urlString string) error {
+func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string) error {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
@@ -91,16 +89,6 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, dataDir st
 			if !strings.HasSuffix(p.prefix, "/") {
 				p.prefix += "/"
 			}
-		}
-	}
-
-	qs := u.Query()
-	sv := qs.Get("schema-validator")
-	if sv != "" {
-		fp := filepath.Join(dataDir, sv)
-		p.schemaValidator, err = util.NewSchemaValidator(fp)
-		if err != nil {
-			return err
 		}
 	}
 
@@ -184,7 +172,7 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, dataDir st
 func (p *s3Driver) Start(pc internal.DriverConfig) error {
 	p.config = pc
 	p.logger = pc.Logger.WithPrefix("[s3]")
-	if err := p.connect(pc.Context, p.logger, pc.DataDir, pc.URL); err != nil {
+	if err := p.connect(pc.Context, p.logger, pc.URL); err != nil {
 		return err
 	}
 	return nil
@@ -202,22 +190,11 @@ func (p *s3Driver) MaxBatchSize() int {
 }
 
 func (p *s3Driver) process(ctx context.Context, logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
-	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
-	if p.schemaValidator != nil {
-		found, valid, path, err := p.schemaValidator.Validate(event)
-		if err != nil {
-			return true, fmt.Errorf("error validating schema: %w", err)
-		}
-		if !found {
-			logger.Trace("skipping %s, no schema found for event: %s", event.Table, util.JSONStringify(event))
-			return false, nil
-		}
-		if !valid {
-			logger.Trace("skipping %s, schema did not validate for event: %s", event.Table, util.JSONStringify(event))
-			return false, nil
-		}
-		key = path
-		logger.Trace("schema validated %s", path)
+	var key string
+	if event.SchemaValidatedPath != nil {
+		key = *event.SchemaValidatedPath
+	} else {
+		key = fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
 	}
 	if dryRun {
 		logger.Trace("would store %s:%s", p.bucket, key)
@@ -293,7 +270,7 @@ func (p *s3Driver) ImportCompleted() error {
 func (p *s3Driver) Import(config internal.ImporterConfig) error {
 	p.logger = config.Logger.WithPrefix("[s3]")
 	p.importConfig = config
-	if err := p.connect(config.Context, p.logger, filepath.Dir(config.DataDir), config.URL); err != nil {
+	if err := p.connect(config.Context, p.logger, config.URL); err != nil {
 		return err
 	}
 	return importer.Run(p.logger, config, p)

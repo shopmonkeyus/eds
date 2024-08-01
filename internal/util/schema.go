@@ -18,6 +18,8 @@ type SchemaValidator struct {
 	rules    map[string]*SchemaValidationRule
 }
 
+var _ internal.SchemaValidator = (*SchemaValidator)(nil)
+
 type SchemaValidationRule struct {
 	Schema string `json:"schema"`
 	Path   string `json:"path"`
@@ -92,8 +94,10 @@ func (v *SchemaValidator) Validate(event internal.DBChangeEvent) (bool, bool, st
 			return true, false, "", err
 		}
 		var path strings.Builder
-		if err := rule.template.Execute(&path, o); err != nil {
-			return true, false, "", fmt.Errorf("error executing template: %w for %s", err, JSONStringify(o))
+		if rule.template != nil {
+			if err := rule.template.Execute(&path, o); err != nil {
+				return true, false, "", fmt.Errorf("error executing template: %w for %s", err, JSONStringify(o))
+			}
 		}
 		return true, true, path.String(), nil
 	}
@@ -101,7 +105,7 @@ func (v *SchemaValidator) Validate(event internal.DBChangeEvent) (bool, bool, st
 }
 
 // NewSchemaValidator creates a new SchemaValidator from the schema files in the given directory.
-func NewSchemaValidator(schemaDir string) (*SchemaValidator, error) {
+func NewSchemaValidator(schemaDir string) (internal.SchemaValidator, error) {
 
 	abs, err := filepath.Abs(schemaDir)
 	if err != nil {
@@ -167,11 +171,13 @@ func NewSchemaValidator(schemaDir string) (*SchemaValidator, error) {
 		}
 		rule.schema = schema
 
-		tmpl, err := template.New(fn).Parse(rule.Path)
-		if err != nil {
-			return nil, fmt.Errorf("error creating template: %s for table: %s. %w", fn, table, err)
+		if rule.Path != "" {
+			tmpl, err := template.New(fn).Parse(rule.Path)
+			if err != nil {
+				return nil, fmt.Errorf("error creating template: %s for table: %s. %w", fn, table, err)
+			}
+			rule.template = tmpl
 		}
-		rule.template = tmpl
 	}
 
 	return &SchemaValidator{

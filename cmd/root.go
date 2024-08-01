@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
@@ -200,6 +201,14 @@ func getSchemaAndTableFiles(datadir string) (string, string) {
 	return schemaFile, tablesFile
 }
 
+func loadSchemaValidator(cmd *cobra.Command) (internal.SchemaValidator, error) {
+	schemaDir := mustFlagString(cmd, "schema-validator", false)
+	if schemaDir == "" {
+		return nil, nil
+	}
+	return util.NewSchemaValidator(schemaDir)
+}
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:  "eds-server",
@@ -221,4 +230,5 @@ func init() {
 	rootCmd.PersistentFlags().Bool("timestamp", false, "turn on timestamps in logs")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
+	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
 }
