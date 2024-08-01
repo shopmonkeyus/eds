@@ -173,7 +173,7 @@ func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
 	dataDir, _ = filepath.Abs(filepath.Clean(dataDir))
 
 	if !util.Exists(dataDir) {
-		os.Mkdir(dataDir, 0700)
+		os.MkdirAll(dataDir, 0700)
 		logger.Debug("making data directory: %s", dataDir)
 	}
 	if ok, err := util.IsDirWritable(dataDir); !ok {
