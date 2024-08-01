@@ -14,5 +14,13 @@ func GetAPIURLFromJWT(jwtString string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to parse jwt: %w", err)
 	}
-	return tokens.Claims.GetIssuer()
+	iss, err := tokens.Claims.GetIssuer()
+	if err != nil {
+		return "", fmt.Errorf("failed to get issuer from jwt: %w", err)
+	}
+	if iss == "https://shopmonkey.io" {
+		// support for legacy tokens
+		iss = "https://api.shopmonkey.cloud"
+	}
+	return iss, nil
 }
