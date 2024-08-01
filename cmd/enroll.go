@@ -14,7 +14,8 @@ import (
 )
 
 type enrollTokenData struct {
-	Token string `json:"token"`
+	Token    string `json:"token"`
+	ServerID string `json:"serverId"`
 }
 
 type enrollResponse struct {
@@ -87,12 +88,15 @@ var enrollCmd = &cobra.Command{
 		if err != nil {
 			logger.Fatal("failed to create token file: %w", err)
 		}
-		_, err = file.WriteString(enrollResp.Data.Token)
+		jsonData, _ := json.Marshal(enrollResp.Data)
+		if err != nil {
+			logger.Fatal("Error converting to JSON: %v", err)
+		}
+		_, err = file.WriteString(string(jsonData))
 		if err != nil {
 			logger.Fatal("failed to write to token file: %w", err)
 		}
 		file.Close()
-
 	},
 }
 
