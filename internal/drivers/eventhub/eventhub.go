@@ -32,6 +32,7 @@ var _ internal.DriverLifecycle = (*eventHubDriver)(nil)
 var _ internal.DriverHelp = (*eventHubDriver)(nil)
 var _ importer.Handler = (*eventHubDriver)(nil)
 var _ internal.Importer = (*eventHubDriver)(nil)
+var _ internal.ImporterHelp = (*eventHubDriver)(nil)
 
 func (p *eventHubDriver) connect(urlString string) error {
 	u, err := url.Parse(urlString)

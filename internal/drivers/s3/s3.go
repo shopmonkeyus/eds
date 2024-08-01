@@ -61,6 +61,7 @@ var _ internal.Driver = (*s3Driver)(nil)
 var _ internal.DriverLifecycle = (*s3Driver)(nil)
 var _ internal.DriverHelp = (*s3Driver)(nil)
 var _ internal.Importer = (*s3Driver)(nil)
+var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
 // Start the driver. This is called once at the beginning of the driver's lifecycle.

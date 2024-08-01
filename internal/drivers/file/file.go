@@ -25,6 +25,7 @@ var _ internal.Driver = (*fileDriver)(nil)
 var _ internal.DriverLifecycle = (*fileDriver)(nil)
 var _ internal.DriverHelp = (*fileDriver)(nil)
 var _ internal.Importer = (*fileDriver)(nil)
+var _ internal.ImporterHelp = (*fileDriver)(nil)
 var _ importer.Handler = (*fileDriver)(nil)
 
 func (p *fileDriver) GetPathFromURL(urlString string) (string, error) {

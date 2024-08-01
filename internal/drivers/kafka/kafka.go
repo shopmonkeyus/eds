@@ -49,6 +49,7 @@ var _ internal.Driver = (*kafkaDriver)(nil)
 var _ internal.DriverLifecycle = (*kafkaDriver)(nil)
 var _ internal.DriverHelp = (*kafkaDriver)(nil)
 var _ internal.Importer = (*kafkaDriver)(nil)
+var _ internal.ImporterHelp = (*kafkaDriver)(nil)
 var _ importer.Handler = (*kafkaDriver)(nil)
 
 func (p *kafkaDriver) connect(urlString string) error {
