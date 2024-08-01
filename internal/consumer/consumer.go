@@ -201,13 +201,17 @@ func (c *Consumer) bufferer() {
 			c.nackEverything()
 			return
 		case msg := <-c.buffer:
+			m, err := msg.Metadata()
+			if err != nil {
+				c.handleError(err)
+				return
+			}
 			log := c.logger.With(map[string]any{
 				"msgId":   msg.Headers().Get(nats.MsgIdHdr),
 				"subject": msg.Subject(),
+				"seq":     m.Sequence.Consumer,
+				"sid":     m.Sequence.Stream,
 			})
-			if m, err := msg.Metadata(); err == nil {
-				log.Trace("msg received - deliveries=%d,consumer=%d,stream=%d,pending=%d", m.NumDelivered, m.Sequence.Consumer, m.Sequence.Stream, len(c.pending))
-			}
 			c.pending = append(c.pending, msg)
 			buf := msg.Data()
 			md, _ := msg.Metadata()
@@ -234,7 +238,8 @@ func (c *Consumer) bufferer() {
 				internal.PendingEvents.Dec()
 				continue
 			}
-			flush, err := c.driver.Process(evt)
+			evt.NatsMsg = msg // in case the driver wants to get specific information from it for logging, etc
+			flush, err := c.driver.Process(log, evt)
 			if err != nil {
 				internal.PendingEvents.Dec()
 				c.handleError(err)

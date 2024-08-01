@@ -161,7 +161,7 @@ func (p *s3Driver) MaxBatchSize() int {
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *s3Driver) Process(event internal.DBChangeEvent) (bool, error) {
+func (p *s3Driver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
 	key := fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
 	buf := []byte(util.JSONStringify(event))
 	_, err := p.s3.PutObject(p.config.Context, &awss3.PutObjectInput{
@@ -174,7 +174,7 @@ func (p *s3Driver) Process(event internal.DBChangeEvent) (bool, error) {
 	if err != nil {
 		return true, fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, key, err)
 	}
-	p.logger.Trace("stored %s:%s", p.bucket, key)
+	logger.Trace("stored %s:%s", p.bucket, key)
 	return false, nil
 }
 
