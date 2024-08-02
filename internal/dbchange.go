@@ -15,6 +15,7 @@ type DBChangeEvent struct {
 	ModelVersion  string          `json:"modelVersion"`
 	CompanyID     *string         `json:"companyId,omitempty"`
 	LocationID    *string         `json:"locationId,omitempty"`
+	UserID        *string         `json:"userId,omitempty"`
 	Before        json.RawMessage `json:"before,omitempty"`
 	After         json.RawMessage `json:"after,omitempty"`
 	Diff          []string        `json:"diff,omitempty"`
@@ -25,6 +26,8 @@ type DBChangeEvent struct {
 	NatsMsg  jetstream.Msg `json:"-"`        // could be nil
 
 	object map[string]any
+
+	SchemaValidatedPath *string `json:"-"` // set by the schema validator if valid and the path is returned as non-empty and not nil
 }
 
 func (c *DBChangeEvent) String() string {

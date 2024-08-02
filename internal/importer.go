@@ -24,6 +24,9 @@ type ImporterConfig struct {
 	// SchemaRegistry is the schema registry to use for the importer.
 	SchemaRegistry SchemaRegistry
 
+	// SchemaValidator is the schema validator to use for the importer or nil if not needed.
+	SchemaValidator SchemaValidator
+
 	// MaxParallel is the maximum number of tables to import in parallel (if supported by the Importer).
 	MaxParallel int
 

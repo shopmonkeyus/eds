@@ -58,6 +58,9 @@ type ConsumerConfig struct {
 
 	// DeliverAll will configure the consumer to read from the beginning of the stream, this only works if the consumer is new
 	DeliverAll bool
+
+	// SchemaValidator is the schema validator to use for the importer or nil if not needed.
+	SchemaValidator internal.SchemaValidator
 }
 
 type Consumer struct {
@@ -81,6 +84,7 @@ type Consumer struct {
 	subError        chan error
 	sessionID       string
 	tableTimestamps map[string]*time.Time
+	validator       internal.SchemaValidator
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -174,14 +178,34 @@ func (c *Consumer) flush(logger logger.Logger) bool {
 	return c.stopping
 }
 
-func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) bool {
-	if c.tableTimestamps == nil {
-		return false
+func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent) bool {
+	if c.tableTimestamps != nil {
+		eventTimestamp := time.UnixMilli(evt.Timestamp)
+		// check if we have a timestamp for this table and only process if its newer
+		if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
+			if eventTimestamp.Before(*tableTimestamp) {
+				return true
+			}
+		}
 	}
-	eventTimestamp := time.UnixMilli(evt.Timestamp)
-	// check if we have a timestamp for this table and only process if its newer
-	if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
-		return eventTimestamp.Before(*tableTimestamp)
+	if c.validator != nil {
+		found, valid, path, err := c.validator.Validate(*evt)
+		if err != nil {
+			logger.Error("error validating schema: %s", err)
+			return true
+		}
+		if !found {
+			logger.Trace("skipping %s, no schema found for event: %s", evt.Table, util.JSONStringify(evt))
+			return true
+		}
+		if !valid {
+			logger.Trace("skipping %s, schema did not validate for event: %s", evt.Table, util.JSONStringify(evt))
+			return true
+		}
+		if path != "" {
+			evt.SchemaValidatedPath = &path
+			logger.Trace("schema validated %s", path)
+		}
 	}
 	return false
 }
@@ -225,8 +249,8 @@ func (c *Consumer) bufferer() {
 				c.handleError(err)
 				return
 			}
-			if c.shouldSkip(&evt) {
-				log.Trace("skipping event due to timestamp %d", evt.Timestamp)
+			if c.shouldSkip(log, &evt) {
+				log.Debug("skipping event")
 				if err := msg.Ack(); err != nil {
 					// not much we can do here, just log it
 					log.Error("error acking skipped msg: %s", err)
@@ -484,6 +508,8 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
+	consumer.validator = config.SchemaValidator
+
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
 	if config.ExportTableTimestamps != nil {
 		consumer.tableTimestamps = config.ExportTableTimestamps
