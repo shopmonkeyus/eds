@@ -91,7 +91,16 @@ func (s *logFileSink) Write(buf []byte) (int, error) {
 	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	return s.f.Write(buf)
+
+	n, err := s.f.Write(buf)
+	if err != nil {
+		return n, err
+	}
+	l, err := s.f.WriteString("\n")
+	if err != nil {
+		return l, err
+	}
+	return n + l, nil
 }
 
 func (s *logFileSink) Close() error {

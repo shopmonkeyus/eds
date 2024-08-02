@@ -16,6 +16,8 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+const maxBatchSize = 200
+
 type snowflakeDriver struct {
 	config    internal.DriverConfig
 	logger    logger.Logger
@@ -84,7 +86,7 @@ func (p *snowflakeDriver) Stop() error {
 	p.logger.Debug("stopping")
 	p.once.Do(func() {
 		p.logger.Debug("waiting on flush")
-		p.Flush() // make sure we flush
+		p.Flush(p.logger) // make sure we flush
 		p.logger.Debug("completed flush")
 		p.logger.Debug("waiting on waitgroup")
 		p.waitGroup.Wait()
@@ -104,7 +106,7 @@ func (p *snowflakeDriver) Stop() error {
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
 func (p *snowflakeDriver) MaxBatchSize() int {
-	return -1
+	return maxBatchSize
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
@@ -121,14 +123,14 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 	if err != nil {
 		return false, fmt.Errorf("error getting json object: %w", err)
 	}
-	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, nil)
+	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
 	return false, nil
 }
 
 var sequence int64
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-func (p *snowflakeDriver) Flush() error {
+func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 	p.locker.Lock()
 	defer p.locker.Unlock()
 	if p.db == nil {
@@ -140,7 +142,7 @@ func (p *snowflakeDriver) Flush() error {
 	count := len(records)
 	p.batcher.Clear()
 	if count > 0 {
-		p.logger.Debug("flush: %d / %d", count, sequence+1)
+		logger.Debug("flush: %d / %d", count, sequence+1)
 		sequence++
 		tag := fmt.Sprintf("eds-server-%s/%d/%d", p.sessionID, sequence, count)
 		ctx := sf.WithQueryTag(context.Background(), tag)
@@ -160,14 +162,14 @@ func (p *snowflakeDriver) Flush() error {
 				}
 				force = ok
 				if force {
-					p.logger.Trace("forcing delete before insert because we've seen an insert for %s/%s", record.Table, record.Id)
+					logger.Trace("forcing delete before insert because we've seen an insert for %s/%s", record.Table, record.Id)
 				}
 			case "UPDATE":
 				// slight optimization to skip records that just have an updatedDate and nothing else
 				justUpdatedDate := len(record.Diff) == 1 && record.Diff[0] == "updatedDate"
 				noUpdates := len(record.Diff) == 0
 				if justUpdatedDate || noUpdates {
-					p.logger.Trace("skipping update because only updatedDate changed for %s/%s", record.Table, record.Id)
+					logger.Trace("skipping update because only updatedDate changed for %s/%s", record.Table, record.Id)
 					continue
 				}
 			case "DELETE":
@@ -176,7 +178,7 @@ func (p *snowflakeDriver) Flush() error {
 			}
 			sql, c := toSQL(record, p.schema, force)
 			statementCount += c
-			p.logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i+1, count, strings.TrimRight(sql, "\n"))
+			logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i+1, count, strings.TrimRight(sql, "\n"))
 			query.WriteString(sql)
 			if key != "" {
 				cachekeys = append(cachekeys, key)
@@ -188,11 +190,11 @@ func (p *snowflakeDriver) Flush() error {
 				return fmt.Errorf("error creating exec context: %w", err)
 			}
 			ts := time.Now()
-			p.logger.Trace("executing query (%s/%d)", tag, statementCount)
+			logger.Trace("executing query (%s/%d)", tag, statementCount)
 			if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
 				return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
 			}
-			p.logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
+			logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
 		}
 		if len(cachekeys) > 0 {
 			// cache keys seen for the past 24 hours ... might want to make it configurable at some point but this is good enough for now

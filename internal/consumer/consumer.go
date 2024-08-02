@@ -96,7 +96,7 @@ func (c *Consumer) Stop() error {
 		c.lock.Lock()
 		c.stopping = true
 		c.lock.Unlock()
-		c.flush()
+		c.flush(c.logger)
 		c.cancel()
 		c.logger.Debug("waiting on bufferer")
 		c.waitGroup.Wait()
@@ -140,15 +140,15 @@ func (c *Consumer) handleError(err error) {
 	c.subError <- err
 }
 
-func (c *Consumer) flush() bool {
-	c.logger.Trace("flush")
+func (c *Consumer) flush(logger logger.Logger) bool {
+	logger.Trace("flush")
 	if c.driver == nil {
 		return c.stopping
 	}
 	started := time.Now()
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if err := c.driver.Flush(); err != nil {
+	if err := c.driver.Flush(logger); err != nil {
 		if errors.Is(err, internal.ErrDriverStopped) {
 			c.nackEverything()
 			return true
@@ -160,7 +160,7 @@ func (c *Consumer) flush() bool {
 	for _, m := range c.pending {
 		if err := m.Ack(); err != nil {
 			internal.PendingEvents.Dec()
-			c.logger.Error("error acking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
+			logger.Error("error acking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
 			c.nackEverything()
 			return true
 		}
@@ -283,7 +283,7 @@ func (c *Consumer) bufferer() {
 				if traceLogNatsProcessDetail {
 					log.Trace("flush 1 called. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
 				}
-				if c.flush() {
+				if c.flush(log) {
 					return
 				}
 				continue
@@ -299,7 +299,7 @@ func (c *Consumer) bufferer() {
 				if traceLogNatsProcessDetail {
 					log.Trace("flush 2 called. flush=%v,pending=%d,max=%d,started=%v", flush, len(c.pending), maxsize, time.Since(*c.pendingStarted))
 				}
-				if c.flush() {
+				if c.flush(log) {
 					return
 				}
 				continue
@@ -310,7 +310,7 @@ func (c *Consumer) bufferer() {
 				if traceLogNatsProcessDetail {
 					c.logger.Trace("flush 3 called. count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
 				}
-				if c.flush() {
+				if c.flush(c.logger) {
 					return
 				}
 				continue
@@ -593,16 +593,18 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		} else {
 			jsConfig.DeliverPolicy = jetstream.DeliverNewPolicy
 		}
+
 		c, err = js.CreateConsumer(configConsumerCtx, "dbchange", jsConfig)
 		if err != nil {
 			nc.Close()
 			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
 		}
 	} else {
-		consumer.logger.Debug("consumer found")
 
 		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
 		jsConfig.OptStartTime = c.CachedInfo().Config.OptStartTime
+		consumer.logger.Debug("consumer found, setting delivery policy to %v and start time to %v", jsConfig.DeliverPolicy, jsConfig.OptStartTime)
+
 		// consumer found, update it
 		// TODO: we should check if the consumer is already in the correct state and skip this
 		c, err = js.UpdateConsumer(configConsumerCtx, "dbchange", jsConfig)

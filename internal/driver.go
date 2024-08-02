@@ -61,7 +61,7 @@ type Driver interface {
 	Process(logger logger.Logger, event DBChangeEvent) (bool, error)
 
 	// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-	Flush() error
+	Flush(logger logger.Logger) error
 }
 
 // DriverAlias is an interface that Drivers implement for specifying additional protocol schemes for URLs that the driver can handle.

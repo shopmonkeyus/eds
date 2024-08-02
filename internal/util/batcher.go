@@ -28,12 +28,16 @@ func (b *Batcher) Records() []*Record {
 // Add will add a record to the batcher.
 func (b *Batcher) Add(table string, id string, operation string, diff []string, payload map[string]any, event *internal.DBChangeEvent) {
 	var primaryKey string
-	if val, ok := payload["id"].(string); ok {
-		primaryKey = val
+	if event != nil {
+		primaryKey = event.GetPrimaryKey()
 	} else {
-		primaryKey = id
+		if val, ok := payload["id"].(string); ok {
+			primaryKey = val
+		} else {
+			primaryKey = id
+		}
 	}
-	hashkey := table + id
+	hashkey := table + primaryKey
 	index, found := b.pks[hashkey]
 	if operation == "DELETE" {
 		if found {

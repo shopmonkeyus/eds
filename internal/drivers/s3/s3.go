@@ -281,7 +281,7 @@ func (p *s3Driver) Process(logger logger.Logger, event internal.DBChangeEvent) (
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-func (p *s3Driver) Flush() error {
+func (p *s3Driver) Flush(logger logger.Logger) error {
 	p.logger.Debug("flush called")
 	p.jobWaitGroup.Wait()
 	var errs []error
