@@ -1,8 +1,6 @@
 package util
 
-import (
-	"github.com/shopmonkeyus/eds-server/internal"
-)
+import "github.com/shopmonkeyus/eds-server/internal"
 
 type Batcher struct {
 	records []*Record

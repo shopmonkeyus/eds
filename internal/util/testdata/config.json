@@ -1,0 +1,6 @@
+{
+  "labor": {
+    "schema": "labor_message.json",
+    "path": "{{.table}}/received/{{.table}}_{{.mvccTimestamp}}_{{.id}}.json"
+  }
+}
