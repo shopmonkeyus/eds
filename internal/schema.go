@@ -46,6 +46,6 @@ type SchemaRegistry interface {
 
 // SchemaValidator is the interface for a schema validator.
 type SchemaValidator interface {
-	// Validate the event against the schema.
+	// Validate the event against the schema. Returns true if a schema is found for the table, true if the event is valid, the path transformed and an error if one occurs.
 	Validate(event DBChangeEvent) (bool, bool, string, error)
 }
