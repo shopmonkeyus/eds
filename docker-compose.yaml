@@ -45,14 +45,13 @@ services:
   mssql:
     image: mcr.microsoft.com/azure-sql-edge
     stdin_open: true
+    user: root
     ports:
-      - "1433:1433"
+      - 1433:1433
     environment:
       - MSSQL_SA_PASSWORD=Asdf1234!
       - ACCEPT_EULA=Y
       - MSSQL_DATA_DIR=/var/opt/mssql/data
-      - MSSQL_LOG_DIR=/var/opt/mssql/log
-      - MSSQL_BACKUP_DIR=/var/opt/mssql/backup
   init-kafka:
     image: confluentinc/cp-kafka:7.7.0
     depends_on:
