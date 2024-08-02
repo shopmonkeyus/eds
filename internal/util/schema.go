@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	js "github.com/santhosh-tekuri/jsonschema/v5"
+	js "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/shopmonkeyus/eds-server/internal"
 )
 
