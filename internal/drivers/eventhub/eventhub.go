@@ -69,7 +69,7 @@ func (p *eventHubDriver) Start(pc internal.DriverConfig) error {
 func (p *eventHubDriver) Stop() error {
 	p.logger.Debug("stopping")
 	p.once.Do(func() {
-		p.Flush()
+		p.Flush(p.logger)
 		p.logger.Debug("waiting on waitgroup")
 		p.waitGroup.Wait()
 		p.logger.Debug("completed waitgroup")
@@ -125,8 +125,8 @@ func (p *eventHubDriver) addEventToBatch(batch *azeventhubs.EventDataBatch, reco
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-func (p *eventHubDriver) Flush() error {
-	p.logger.Debug("flush")
+func (p *eventHubDriver) Flush(logger logger.Logger) error {
+	logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	records := p.batcher.Records()
@@ -167,9 +167,9 @@ func (p *eventHubDriver) Flush() error {
 		}
 		for _, batch := range batches {
 			if p.dryRun {
-				p.logger.Trace("would send batch (%03d/%03d) with count: %d, bytes: %d", 1+offset, count, batch.NumEvents(), batch.NumBytes())
+				logger.Trace("would send batch (%03d/%03d) with count: %d, bytes: %d", 1+offset, count, batch.NumEvents(), batch.NumBytes())
 			} else {
-				p.logger.Trace("sending batch (%03d/%03d) with count: %d, bytes: %d", 1+offset, count, batch.NumEvents(), batch.NumBytes())
+				logger.Trace("sending batch (%03d/%03d) with count: %d, bytes: %d", 1+offset, count, batch.NumEvents(), batch.NumBytes())
 				if err := p.producer.SendEventDataBatch(p.config.Context, batch, nil); err != nil {
 					return fmt.Errorf("error sending batch: %w", err)
 				}
@@ -218,7 +218,7 @@ func (p *eventHubDriver) ImportEvent(event internal.DBChangeEvent, schema *inter
 	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
 
 	if p.batcher.Len() >= maxImportBatchSize {
-		return p.Flush()
+		return p.Flush(p.logger)
 	}
 	return nil
 }
@@ -226,7 +226,7 @@ func (p *eventHubDriver) ImportEvent(event internal.DBChangeEvent, schema *inter
 // ImportCompleted is called when all events have been processed.
 func (p *eventHubDriver) ImportCompleted() error {
 	if p.batcher != nil {
-		return p.Flush()
+		return p.Flush(p.logger)
 	}
 	p.producer.Close(context.Background())
 	return nil

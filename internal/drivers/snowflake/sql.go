@@ -197,10 +197,11 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 				if val, ok := record.Object[name]; ok {
 					v := quoteValue(val, "")
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
-				} else {
-					c := model.Properties[name]
-					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), nullableValue(c, false)))
 				}
+				// else shouldn't be possible
+			}
+			if len(updateValues) == 0 {
+				return sql.String(), count // in case we skipped, just return
 			}
 			sql.WriteString("UPDATE ")
 			sql.WriteString(util.QuoteIdentifier(record.Table))
@@ -234,6 +235,7 @@ func getConnectionStringFromURL(urlString string) (string, error) {
 	str.WriteString(u.Path)
 	v := u.Query()
 	v.Set("client_session_keep_alive", "true")
+	v.Set("application", "eds-server")
 	str.WriteString("?")
 	str.WriteString(v.Encode())
 	return str.String(), nil

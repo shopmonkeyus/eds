@@ -134,7 +134,7 @@ func (p *kafkaDriver) process(event internal.DBChangeEvent, dryRun bool) error {
 		})
 	}
 	if len(p.pending) >= maxImportBatchSize {
-		return p.Flush()
+		return p.Flush(p.logger)
 	}
 	return nil
 }
@@ -150,13 +150,14 @@ func (p *kafkaDriver) Process(logger logger.Logger, event internal.DBChangeEvent
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-func (p *kafkaDriver) Flush() error {
+func (p *kafkaDriver) Flush(logger logger.Logger) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if len(p.pending) > 0 {
 		if err := p.writer.WriteMessages(p.ctx, p.pending...); err != nil {
 			return fmt.Errorf("error publishing message. %w", err)
 		}
+		logger.Debug("flushed %d messages", len(p.pending))
 		p.pending = nil
 	}
 	return nil
@@ -200,7 +201,7 @@ func (p *kafkaDriver) ImportEvent(event internal.DBChangeEvent, schema *internal
 
 // ImportCompleted is called when all events have been processed.
 func (p *kafkaDriver) ImportCompleted() error {
-	if err := p.Flush(); err != nil {
+	if err := p.Flush(p.logger); err != nil {
 		return err
 	}
 	return p.writer.Close()
