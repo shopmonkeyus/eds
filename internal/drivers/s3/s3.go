@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -51,6 +53,12 @@ func (lt *RecalculateV4Signature) RoundTrip(req *http.Request) (*http.Response, 
 	return lt.next.RoundTrip(req)
 }
 
+type job struct {
+	logger logger.Logger
+	event  internal.DBChangeEvent
+	key    string
+}
+
 type s3Driver struct {
 	config       internal.DriverConfig
 	logger       logger.Logger
@@ -58,6 +66,10 @@ type s3Driver struct {
 	prefix       string
 	s3           *awss3.Client
 	importConfig internal.ImporterConfig
+	waitGroup    sync.WaitGroup
+	jobWaitGroup sync.WaitGroup
+	ch           chan job
+	errors       chan error
 }
 
 var _ internal.Driver = (*s3Driver)(nil)
@@ -155,17 +167,70 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 
 	if _, err := p.s3.ListObjects(ctx, &awss3.ListObjectsInput{Bucket: aws.String(p.bucket), MaxKeys: aws.Int32(1)}); err != nil {
 		var bnf *types.NoSuchBucket
-		if errors.As(err, &bnf) {
-			if _, err := p.s3.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(p.bucket)}); err != nil {
-				return fmt.Errorf("bucket not found and unable to create bucket %s: %w", p.bucket, err)
+		// only attempt to create the bucket if we are using localhost
+		if strings.Contains(host, "localhost") {
+			if errors.As(err, &bnf) {
+				if _, err := p.s3.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(p.bucket)}); err != nil {
+					return fmt.Errorf("bucket not found and unable to create bucket %s: %w", p.bucket, err)
+				}
+				logger.Info("created bucket %s", p.bucket)
+				return nil // we created the bucket ok
 			}
-			logger.Info("created bucket %s", p.bucket)
-			return nil // we created the bucket ok
 		}
 		return fmt.Errorf("unable to verify bucket %s: %w", p.bucket, bnf)
 	}
 
+	maxBatchSize := 1_000 // maximum number of events to batch
+	uploadTasks := 4      // number of concurrent upload tasks
+
+	if u.Query().Get("maxBatchSize") != "" {
+		maxBatchSize, err = strconv.Atoi(u.Query().Get("maxBatchSize"))
+		if err != nil {
+			return fmt.Errorf("unable to parse maxBatchSize: %w", err)
+		}
+		if maxBatchSize <= 0 {
+			maxBatchSize = 1_000
+		}
+	}
+	if u.Query().Get("uploadTasks") != "" {
+		uploadTasks, err = strconv.Atoi(u.Query().Get("uploadTasks"))
+		if err != nil {
+			return fmt.Errorf("unable to parse uploadTasks: %w", err)
+		}
+		if uploadTasks <= 0 {
+			uploadTasks = 4
+		}
+	}
+	p.logger.Debug("setting maxBatchSize=%d uploadTasks=%d", maxBatchSize, uploadTasks)
+
+	p.ch = make(chan job, maxBatchSize)
+	p.errors = make(chan error, maxBatchSize)
+	for i := 0; i < uploadTasks; i++ {
+		p.waitGroup.Add(1)
+		go p.run()
+	}
+
 	return nil
+}
+
+func (p *s3Driver) run() {
+	defer p.waitGroup.Done()
+	for job := range p.ch {
+		buf := []byte(util.JSONStringify(job.event))
+		_, err := p.s3.PutObject(context.Background(), &awss3.PutObjectInput{
+			Bucket:        aws.String(p.bucket),
+			Key:           aws.String(job.key),
+			ContentType:   aws.String("application/json"),
+			Body:          bytes.NewReader(buf),
+			ContentLength: aws.Int64(int64(len(buf))),
+		})
+		if err != nil {
+			p.errors <- fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, job.key, err)
+		} else {
+			job.logger.Trace("uploaded to %s:%s", p.bucket, job.key)
+		}
+		p.jobWaitGroup.Done()
+	}
 }
 
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
@@ -180,16 +245,21 @@ func (p *s3Driver) Start(pc internal.DriverConfig) error {
 
 // Stop the driver. This is called once at the end of the driver's lifecycle.
 func (p *s3Driver) Stop() error {
+	p.logger.Debug("stopping s3 driver")
+	p.jobWaitGroup.Wait()
+	close(p.ch)
+	p.waitGroup.Wait()
+	p.logger.Debug("stopped s3 driver")
 	return nil
 }
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
 // Return -1 to indicate that there is no limit.
 func (p *s3Driver) MaxBatchSize() int {
-	return 1
+	return 1_000
 }
 
-func (p *s3Driver) process(ctx context.Context, logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
+func (p *s3Driver) process(_ context.Context, logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
 	var key string
 	if event.SchemaValidatedPath != nil {
 		key = *event.SchemaValidatedPath
@@ -199,18 +269,8 @@ func (p *s3Driver) process(ctx context.Context, logger logger.Logger, event inte
 	if dryRun {
 		logger.Trace("would store %s:%s", p.bucket, key)
 	} else {
-		buf := []byte(util.JSONStringify(event))
-		_, err := p.s3.PutObject(ctx, &awss3.PutObjectInput{
-			Bucket:        aws.String(p.bucket),
-			Key:           aws.String(key),
-			ContentType:   aws.String("application/json"),
-			Body:          bytes.NewReader(buf),
-			ContentLength: aws.Int64(int64(len(buf))),
-		})
-		if err != nil {
-			return true, fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, key, err)
-		}
-		logger.Trace("stored %s:%s", p.bucket, key)
+		p.jobWaitGroup.Add(1)
+		p.ch <- job{logger, event, key}
 	}
 	return false, nil
 }
@@ -222,7 +282,23 @@ func (p *s3Driver) Process(logger logger.Logger, event internal.DBChangeEvent) (
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 func (p *s3Driver) Flush() error {
-	return nil
+	p.logger.Debug("flush called")
+	p.jobWaitGroup.Wait()
+	var errs []error
+done:
+	for {
+		select {
+		case err := <-p.errors:
+			errs = append(errs, err)
+		default:
+			break done
+		}
+	}
+	p.logger.Debug("flush finished")
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }
 
 // Name is a unique name for the driver.
