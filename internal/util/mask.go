@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	cstr "github.com/shopmonkeyus/go-common/string"
@@ -34,10 +35,14 @@ func MaskURL(urlString string) (string, error) {
 			str.WriteString(cstr.Mask(p[1:]))
 		}
 	}
-	qs := u.Query().Encode()
-	if qs != "" {
+	var qs []string
+	for k, v := range u.Query() {
+		qs = append(qs, fmt.Sprintf("%s=%s", k, cstr.Mask(strings.Join(v, ","))))
+	}
+	sort.Strings(qs)
+	if len(qs) > 0 {
 		str.WriteString("?")
-		str.WriteString(cstr.Mask(qs))
+		str.WriteString(strings.Join(qs, "&"))
 	}
 	return str.String(), nil
 }

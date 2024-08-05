@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/shopmonkeyus/eds-server/internal"
@@ -70,6 +71,8 @@ type s3Driver struct {
 	jobWaitGroup sync.WaitGroup
 	ch           chan job
 	errors       chan error
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 var _ internal.Driver = (*s3Driver)(nil)
@@ -84,6 +87,10 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
 	}
+
+	c, cancel := context.WithCancel(ctx)
+	p.ctx = c
+	p.cancel = cancel
 
 	host := u.Host
 	p.bucket = u.Path
@@ -141,12 +148,36 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 		}
 	}
 
+	var accessKeyID, secretAccessKey, sessionToken string
+
+	if u.Query().Has("region") {
+		region = u.Query().Get("region")
+	}
+	if u.Query().Has("access-key-id") {
+		accessKeyID = u.Query().Get("access-key-id")
+	} else {
+		accessKeyID = os.Getenv("AWS_ACCESS_KEY_ID")
+	}
+	if u.Query().Has("secret-access-key") {
+		secretAccessKey = u.Query().Get("secret-access-key")
+	} else {
+		secretAccessKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+	}
+	if u.Query().Has("session-token") {
+		sessionToken = u.Query().Get("session-token")
+	} else {
+		sessionToken = os.Getenv("AWS_SESSION_TOKEN")
+	}
+
 	var cfg aws.Config
+
+	provider := config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, sessionToken))
 
 	if strings.Contains(host, "googleapis.com") {
 		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion("auto"),
-			config.WithEndpointResolverWithOptions(customResolver))
+			config.WithEndpointResolverWithOptions(customResolver),
+			provider)
 		if err == nil {
 			cfg.HTTPClient = &http.Client{Transport: &RecalculateV4Signature{http.DefaultTransport, v4.NewSigner(), cfg}}
 		}
@@ -154,6 +185,7 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion(region),
 			config.WithEndpointResolverWithOptions(customResolver),
+			provider,
 		)
 	}
 
@@ -215,21 +247,26 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 
 func (p *s3Driver) run() {
 	defer p.waitGroup.Done()
-	for job := range p.ch {
-		buf := []byte(util.JSONStringify(job.event))
-		_, err := p.s3.PutObject(context.Background(), &awss3.PutObjectInput{
-			Bucket:        aws.String(p.bucket),
-			Key:           aws.String(job.key),
-			ContentType:   aws.String("application/json"),
-			Body:          bytes.NewReader(buf),
-			ContentLength: aws.Int64(int64(len(buf))),
-		})
-		if err != nil {
-			p.errors <- fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, job.key, err)
-		} else {
-			job.logger.Trace("uploaded to %s:%s", p.bucket, job.key)
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case job := <-p.ch:
+			buf := []byte(util.JSONStringify(job.event))
+			_, err := p.s3.PutObject(context.Background(), &awss3.PutObjectInput{
+				Bucket:        aws.String(p.bucket),
+				Key:           aws.String(job.key),
+				ContentType:   aws.String("application/json"),
+				Body:          bytes.NewReader(buf),
+				ContentLength: aws.Int64(int64(len(buf))),
+			})
+			if err != nil {
+				p.errors <- fmt.Errorf("error storing s3 object to %s:%s: %w", p.bucket, job.key, err)
+			} else {
+				job.logger.Trace("uploaded to %s:%s", p.bucket, job.key)
+			}
+			p.jobWaitGroup.Done()
 		}
-		p.jobWaitGroup.Done()
 	}
 }
 
@@ -245,6 +282,7 @@ func (p *s3Driver) Start(pc internal.DriverConfig) error {
 
 // Stop the driver. This is called once at the end of the driver's lifecycle.
 func (p *s3Driver) Stop() error {
+	p.cancel()
 	p.logger.Debug("stopping s3 driver")
 	p.jobWaitGroup.Wait()
 	close(p.ch)
@@ -282,7 +320,7 @@ func (p *s3Driver) Process(logger logger.Logger, event internal.DBChangeEvent) (
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 func (p *s3Driver) Flush(logger logger.Logger) error {
-	p.logger.Debug("flush called")
+	logger.Debug("flush called")
 	p.jobWaitGroup.Wait()
 	var errs []error
 done:
@@ -294,7 +332,7 @@ done:
 			break done
 		}
 	}
-	p.logger.Debug("flush finished")
+	logger.Debug("flush finished")
 	if len(errs) == 0 {
 		return nil
 	}
@@ -313,7 +351,7 @@ func (p *s3Driver) Description() string {
 
 // ExampleURL should return an example URL for configuring the driver.
 func (p *s3Driver) ExampleURL() string {
-	return "s3://bucket/folder"
+	return "s3://bucket/folder?region=us-west-2&access-key-id=AKIAIOSFODNN7EXAMPLE&secret-access-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 }
 
 // Help should return a detailed help documentation for the driver.
