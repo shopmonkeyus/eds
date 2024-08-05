@@ -107,5 +107,5 @@ func init() {
 	rootCmd.AddCommand(enrollCmd)
 	enrollCmd.Flags().String("api-url", "", "the for testing again preview environment")
 	enrollCmd.Flags().MarkHidden("api-url")
-	enrollCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
-}
+	enrollCmd.Flags().String("data-dir", filepath.Join(cwd+"/datadir"), "the data directory for storing logs and other data")
+}d
