@@ -59,11 +59,15 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-func (e *errorResponse) Parse(buf []byte, statusCode int, context string) error {
+func (e *errorResponse) Parse(buf []byte, statusCode int, context string, requestId string) error {
 	if err := json.Unmarshal(buf, e); err == nil {
 		return fmt.Errorf("%s: %s", context, e.Message)
 	}
-	return fmt.Errorf("%s: %s (status code=%d)", context, string(buf), statusCode)
+	info := fmt.Sprintf("(status code=%d)", statusCode)
+	if requestId != "" {
+		info += fmt.Sprintf(" (requestId=%s)", requestId)
+	}
+	return fmt.Errorf("%s: %s %s", context, string(buf), info)
 }
 
 func handleAPIError(resp *http.Response, context string) error {
@@ -72,7 +76,7 @@ func handleAPIError(resp *http.Response, context string) error {
 		return fmt.Errorf("%s: error reading response: %w", context, err)
 	}
 	var errResponse errorResponse
-	return errResponse.Parse(buf, resp.StatusCode, context)
+	return errResponse.Parse(buf, resp.StatusCode, context, getRequestID(resp))
 }
 
 func createExportJob(ctx context.Context, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
