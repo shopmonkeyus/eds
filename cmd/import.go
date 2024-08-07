@@ -60,14 +60,14 @@ type errorResponse struct {
 }
 
 func (e *errorResponse) Parse(buf []byte, statusCode int, context string, requestId string) error {
-	if err := json.Unmarshal(buf, e); err == nil {
-		return fmt.Errorf("%s: %s", context, e.Message)
-	}
-	info := fmt.Sprintf("(status code=%d)", statusCode)
+	var requestIdTag string
 	if requestId != "" {
-		info += fmt.Sprintf(" (requestId=%s)", requestId)
+		requestIdTag = fmt.Sprintf("(requestId=%s)", requestId)
 	}
-	return fmt.Errorf("%s: %s %s", context, string(buf), info)
+	if err := json.Unmarshal(buf, e); err == nil {
+		return fmt.Errorf("%s: %s %s", context, e.Message, requestIdTag)
+	}
+	return fmt.Errorf("%s: %s (status code=%d) %s", context, string(buf), statusCode, requestIdTag)
 }
 
 func handleAPIError(resp *http.Response, context string) error {
