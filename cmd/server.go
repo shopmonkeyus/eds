@@ -532,6 +532,8 @@ var serverCmd = &cobra.Command{
 		server := mustFlagString(cmd, "server", true)
 		dataDir := getDataDir(cmd, logger)
 
+		apiurl = strings.TrimSuffix(apiurl, "/") // remove trailing slash
+
 		if cmd.Flags().Changed("api-url") {
 			logger.Info("using alternative API url: %s", apiurl)
 		} else {
