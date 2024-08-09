@@ -150,7 +150,7 @@ func (f *Field) SQLTypeSqlServer() string {
 			builder.WriteString("varchar(max)")
 		}
 	case "DateTime":
-		builder.WriteString("nvarchar(100)")
+		builder.WriteString("nvarchar(500)")
 		//TODO: handle dates for sqlserver?
 		// if f.IsTimestampZ {
 		// 	builder.WriteString("datetime2(6)")
