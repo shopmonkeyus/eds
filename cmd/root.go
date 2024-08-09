@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
+	"log"
 	glog "log"
 	"net/http"
 	"os"
@@ -14,6 +14,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	// Register all drivers
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/eventhub"
@@ -43,21 +44,13 @@ type EnrollTokenData struct {
 	ServerID string `json:"serverId"`
 }
 
-func readTokenFile(dataDir string, logger logger.Logger) EnrollTokenData {
-	tokenFile := filepath.Join(dataDir, "token.json")
-	if !util.Exists(tokenFile) {
-		logger.Fatal("token file does not exist: %s", tokenFile)
+func initConfig() {
+	viper.SetConfigName("config")
+	viper.AddConfigPath("./dataDir")
+	viper.AutomaticEnv()
+	if err := viper.ReadInConfig(); err != nil {
+		log.Fatalf("Error reading config file, %s", err)
 	}
-	if !util.Exists(tokenFile) {
-		logger.Fatal("token file does not exist: %s", tokenFile)
-	}
-	buf, err := os.ReadFile(tokenFile)
-	if err != nil {
-		logger.Fatal("error reading token file: %s", err)
-	}
-	var tokenData EnrollTokenData
-	err = json.Unmarshal(buf, &tokenData)
-	return tokenData
 }
 
 func mustFlagInt(cmd *cobra.Command, name string, required bool) int {

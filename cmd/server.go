@@ -26,6 +26,7 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var Version string                // set in main
@@ -548,20 +549,24 @@ var serverCmd = &cobra.Command{
 			return
 		}
 
-		apiurl := mustFlagString(cmd, "api-url", true)
+		apiurl := mustFlagString(cmd, "api-url", false)
 		driverURL := mustFlagString(cmd, "url", true)
-		server := mustFlagString(cmd, "server", true)
+		server := mustFlagString(cmd, "server", false)
 		dataDir := getDataDir(cmd, logger)
-		apikeyFlag := mustFlagString(cmd, "api-key", false)
-		var apikey string
-		var serverId string
+		apikey := mustFlagString(cmd, "api-key", false)
 
-		if apikeyFlag != "" {
-			apikey = apikeyFlag
+		if apikey == "" {
+			apikey = viper.GetString("token")
+			logger.Info("using config api token")
 		} else {
-			tokenData := readTokenFile(dataDir, logger)
-			apikey = tokenData.Token
-			serverId = tokenData.ServerID
+			logger.Info("using parameter api token")
+		}
+
+		if server == "" {
+			server = viper.GetString("server_id")
+			logger.Info("using config server id")
+		} else {
+			logger.Info("using parameter server id")
 		}
 
 		if cmd.Flags().Changed("api-url") {
@@ -766,7 +771,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, driverURL, serverId)
+			session, err := sendStart(logger, apiurl, apikey, driverURL, server)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
@@ -907,6 +912,7 @@ var serverHelpCmd = &cobra.Command{
 }
 
 func init() {
+	cobra.OnInitialize(initConfig)
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverHelpCmd)
 
@@ -917,6 +923,7 @@ func init() {
 	}
 
 	// NOTE: sync these with forkCmd
+	serverCmd.Flags().String("config", "", "config file (default is ./dataDir/config.toml)")
 	serverCmd.Flags().String("url", "", "driver connection string")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
