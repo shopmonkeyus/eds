@@ -890,7 +890,7 @@ func init() {
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
 	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
-	serverCmd.Flags().StringSlice("company-id", nil, "restrict to a specific company ID or multiple")
+	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
 
 	// deprecated but left for backwards compatibility
 	serverCmd.Flags().Int("health-port", 0, "the port to listen for health checks")

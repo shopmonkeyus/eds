@@ -637,8 +637,8 @@ func init() {
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks (if supported by driver)")
 	importCmd.Flags().Bool("single", false, "run one insert at a time instead of batching")
 	importCmd.Flags().StringSlice("only", nil, "only import these tables")
-	importCmd.Flags().StringSlice("company-id", nil, "only import these company ids")
-	importCmd.Flags().StringSlice("location-id", nil, "only import these location ids")
+	importCmd.Flags().StringSlice("companyIds", nil, "only import these company ids")
+	importCmd.Flags().StringSlice("locationIds", nil, "only import these location ids")
 
 	// internal flags
 	importCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
