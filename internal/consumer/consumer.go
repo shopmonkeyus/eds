@@ -41,6 +41,9 @@ type ConsumerConfig struct {
 	// Credentials for the nats server
 	Credentials string
 
+	// CompanyIDs is the list of company IDs to listen for. If empty, all companies will be listened to.
+	CompanyIDs []string
+
 	// Suffix for the consumer name
 	Suffix string
 
@@ -519,6 +522,22 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 				startAt = ts
 			}
 		}
+	}
+
+	// set company ID overrides
+	if len(config.CompanyIDs) > 0 {
+		var newCompanyIDs []string
+		for _, companyID := range config.CompanyIDs {
+			if !util.SliceContains(info.companyIDs, companyID) {
+				return nil, fmt.Errorf("provided company ID %s not in credentials", companyID)
+			}
+			newCompanyIDs = append(newCompanyIDs, companyID)
+		}
+		if len(newCompanyIDs) == 0 {
+			return nil, fmt.Errorf("no valid company IDs provided")
+		}
+		info.companyIDs = newCompanyIDs
+		consumer.logger.Debug("using override company IDs: %v", newCompanyIDs)
 	}
 
 	if config.Driver != nil {
