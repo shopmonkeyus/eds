@@ -50,6 +50,7 @@ var forkCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		logger := newLogger(cmd)
+		companyIds, _ := cmd.Flags().GetStringSlice("company-id")
 		datadir := mustFlagString(cmd, "data-dir", true)
 		logDir := mustFlagString(cmd, "logs-dir", true)
 		sink, err := newLogFileSink(logDir)
@@ -201,6 +202,7 @@ var forkCmd = &cobra.Command{
 						ExportTableTimestamps: exportTableTimestamps,
 						DeliverAll:            restartFlag,
 						SchemaValidator:       validator,
+						CompanyIDs:            companyIds,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)
@@ -292,6 +294,7 @@ func init() {
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "driver connection string")
 	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
+	forkCmd.Flags().StringSlice("company-id", nil, "restrict to a specific company ID or multiple")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
