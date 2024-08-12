@@ -96,7 +96,7 @@ func writeCredsToFile(data string, filename string) error {
 	return nil
 }
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, serverId string) (*edsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -119,7 +119,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Hostname = hostname
 	body.Version = Version
 	body.OsInfo = osinfo
-	body.ServerID = serverId
+	body.ServerID = edsServerId
 
 	driverMeta, err := internal.GetDriverMetadataForURL(driverUrl)
 	if err != nil {
@@ -772,7 +772,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, driverURL, server)
+			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
