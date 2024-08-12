@@ -552,6 +552,7 @@ var serverCmd = &cobra.Command{
 		apiurl := mustFlagString(cmd, "api-url", false)
 		driverURL := mustFlagString(cmd, "url", true)
 		server := mustFlagString(cmd, "server", false)
+		edsServerId := mustFlagString(cmd, "eds-server-id", false)
 		dataDir := getDataDir(cmd, logger)
 		apikey := mustFlagString(cmd, "api-key", false)
 
@@ -562,11 +563,11 @@ var serverCmd = &cobra.Command{
 			logger.Info("using parameter api token")
 		}
 
-		if server == "" {
-			server = viper.GetString("server_id")
-			logger.Info("using config server id")
+		if edsServerId == "" {
+			edsServerId = viper.GetString("server_id")
+			logger.Info("using config server id: %s", edsServerId)
 		} else {
-			logger.Info("using parameter server id")
+			logger.Info("using parameter server id: %s", edsServerId)
 		}
 
 		if cmd.Flags().Changed("api-url") {
@@ -927,7 +928,8 @@ func init() {
 	serverCmd.Flags().String("url", "", "driver connection string")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
-	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
+	serverCmd.Flags().String("data-dir", filepath.Join(cwd, "dataDir"), "the data directory for storing logs and other data")
+	serverCmd.Flags().String("eds-server-id", "", "the EDS server ID")
 
 	// deprecated but left for backwards compatibility
 	serverCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
