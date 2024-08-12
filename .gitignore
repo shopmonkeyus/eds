@@ -6,6 +6,7 @@
 /creds.txt
 /schema.json
 /tables.json
+/sqlserver-data/
 /eds-server-data.db
 /datadir
 /shopmonkey.key.asc

@@ -109,7 +109,7 @@ func (p *fileDriver) Process(logger logger.Logger, event internal.DBChangeEvent)
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-func (p *fileDriver) Flush() error {
+func (p *fileDriver) Flush(logger logger.Logger) error {
 	return nil
 }
 

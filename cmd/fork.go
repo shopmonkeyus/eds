@@ -74,6 +74,12 @@ var forkCmd = &cobra.Command{
 
 		schemaFile, tablesFile := getSchemaAndTableFiles(datadir)
 
+		// check to see if there's a schema validator and if so load it
+		validator, err := loadSchemaValidator(cmd)
+		if err != nil {
+			logger.Fatal("error loading validator: %s", err)
+		}
+
 		tracker, err := tracker.NewTracker(tracker.TrackerConfig{
 			Logger:  logger,
 			Context: ctx,
@@ -123,7 +129,7 @@ var forkCmd = &cobra.Command{
 			}
 		}
 
-		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker)
+		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker, datadir)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(3)
@@ -195,6 +201,7 @@ var forkCmd = &cobra.Command{
 						Driver:                driver,
 						ExportTableTimestamps: exportTableTimestamps,
 						DeliverAll:            restartFlag,
+						SchemaValidator:       validator,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)

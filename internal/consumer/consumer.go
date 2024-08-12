@@ -58,6 +58,9 @@ type ConsumerConfig struct {
 
 	// DeliverAll will configure the consumer to read from the beginning of the stream, this only works if the consumer is new
 	DeliverAll bool
+
+	// SchemaValidator is the schema validator to use for the importer or nil if not needed.
+	SchemaValidator internal.SchemaValidator
 }
 
 type Consumer struct {
@@ -81,6 +84,7 @@ type Consumer struct {
 	subError        chan error
 	sessionID       string
 	tableTimestamps map[string]*time.Time
+	validator       internal.SchemaValidator
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -92,7 +96,7 @@ func (c *Consumer) Stop() error {
 		c.lock.Lock()
 		c.stopping = true
 		c.lock.Unlock()
-		c.flush()
+		c.flush(c.logger)
 		c.cancel()
 		c.logger.Debug("waiting on bufferer")
 		c.waitGroup.Wait()
@@ -136,15 +140,15 @@ func (c *Consumer) handleError(err error) {
 	c.subError <- err
 }
 
-func (c *Consumer) flush() bool {
-	c.logger.Trace("flush")
+func (c *Consumer) flush(logger logger.Logger) bool {
+	logger.Trace("flush")
 	if c.driver == nil {
 		return c.stopping
 	}
 	started := time.Now()
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if err := c.driver.Flush(); err != nil {
+	if err := c.driver.Flush(logger); err != nil {
 		if errors.Is(err, internal.ErrDriverStopped) {
 			c.nackEverything()
 			return true
@@ -156,7 +160,7 @@ func (c *Consumer) flush() bool {
 	for _, m := range c.pending {
 		if err := m.Ack(); err != nil {
 			internal.PendingEvents.Dec()
-			c.logger.Error("error acking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
+			logger.Error("error acking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
 			c.nackEverything()
 			return true
 		}
@@ -174,14 +178,34 @@ func (c *Consumer) flush() bool {
 	return c.stopping
 }
 
-func (c *Consumer) shouldSkip(evt *internal.DBChangeEvent) bool {
-	if c.tableTimestamps == nil {
-		return false
+func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent) bool {
+	if c.tableTimestamps != nil {
+		eventTimestamp := time.UnixMilli(evt.Timestamp)
+		// check if we have a timestamp for this table and only process if its newer
+		if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
+			if eventTimestamp.Before(*tableTimestamp) {
+				return true
+			}
+		}
 	}
-	eventTimestamp := time.UnixMilli(evt.Timestamp)
-	// check if we have a timestamp for this table and only process if its newer
-	if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
-		return eventTimestamp.Before(*tableTimestamp)
+	if c.validator != nil {
+		found, valid, path, err := c.validator.Validate(*evt)
+		if err != nil {
+			logger.Error("error validating schema: %s", err)
+			return true
+		}
+		if !found {
+			logger.Trace("skipping %s, no schema found for event: %s", evt.Table, util.JSONStringify(evt))
+			return true
+		}
+		if !valid {
+			logger.Trace("skipping %s, schema did not validate for event: %s", evt.Table, util.JSONStringify(evt))
+			return true
+		}
+		if path != "" {
+			evt.SchemaValidatedPath = &path
+			logger.Trace("schema validated %s", path)
+		}
 	}
 	return false
 }
@@ -225,8 +249,8 @@ func (c *Consumer) bufferer() {
 				c.handleError(err)
 				return
 			}
-			if c.shouldSkip(&evt) {
-				log.Trace("skipping event due to timestamp %d", evt.Timestamp)
+			if c.shouldSkip(log, &evt) {
+				log.Debug("skipping event")
 				if err := msg.Ack(); err != nil {
 					// not much we can do here, just log it
 					log.Error("error acking skipped msg: %s", err)
@@ -259,7 +283,7 @@ func (c *Consumer) bufferer() {
 				if traceLogNatsProcessDetail {
 					log.Trace("flush 1 called. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
 				}
-				if c.flush() {
+				if c.flush(log) {
 					return
 				}
 				continue
@@ -275,7 +299,7 @@ func (c *Consumer) bufferer() {
 				if traceLogNatsProcessDetail {
 					log.Trace("flush 2 called. flush=%v,pending=%d,max=%d,started=%v", flush, len(c.pending), maxsize, time.Since(*c.pendingStarted))
 				}
-				if c.flush() {
+				if c.flush(log) {
 					return
 				}
 				continue
@@ -286,7 +310,7 @@ func (c *Consumer) bufferer() {
 				if traceLogNatsProcessDetail {
 					c.logger.Trace("flush 3 called. count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
 				}
-				if c.flush() {
+				if c.flush(c.logger) {
 					return
 				}
 				continue
@@ -484,6 +508,8 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
+	consumer.validator = config.SchemaValidator
+
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
 	if config.ExportTableTimestamps != nil {
 		consumer.tableTimestamps = config.ExportTableTimestamps
@@ -567,16 +593,18 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		} else {
 			jsConfig.DeliverPolicy = jetstream.DeliverNewPolicy
 		}
+
 		c, err = js.CreateConsumer(configConsumerCtx, "dbchange", jsConfig)
 		if err != nil {
 			nc.Close()
 			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
 		}
 	} else {
-		consumer.logger.Debug("consumer found")
 
 		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
 		jsConfig.OptStartTime = c.CachedInfo().Config.OptStartTime
+		consumer.logger.Debug("consumer found, setting delivery policy to %v and start time to %v", jsConfig.DeliverPolicy, jsConfig.OptStartTime)
+
 		// consumer found, update it
 		// TODO: we should check if the consumer is already in the correct state and skip this
 		c, err = js.UpdateConsumer(configConsumerCtx, "dbchange", jsConfig)

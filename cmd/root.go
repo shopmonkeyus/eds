@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
@@ -24,6 +25,7 @@ import (
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/postgresql"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/s3"
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/snowflake"
+	_ "github.com/shopmonkeyus/eds-server/internal/drivers/sqlserver"
 )
 
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
@@ -106,7 +108,16 @@ func (s *logFileSink) Write(buf []byte) (int, error) {
 	}
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	return s.f.Write(buf)
+
+	n, err := s.f.Write(buf)
+	if err != nil {
+		return n, err
+	}
+	l, err := s.f.WriteString("\n")
+	if err != nil {
+		return l, err
+	}
+	return n + l, nil
 }
 
 func (s *logFileSink) Close() error {
@@ -216,6 +227,14 @@ func getSchemaAndTableFiles(datadir string) (string, string) {
 	return schemaFile, tablesFile
 }
 
+func loadSchemaValidator(cmd *cobra.Command) (internal.SchemaValidator, error) {
+	schemaDir := mustFlagString(cmd, "schema-validator", false)
+	if schemaDir == "" {
+		return nil, nil
+	}
+	return util.NewSchemaValidator(schemaDir)
+}
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:  "eds-server",
@@ -237,4 +256,5 @@ func init() {
 	rootCmd.PersistentFlags().Bool("timestamp", false, "turn on timestamps in logs")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
+	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
 }

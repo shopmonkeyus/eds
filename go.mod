@@ -6,7 +6,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.2.1
 	github.com/aws/aws-sdk-go-v2 v1.30.3
 	github.com/aws/aws-sdk-go-v2/config v1.27.27
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.58.2
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.58.3
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/charmbracelet/huh v0.5.2
 	github.com/cockroachdb/errors v1.11.3
@@ -16,10 +16,12 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
+	github.com/microsoft/go-mssqldb v1.7.2
 	github.com/nats-io/jwt/v2 v2.5.8
 	github.com/nats-io/nats.go v1.36.0
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/client_model v0.6.1
+	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/savsgio/gotils v0.0.0-20240704082632-aef3928b8a38
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/shirou/gopsutil/v4 v4.24.7
@@ -30,7 +32,7 @@ require (
 	github.com/tidwall/buntdb v1.3.1
 	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
-	golang.org/x/sync v0.7.0
+	golang.org/x/sync v0.8.0
 )
 
 require (
@@ -86,6 +88,8 @@ require (
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect

@@ -1,4 +1,4 @@
-package mysql
+package sqlserver
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/microsoft/go-mssqldb"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/importer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
@@ -17,7 +17,7 @@ import (
 
 const maxBytesSizeInsert = 5_000_000
 
-type mysqlDriver struct {
+type sqlserverDriver struct {
 	ctx          context.Context
 	logger       logger.Logger
 	db           *sql.DB
@@ -26,23 +26,23 @@ type mysqlDriver struct {
 	once         sync.Once
 	pending      strings.Builder
 	count        int
-	executor     func(string) error
 	importConfig internal.ImporterConfig
+	executor     func(string) error
 	size         int
 }
 
-var _ internal.Driver = (*mysqlDriver)(nil)
-var _ internal.DriverLifecycle = (*mysqlDriver)(nil)
-var _ internal.Importer = (*mysqlDriver)(nil)
-var _ internal.DriverHelp = (*mysqlDriver)(nil)
-var _ importer.Handler = (*mysqlDriver)(nil)
+var _ internal.Driver = (*sqlserverDriver)(nil)
+var _ internal.DriverLifecycle = (*sqlserverDriver)(nil)
+var _ internal.Importer = (*sqlserverDriver)(nil)
+var _ internal.DriverHelp = (*sqlserverDriver)(nil)
+var _ importer.Handler = (*sqlserverDriver)(nil)
 
-func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
+func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
 	dsn, err := parseURLToDSN(urlstr)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing url: %w", err)
 	}
-	db, err := sql.Open("mysql", dsn)
+	db, err := sql.Open("sqlserver", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
@@ -56,12 +56,12 @@ func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, 
 }
 
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
-func (p *mysqlDriver) Start(config internal.DriverConfig) error {
+func (p *sqlserverDriver) Start(config internal.DriverConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[mysql]")
+	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	schema, err := config.SchemaRegistry.GetLatestSchema()
 	if err != nil {
 		p.db.Close()
@@ -74,7 +74,7 @@ func (p *mysqlDriver) Start(config internal.DriverConfig) error {
 }
 
 // Stop the driver. This is called once at the end of the driver's lifecycle.
-func (p *mysqlDriver) Stop() error {
+func (p *sqlserverDriver) Stop() error {
 	p.logger.Debug("stopping")
 	p.once.Do(func() {
 		p.logger.Debug("waiting on waitgroup")
@@ -93,12 +93,12 @@ func (p *mysqlDriver) Stop() error {
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
 // Return -1 to indicate that there is no limit.
-func (p *mysqlDriver) MaxBatchSize() int {
+func (p *sqlserverDriver) MaxBatchSize() int {
 	return -1
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
-func (p *mysqlDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+func (p *sqlserverDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
@@ -115,7 +115,7 @@ func (p *mysqlDriver) Process(logger logger.Logger, event internal.DBChangeEvent
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-func (p *mysqlDriver) Flush(logger logger.Logger) error {
+func (p *sqlserverDriver) Flush(logger logger.Logger) error {
 	logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
@@ -145,7 +145,7 @@ func (p *mysqlDriver) Flush(logger logger.Logger) error {
 }
 
 // CreateDatasource allows the handler to create the datasource before importing data.
-func (p *mysqlDriver) CreateDatasource(schema internal.SchemaMap) error {
+func (p *sqlserverDriver) CreateDatasource(schema internal.SchemaMap) error {
 	// create all the tables
 	for _, table := range p.importConfig.Tables {
 		data := schema[table]
@@ -159,11 +159,12 @@ func (p *mysqlDriver) CreateDatasource(schema internal.SchemaMap) error {
 }
 
 // ImportEvent allows the handler to process the event.
-func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.Schema) error {
-	sql, err := toSQLFromObject("INSERT", data, event.Table, event, nil)
+func (p *sqlserverDriver) ImportEvent(event internal.DBChangeEvent, schema *internal.Schema) error {
+	object, err := event.GetObject()
 	if err != nil {
 		return err
 	}
+	sql := toSQLFromObject("INSERT", schema, event.Table, object, nil)
 	p.pending.WriteString(sql)
 	p.count++
 	p.size += len(sql)
@@ -179,7 +180,7 @@ func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.S
 }
 
 // ImportCompleted is called when all events have been processed.
-func (p *mysqlDriver) ImportCompleted() error {
+func (p *sqlserverDriver) ImportCompleted() error {
 	if p.size > 0 {
 		if err := p.executor(p.pending.String()); err != nil {
 			p.logger.Trace("offending sql: %s", p.pending.String())
@@ -190,7 +191,7 @@ func (p *mysqlDriver) ImportCompleted() error {
 }
 
 // Import is called to import data from the source.
-func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
+func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
@@ -198,7 +199,7 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	defer db.Close()
 
 	p.importConfig = config
-	p.logger = config.Logger.WithPrefix("[mysql]")
+	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
 	p.pending = strings.Builder{}
 	p.count = 0
@@ -207,30 +208,29 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	return importer.Run(p.logger, config, p)
 }
 
-// Name is a unique name for the driver.
-func (p *mysqlDriver) Name() string {
-	return "MySQL"
+func (p *sqlserverDriver) Name() string {
+	return "Microsoft SQL Server"
 }
 
 // Description is the description of the driver.
-func (p *mysqlDriver) Description() string {
-	return "Supports streaming EDS messages to a MySQL database."
+func (p *sqlserverDriver) Description() string {
+	return "Supports streaming EDS messages to a Microsoft SQL Server database."
 }
 
 // ExampleURL should return an example URL for configuring the driver.
-func (p *mysqlDriver) ExampleURL() string {
-	return "mysql://user:password@localhost:3306/database"
+func (p *sqlserverDriver) ExampleURL() string {
+	return "sqlserver://user:password@localhost:11433/database"
 }
 
 // Help should return a detailed help documentation for the driver.
-func (p *mysqlDriver) Help() string {
+func (p *sqlserverDriver) Help() string {
 	var help strings.Builder
 	help.WriteString(util.GenerateHelpSection("Schema", "The database will match the public schema from the Shopmonkey transactional database.\n"))
 	return help.String()
 }
 
 func init() {
-	var driver mysqlDriver
-	internal.RegisterDriver("mysql", &driver)
-	internal.RegisterImporter("mysql", &driver)
+	var driver sqlserverDriver
+	internal.RegisterDriver("sqlserver", &driver)
+	internal.RegisterImporter("sqlserver", &driver)
 }

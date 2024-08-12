@@ -17,7 +17,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: eds
       MYSQL_USER: eds
-      MYSQL_PASSWORD: eds
+      MYSQL_PASSWORD: Asdf1234!
       MYSQL_DATABASE: eds
     ports:
       - 13306:3306
@@ -25,7 +25,7 @@ services:
     image: postgres
     environment:
       POSTGRES_USER: eds
-      POSTGRES_PASSWORD: eds
+      POSTGRES_PASSWORD: Asdf1234!
       POSTGRES_DB: eds
     ports:
       - 15432:5432
@@ -42,6 +42,16 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge
+    stdin_open: true
+    user: root
+    ports:
+      - 1433:1433
+    environment:
+      - MSSQL_SA_PASSWORD=Asdf1234!
+      - ACCEPT_EULA=Y
+      - MSSQL_DATA_DIR=/var/opt/mssql/data
   init-kafka:
     image: confluentinc/cp-kafka:7.7.0
     depends_on:

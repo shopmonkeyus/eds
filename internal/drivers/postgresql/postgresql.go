@@ -109,8 +109,8 @@ func (p *postgresqlDriver) Process(logger logger.Logger, event internal.DBChange
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-func (p *postgresqlDriver) Flush() error {
-	p.logger.Debug("flush")
+func (p *postgresqlDriver) Flush(logger logger.Logger) error {
+	logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if p.count > 0 {
@@ -125,13 +125,14 @@ func (p *postgresqlDriver) Flush() error {
 			}
 		}()
 		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
-			p.logger.Trace("offending sql: %s", p.pending.String())
+			logger.Trace("offending sql: %s", p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("unable to commit transaction: %w", err)
 		}
 		success = true
+		logger.Debug("flushed %d records", p.count)
 	}
 	p.pending.Reset()
 	p.count = 0

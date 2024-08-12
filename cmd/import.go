@@ -409,6 +409,12 @@ var importCmd = &cobra.Command{
 
 		var err error
 
+		// check to see if there's a schema validator and if so load it
+		validator, err := loadSchemaValidator(cmd)
+		if err != nil {
+			logger.Fatal("error loading validator: %s", err)
+		}
+
 		// load the schema from the api fresh
 		registry, err := registry.NewAPIRegistry(apiURL)
 		if err != nil {
@@ -480,6 +486,7 @@ var importCmd = &cobra.Command{
 
 		var success bool
 		defer func() {
+			defer util.RecoverPanic(logger)
 			logger.Trace("exit success: %v", success)
 			var filesRemoved bool
 			if success {
@@ -500,6 +507,7 @@ var importCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		}()
+		defer util.RecoverPanic(logger) // panic recover needs to happen after the defer above
 
 		if dir == "" {
 			if jobID == "" {
@@ -580,16 +588,17 @@ var importCmd = &cobra.Command{
 		}
 		logger.Info("Importing data to tables %s", strings.Join(tables, ", "))
 		if err := importer.Import(internal.ImporterConfig{
-			Context:        ctx,
-			URL:            driverUrl,
-			Logger:         logger,
-			SchemaRegistry: registry,
-			MaxParallel:    parallel,
-			JobID:          jobID,
-			DataDir:        dir,
-			DryRun:         dryRun,
-			Tables:         tables,
-			Single:         single,
+			Context:         ctx,
+			URL:             driverUrl,
+			Logger:          logger,
+			SchemaRegistry:  registry,
+			MaxParallel:     parallel,
+			JobID:           jobID,
+			DataDir:         dir,
+			DryRun:          dryRun,
+			Tables:          tables,
+			Single:          single,
+			SchemaValidator: validator,
 		}); err != nil {
 			logger.Error("error running import: %s", err)
 			return

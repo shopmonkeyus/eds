@@ -29,6 +29,9 @@ type DriverConfig struct {
 
 	// Tracker is the local (on disk) database for tracking stuff that the driver can use.
 	Tracker *tracker.Tracker
+
+	// DataDir is the directory where the driver can store data.
+	DataDir string
 }
 
 // DriverSessionHandler is for drivers that want to receive the session id
@@ -58,7 +61,7 @@ type Driver interface {
 	Process(logger logger.Logger, event DBChangeEvent) (bool, error)
 
 	// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
-	Flush() error
+	Flush(logger logger.Logger) error
 }
 
 // DriverAlias is an interface that Drivers implement for specifying additional protocol schemes for URLs that the driver can handle.
@@ -153,7 +156,7 @@ func RegisterDriver(protocol string, driver Driver) {
 }
 
 // NewDriver creates a new driver for the given URL.
-func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry, tracker *tracker.Tracker) (Driver, error) {
+func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry, tracker *tracker.Tracker, datadir string) (Driver, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
@@ -177,6 +180,7 @@ func NewDriver(ctx context.Context, logger logger.Logger, urlString string, regi
 			Logger:         logger.WithPrefix(fmt.Sprintf("[%s]", u.Scheme)),
 			SchemaRegistry: registry,
 			Tracker:        tracker,
+			DataDir:        datadir,
 		}); err != nil {
 			return nil, err
 		}
