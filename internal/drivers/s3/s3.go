@@ -82,44 +82,68 @@ var _ internal.Importer = (*s3Driver)(nil)
 var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
+func getBucketInfo(u *url.URL) (string, string, string) {
+	var prefix, bucket string
+	host := u.Host
+	if strings.HasPrefix(u.Host, "localhost:") || strings.Contains(u.Host, ".") {
+
+	}
+
+	if u.Path == "" {
+		bucket = u.Host
+		host = ""
+	} else {
+		bucket = u.Path[1:] // trim off the forward slash
+
+		tok := strings.Split(bucket, "/")
+		if len(tok) > 1 {
+			bucket = tok[0]
+			prefix = strings.Join(tok[1:], "/")
+			if !strings.HasSuffix(prefix, "/") {
+				prefix += "/"
+			}
+		}
+	}
+	return host, bucket, prefix
+}
+
+const (
+	awsProvider = iota
+	googleProvider
+	localstackProvider
+)
+
+func getCloudProvider(u *url.URL) int {
+	if strings.Contains(u.Host, "localhost") {
+		return localstackProvider
+	}
+	if strings.Contains(u.Host, "googleapis.com") {
+		return googleProvider
+	}
+	return awsProvider
+}
+
 func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string) error {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
 	}
-
 	c, cancel := context.WithCancel(ctx)
 	p.ctx = c
 	p.cancel = cancel
+	var host string
+	cloudProvider := getCloudProvider(u)
+	host, p.bucket, p.prefix = getBucketInfo(u, cloudProvider)
 
-	host := u.Host
-	p.bucket = u.Path
-
-	if u.Path == "" {
-		p.bucket = u.Host
-		host = ""
-	} else {
-		p.bucket = u.Path[1:] // trim off the forward slash
-
-		tok := strings.Split(p.bucket, "/")
-		if len(tok) > 1 {
-			p.bucket = tok[0]
-			p.prefix = strings.Join(tok[1:], "/")
-			if !strings.HasSuffix(p.prefix, "/") {
-				p.prefix += "/"
-			}
-		}
-	}
-
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+	customResolver := aws.EndpointResolverWithOptionsFunc(func(_service, region string, _options ...interface{}) (aws.Endpoint, error) {
 		if host != "" {
 			var url string
-			if strings.Contains(host, "localhost") {
+			if cloudProvider == localstackProvider {
 				url = "http://" + host
 			} else {
 				url = "https://" + host
 			}
-			if strings.Contains(url, "googleapis.com") {
+			if cloudProvider == googleProvider {
 				return aws.Endpoint{
 					URL:               "https://storage.googleapis.com",
 					SigningRegion:     "auto",
