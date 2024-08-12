@@ -16,7 +16,7 @@ import (
 )
 
 type enrollTokenData struct {
-	Token    string `json:"token" toml:"token`
+	Token    string `json:"token" toml:"token"`
 	ServerID string `json:"serverId" toml:"server_id"`
 }
 
