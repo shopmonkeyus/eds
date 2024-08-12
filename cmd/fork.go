@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -282,16 +281,10 @@ var forkCmd = &cobra.Command{
 }
 
 func init() {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("couldn't get current working directory: ", err)
-		os.Exit(1)
-	}
 	rootCmd.AddCommand(forkCmd)
 	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
 
 	// NOTE: sync these with serverCmd
-	forkCmd.Flags().String("data-dir", filepath.Join(cwd, "dataDir"), "the data directory for storing state, logs, and other data")
 	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
 	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")

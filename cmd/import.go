@@ -611,16 +611,9 @@ var importCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(importCmd)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("couldn't get current working directory: ", err)
-		os.Exit(1)
-	}
-
 	// normal flags
 	importCmd.Flags().String("url", "", "driver connection string")
 	importCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey api key")
-	importCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
 
 	// helpful flags
 	importCmd.Flags().String("job-id", "", "resume an existing job")

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,7 +16,7 @@ import (
 )
 
 type enrollTokenData struct {
-	Token    string `json:"token" toml:"server_id`
+	Token    string `json:"token" toml:"token`
 	ServerID string `json:"serverId" toml:"server_id"`
 }
 
@@ -106,13 +105,7 @@ var enrollCmd = &cobra.Command{
 }
 
 func init() {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("couldn't get current working directory: ", err)
-		os.Exit(1)
-	}
 	rootCmd.AddCommand(enrollCmd)
 	enrollCmd.Flags().String("api-url", "", "the for testing again preview environment")
 	enrollCmd.Flags().MarkHidden("api-url")
-	enrollCmd.Flags().String("data-dir", filepath.Join(cwd, "datadir"), "the data directory for storing logs and other data")
 }

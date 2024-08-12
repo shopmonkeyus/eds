@@ -913,7 +913,6 @@ var serverHelpCmd = &cobra.Command{
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverHelpCmd)
 
