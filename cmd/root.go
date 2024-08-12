@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	glog "log"
 	"net/http"
 	"os"
@@ -28,6 +27,8 @@ import (
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/sqlserver"
 )
 
+var cfgFile string
+
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	val, err := cmd.Flags().GetString(name)
 	if err != nil {
@@ -47,11 +48,9 @@ type EnrollTokenData struct {
 }
 
 func initConfig() {
-	viper.SetConfigName("config")
-	viper.AddConfigPath("/dataDir")
-	viper.AutomaticEnv()
-	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalf("Error reading config file, %s", err)
+	if cfgFile != "" {
+		// Use config file from the flag.
+		viper.SetConfigFile(cfgFile)
 	}
 }
 
@@ -263,5 +262,7 @@ func init() {
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
-	forkCmd.PersistentFlags().String("data-dir", filepath.Join(cwd, "dataDir"), "the data directory for storing state, logs, and other data")
+	rootCmd.PersistentFlags().String("data-dir", filepath.Join(cwd, "dataDir"), "the data directory for storing state, logs, and other data")
+	rootCmd.PersistentFlags().String("config", filepath.Join(cwd, "dataDir/config.toml"), "the data directory for storing state, logs, and other data")
+
 }

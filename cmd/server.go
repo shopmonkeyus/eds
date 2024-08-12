@@ -923,7 +923,6 @@ func init() {
 	}
 
 	// NOTE: sync these with forkCmd
-	serverCmd.Flags().String("config", "", "config file (default is ./dataDir/config.toml)")
 	serverCmd.Flags().String("url", "", "driver connection string")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
