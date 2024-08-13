@@ -49,8 +49,10 @@ type EnrollTokenData struct {
 
 func initConfig() {
 	if cfgFile != "" {
-		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
+		if err := viper.ReadInConfig(); err != nil {
+			fmt.Printf("err: %s\n", err)
+		}
 	}
 }
 
@@ -259,6 +261,11 @@ func init() {
 		fmt.Println("couldn't get current working directory: ", err)
 		os.Exit(1)
 	}
+	if err != nil {
+		fmt.Printf("error getting current working directory: %s\n", err)
+		os.Exit(1)
+	}
+	cfgFile = filepath.Join(cwd, "dataDir", "config.toml")
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
 	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
@@ -267,6 +274,6 @@ func init() {
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
 	rootCmd.PersistentFlags().String("data-dir", filepath.Join(cwd, "dataDir"), "the data directory for storing state, logs, and other data")
-	rootCmd.PersistentFlags().String("config", filepath.Join(cwd, "dataDir/config.toml"), "the data directory for storing state, logs, and other data")
+	rootCmd.PersistentFlags().String("config", "", "the data directory for storing state, logs, and other data")
 
 }

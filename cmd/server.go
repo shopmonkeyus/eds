@@ -534,13 +534,16 @@ var serverCmd = &cobra.Command{
 		server := mustFlagString(cmd, "server", false)
 		edsServerId := mustFlagString(cmd, "eds-server-id", false)
 		dataDir := getDataDir(cmd, logger)
-		apikey := mustFlagString(cmd, "api-key", false)
+		apikey := viper.GetString("token")
+		logger.Info("dataDir %s", dataDir)
 
-		if apikey == "" {
-			apikey = viper.GetString("token")
+		logger.Info("using parameter api token %s", apikey)
+		if cmd.Flags().Changed("api-key") {
+			logger.Info("using parameter api token")
+		} else if apikey != "" {
 			logger.Info("using config api token")
 		} else {
-			logger.Info("using parameter api token")
+			logger.Fatal("API key not provided")
 		}
 
 		if edsServerId == "" {
@@ -898,18 +901,13 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverHelpCmd)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("couldn't get current working directory: ", err)
-		os.Exit(1)
-	}
-
 	// NOTE: sync these with forkCmd
 	serverCmd.Flags().String("url", "", "driver connection string")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
+	viper.BindPFlag("token", serverCmd.Flags().Lookup("api-key"))
+
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
 	serverCmd.Flags().String("eds-server-id", "", "the EDS server ID")
-	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
 	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
 	serverCmd.Flags().MarkHidden("companyIds") // not intended for production use
 
