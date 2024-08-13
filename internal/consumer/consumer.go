@@ -588,6 +588,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		FilterSubjects:    subjects,
 		AckPolicy:         jetstream.AckExplicitPolicy,
 		InactiveThreshold: time.Hour * 24 * 3, // expire if unused 3 days from first creating
+		MaxWaiting:        1,                  // only 1 consumer allowed
 	}
 
 	// create a context with a longer deadline for creating the consumer
@@ -622,6 +623,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
 		jsConfig.OptStartTime = c.CachedInfo().Config.OptStartTime
+		jsConfig.MaxWaiting = c.CachedInfo().Config.MaxWaiting
 		consumer.logger.Debug("consumer found, setting delivery policy to %v and start time to %v", jsConfig.DeliverPolicy, jsConfig.OptStartTime)
 
 		// consumer found, update it
