@@ -291,7 +291,7 @@ func init() {
 	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
-	serverCmd.Flags().String("eds-server-id", "", "the EDS server ID")
+	forkCmd.Flags().String("eds-server-id", "", "the EDS server ID")
 	forkCmd.Flags().String("url", "", "driver connection string")
 	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
 	forkCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple")
