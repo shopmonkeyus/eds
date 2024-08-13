@@ -44,10 +44,11 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 
 func initConfig() {
 	cfgFile := filepath.Join(dataDir, "config.toml")
-	if dataDir != "" {
+	if dataDir != "" && util.Exists(cfgFile) {
 		viper.SetConfigFile(cfgFile)
 		if err := viper.ReadInConfig(); err != nil && !util.SliceContains(os.Args, "enroll") {
-			fmt.Printf("error loading %s: %s", cfgFile, err)
+			fmt.Printf("error loading %s: %s\n", cfgFile, err)
+			os.Exit(3)
 		}
 	}
 }

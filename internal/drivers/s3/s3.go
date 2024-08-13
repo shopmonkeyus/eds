@@ -237,10 +237,12 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 					return fmt.Errorf("bucket not found and unable to create bucket %s: %w", p.bucket, err)
 				}
 				logger.Info("created bucket %s", p.bucket)
-				return nil // we created the bucket ok
+				err = nil // we created the bucket ok, so reset the error
 			}
 		}
-		return fmt.Errorf("unable to verify bucket %s: %w", p.bucket, bnf)
+		if err != nil {
+			return fmt.Errorf("unable to verify bucket %s: %w", p.bucket, err)
+		}
 	}
 
 	maxBatchSize := 1_000 // maximum number of events to batch
