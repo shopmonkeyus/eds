@@ -26,6 +26,7 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var Version string                // set in main
@@ -47,6 +48,7 @@ type sessionStart struct {
 	MachineId string     `json:"machineId"`
 	OsInfo    any        `json:"osinfo"`
 	Driver    driverMeta `json:"driver"`
+	ServerID  string     `json:"serverId"`
 }
 
 type edsSession struct {
@@ -94,7 +96,7 @@ func writeCredsToFile(data string, filename string) error {
 	return nil
 }
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string) (*edsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -117,6 +119,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Hostname = hostname
 	body.Version = Version
 	body.OsInfo = osinfo
+	body.ServerID = edsServerId
 
 	driverMeta, err := internal.GetDriverMetadataForURL(driverUrl)
 	if err != nil {
@@ -526,17 +529,21 @@ var serverCmd = &cobra.Command{
 			return
 		}
 
-		apiurl := mustFlagString(cmd, "api-url", true)
-		apikey := mustFlagString(cmd, "api-key", true)
+		apiurl := mustFlagString(cmd, "api-url", false)
 		driverURL := mustFlagString(cmd, "url", true)
-		server := mustFlagString(cmd, "server", true)
+		server := mustFlagString(cmd, "server", false)
+		edsServerId := viper.GetString("server_id")
 		dataDir := getDataDir(cmd, logger)
+		apikey := viper.GetString("token")
+		logger.Trace("using parameter api token %s", apikey)
+		logger.Info("using parameter server id: %s", edsServerId)
 
 		apiurl = strings.TrimSuffix(apiurl, "/") // remove trailing slash
 
 		if cmd.Flags().Changed("api-url") {
 			logger.Info("using alternative API url: %s", apiurl)
 		} else {
+
 			url, err := util.GetAPIURLFromJWT(apikey)
 			if err != nil {
 				logger.Fatal("invalid API key. %s", err)
@@ -735,7 +742,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, driverURL)
+			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
 			if err != nil {
 				logger.Fatal("failed to send session start: %s", err)
 			}
@@ -879,17 +886,14 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverHelpCmd)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Println("couldn't get current working directory: ", err)
-		os.Exit(1)
-	}
-
 	// NOTE: sync these with forkCmd
 	serverCmd.Flags().String("url", "", "driver connection string")
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
+	viper.BindPFlag("token", serverCmd.Flags().Lookup("api-key"))
+
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
-	serverCmd.Flags().String("data-dir", cwd, "the data directory for storing logs and other data")
+	serverCmd.Flags().String("eds-server-id", "", "the EDS server ID")
+	viper.BindPFlag("server_id", serverCmd.Flags().Lookup("eds-server-id"))
 	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
 	serverCmd.Flags().MarkHidden("companyIds") // not intended for production use
 
