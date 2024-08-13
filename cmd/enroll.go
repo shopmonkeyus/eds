@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
-
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/spf13/cobra"
 )
@@ -86,7 +84,7 @@ var enrollCmd = &cobra.Command{
 
 		var buf bytes.Buffer
 		if err := toml.NewEncoder(&buf).Encode(enrollResp.Data); err != nil {
-			log.Fatal(err)
+			logger.Fatal("failed to encode response: %w", err)
 		}
 
 		tokenFile := filepath.Join(dataDir, "config.toml")
@@ -94,13 +92,10 @@ var enrollCmd = &cobra.Command{
 		if err != nil {
 			logger.Fatal("failed to create token file: %w", err)
 		}
+		defer file.Close()
 		if err := os.WriteFile(tokenFile, buf.Bytes(), 0644); err != nil {
-			log.Fatal(err)
-		}
-		if err != nil {
 			logger.Fatal("failed to write to token file: %w", err)
 		}
-		file.Close()
 	},
 }
 

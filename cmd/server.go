@@ -532,26 +532,11 @@ var serverCmd = &cobra.Command{
 		apiurl := mustFlagString(cmd, "api-url", false)
 		driverURL := mustFlagString(cmd, "url", true)
 		server := mustFlagString(cmd, "server", false)
-		edsServerId := mustFlagString(cmd, "eds-server-id", false)
+		edsServerId := viper.GetString("server_id")
 		dataDir := getDataDir(cmd, logger)
 		apikey := viper.GetString("token")
-		logger.Info("dataDir %s", dataDir)
-
-		logger.Info("using parameter api token %s", apikey)
-		if cmd.Flags().Changed("api-key") {
-			logger.Info("using parameter api token")
-		} else if apikey != "" {
-			logger.Info("using config api token")
-		} else {
-			logger.Fatal("API key not provided")
-		}
-
-		if edsServerId == "" {
-			edsServerId = viper.GetString("server_id")
-			logger.Info("using config server id: %s", edsServerId)
-		} else {
-			logger.Info("using parameter server id: %s", edsServerId)
-		}
+		logger.Trace("using parameter api token %s", apikey)
+		logger.Info("using parameter server id: %s", edsServerId)
 
 		apiurl = strings.TrimSuffix(apiurl, "/") // remove trailing slash
 
@@ -908,6 +893,7 @@ func init() {
 
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
 	serverCmd.Flags().String("eds-server-id", "", "the EDS server ID")
+	viper.BindPFlag("server_id", serverCmd.Flags().Lookup("eds-server-id"))
 	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
 	serverCmd.Flags().MarkHidden("companyIds") // not intended for production use
 
