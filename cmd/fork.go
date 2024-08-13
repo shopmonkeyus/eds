@@ -42,9 +42,10 @@ func runHealthCheckServerFork(logger logger.Logger, port int) {
 }
 
 var forkCmd = &cobra.Command{
-	Use:   "fork",
-	Short: "Run the server",
-	Args:  cobra.NoArgs,
+	Use:    "fork",
+	Short:  "Run the server",
+	Args:   cobra.NoArgs,
+	Hidden: true, // don't expose this since its only called by the main server process in the wrapper
 	Run: func(cmd *cobra.Command, args []string) {
 		serverStarted := time.Now()
 		ctx, cancel := context.WithCancel(context.Background())
@@ -284,18 +285,21 @@ var forkCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(forkCmd)
-	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
 
 	// NOTE: sync these with serverCmd
+	// these flags are alterd by the server
 	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
-	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
-	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 	forkCmd.Flags().String("url", "", "driver connection string")
 	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
-	forkCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
+
+	// NOTE: sync these with serverCmd
+	// these flags are passed through from the server
 	forkCmd.Flags().Int("port", 0, "the port to listen for health checks and metrics")
+	forkCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple")
+	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
+	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 }

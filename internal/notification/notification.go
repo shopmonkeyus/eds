@@ -33,6 +33,9 @@ type NotificationHandler struct {
 
 	// SendLogs action is called to send logs to the server, should return the storage path.
 	SendLogs func() *SendLogsResponse
+
+	// Configure action is called to configure the server with a driver
+	Configure func(config *ServerConfigPayload)
 }
 
 type SendLogsResponse struct {
@@ -43,6 +46,10 @@ type SendLogsResponse struct {
 type Notification struct {
 	Action string         `json:"action" msgpack:"action"`
 	Data   map[string]any `json:"data,omitempty" msgpack:"data,omitempty"`
+}
+
+type ServerConfigPayload struct {
+	URL string `json:"url" msgpack:"url"`
 }
 
 func (n *Notification) String() string {
@@ -176,6 +183,12 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		c.handler.Upgrade(version, url)
 	case "sendlogs":
 		c.CallSendLogs()
+	case "configure":
+		var config ServerConfigPayload
+		if v, ok := notification.Data["url"].(string); ok {
+			config.URL = v
+		}
+		c.handler.Configure(&config)
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

@@ -96,6 +96,8 @@ var enrollCmd = &cobra.Command{
 		if err := os.WriteFile(tokenFile, buf.Bytes(), 0644); err != nil {
 			logger.Fatal("failed to write to token file: %w", err)
 		}
+		logger.Info("Enrollment successful!")
+		logger.Info("run `eds-server server` to start the server")
 	},
 }
 
