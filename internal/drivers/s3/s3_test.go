@@ -18,27 +18,27 @@ func mustParseURL(s string) *url.URL {
 }
 
 func TestGetBucketInfo(t *testing.T) {
-	var host, bucket, prefix string
-	// host, bucket, prefix = getBucketInfo(mustParseURL("s3://bucket/key?region=us-east-1"))
-	// assert.Equal(t, "bucket", bucket)
-	// assert.Equal(t, "key", prefix)
-	// assert.Equal(t, "", host)
+	var url, bucket, prefix string
+	url, bucket, prefix = getBucketInfo(mustParseURL("s3://bucket?region=us-east-1"), awsProvider)
+	assert.Equal(t, "bucket", bucket)
+	assert.Equal(t, "", prefix)
+	assert.Equal(t, "", url)
 
 	// // aws s3
-	host, bucket, prefix = getBucketInfo(mustParseURL("s3://foo-shopmonkey/test?region=us-west-1"))
-	assert.Equal(t, "foo-shopmonkey", bucket)
-	assert.Equal(t, "test", prefix)
-	assert.Equal(t, "", host)
-
-	// localstack
-	host, bucket, prefix = getBucketInfo(mustParseURL("s3://localhost:4566/foo-shopmonkey/test?region=us-west-1"))
+	url, bucket, prefix = getBucketInfo(mustParseURL("s3://foo-shopmonkey/test?region=us-west-1"), awsProvider)
 	assert.Equal(t, "foo-shopmonkey", bucket)
 	assert.Equal(t, "test/", prefix)
-	assert.Equal(t, "localhost:4566", host)
+	assert.Equal(t, "", url)
+
+	// localstack
+	url, bucket, prefix = getBucketInfo(mustParseURL("s3://localhost:4566/foo-shopmonkey/test?region=us-west-1"), localstackProvider)
+	assert.Equal(t, "foo-shopmonkey", bucket)
+	assert.Equal(t, "test/", prefix)
+	assert.Equal(t, "http://localhost:4566", url)
 
 	// google cloud storage
-	host, bucket, prefix = getBucketInfo(mustParseURL("s3://storage.googleapis.com/eds-import"))
+	url, bucket, prefix = getBucketInfo(mustParseURL("s3://storage.googleapis.com/eds-import"), googleProvider)
 	assert.Equal(t, "eds-import", bucket)
 	assert.Equal(t, "", prefix)
-	assert.Equal(t, "storage.googleapis.com", host)
+	assert.Equal(t, "https://storage.googleapis.com", url)
 }

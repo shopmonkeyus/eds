@@ -82,38 +82,40 @@ var _ internal.Importer = (*s3Driver)(nil)
 var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
-func getBucketInfo(u *url.URL) (string, string, string) {
-	var prefix, bucket string
-	host := u.Host
-	if strings.HasPrefix(u.Host, "localhost:") || strings.Contains(u.Host, ".") {
-
+func getBucketInfo(u *url.URL, provider s3Provider) (string, string, string) {
+	if provider == awsProvider {
+		return "", u.Host, u.Path
 	}
 
-	if u.Path == "" {
-		bucket = u.Host
-		host = ""
-	} else {
-		bucket = u.Path[1:] // trim off the forward slash
+	var prefix string
+	host := u.Host
 
-		tok := strings.Split(bucket, "/")
-		if len(tok) > 1 {
-			bucket = tok[0]
-			prefix = strings.Join(tok[1:], "/")
-			if !strings.HasSuffix(prefix, "/") {
-				prefix += "/"
-			}
+	bucket := u.Path[1:] // trim off the forward slash
+
+	tok := strings.Split(bucket, "/")
+	if len(tok) > 1 {
+		bucket = tok[0]
+		prefix = strings.Join(tok[1:], "/")
+		if !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
 		}
 	}
-	return host, bucket, prefix
+	if provider == localstackProvider {
+		return "http://" + host, bucket, prefix
+	}
+
+	return "https://" + host, bucket, prefix
 }
 
+type s3Provider int
+
 const (
-	awsProvider = iota
+	awsProvider s3Provider = iota
 	googleProvider
 	localstackProvider
 )
 
-func getCloudProvider(u *url.URL) int {
+func getCloudProvider(u *url.URL) s3Provider {
 	if strings.Contains(u.Host, "localhost") {
 		return localstackProvider
 	}
@@ -131,26 +133,20 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	c, cancel := context.WithCancel(ctx)
 	p.ctx = c
 	p.cancel = cancel
-	var host string
+	var url string
 	cloudProvider := getCloudProvider(u)
-	host, p.bucket, p.prefix = getBucketInfo(u, cloudProvider)
+	url, p.bucket, p.prefix = getBucketInfo(u, cloudProvider)
 
 	customResolver := aws.EndpointResolverWithOptionsFunc(func(_service, region string, _options ...interface{}) (aws.Endpoint, error) {
-		if host != "" {
-			var url string
-			if cloudProvider == localstackProvider {
-				url = "http://" + host
-			} else {
-				url = "https://" + host
-			}
-			if cloudProvider == googleProvider {
-				return aws.Endpoint{
-					URL:               "https://storage.googleapis.com",
-					SigningRegion:     "auto",
-					Source:            aws.EndpointSourceCustom,
-					HostnameImmutable: true,
-				}, nil
-			}
+		if cloudProvider == googleProvider {
+			return aws.Endpoint{
+				URL:               "https://storage.googleapis.com",
+				SigningRegion:     "auto",
+				Source:            aws.EndpointSourceCustom,
+				HostnameImmutable: true,
+			}, nil
+		}
+		if url != "" {
 			return aws.Endpoint{
 				PartitionID:   "aws",
 				URL:           url,
@@ -197,7 +193,7 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 
 	provider := config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, sessionToken))
 
-	if strings.Contains(host, "googleapis.com") {
+	if cloudProvider == googleProvider {
 		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion("auto"),
 			config.WithEndpointResolverWithOptions(customResolver),
@@ -224,7 +220,7 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	if _, err := p.s3.ListObjects(ctx, &awss3.ListObjectsInput{Bucket: aws.String(p.bucket), MaxKeys: aws.Int32(1)}); err != nil {
 		var bnf *types.NoSuchBucket
 		// only attempt to create the bucket if we are using localhost
-		if strings.Contains(host, "localhost") {
+		if cloudProvider == localstackProvider {
 			if errors.As(err, &bnf) {
 				if _, err := p.s3.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(p.bucket)}); err != nil {
 					return fmt.Errorf("bucket not found and unable to create bucket %s: %w", p.bucket, err)
