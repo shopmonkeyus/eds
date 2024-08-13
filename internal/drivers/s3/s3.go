@@ -82,29 +82,60 @@ var _ internal.Importer = (*s3Driver)(nil)
 var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
+func addFinalSlash(s string) string {
+	if s == "" {
+		return ""
+	}
+	if !strings.HasSuffix(s, "/") {
+		return s + "/"
+	}
+	return s
+}
+
+// getBucketInfo returns the provider url, bucket and prefix
 func getBucketInfo(u *url.URL, provider s3Provider) (string, string, string) {
 	if provider == awsProvider {
-		return "", u.Host, u.Path
+		return "", u.Host, addFinalSlash(strings.TrimPrefix(u.Path, "/"))
 	}
-
-	var prefix string
-	host := u.Host
-
-	bucket := u.Path[1:] // trim off the forward slash
-
-	tok := strings.Split(bucket, "/")
-	if len(tok) > 1 {
-		bucket = tok[0]
-		prefix = strings.Join(tok[1:], "/")
-		if !strings.HasSuffix(prefix, "/") {
-			prefix += "/"
-		}
+	var prefix, bucket string
+	pathParts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(pathParts) > 0 {
+		bucket = pathParts[0]
+		prefix = addFinalSlash(strings.Join(pathParts[1:], "/"))
 	}
 	if provider == localstackProvider {
-		return "http://" + host, bucket, prefix
+		return "http://" + u.Host, bucket, prefix
 	}
 
-	return "https://" + host, bucket, prefix
+	return "https://" + u.Host, bucket, prefix
+}
+
+func getEndpointResolver(url string, cloudProvider s3Provider) aws.EndpointResolverWithOptionsFunc {
+	return func(_service, region string, _options ...interface{}) (aws.Endpoint, error) {
+		if cloudProvider == googleProvider {
+			return aws.Endpoint{
+				URL:               "https://storage.googleapis.com",
+				SigningRegion:     "auto",
+				Source:            aws.EndpointSourceCustom,
+				HostnameImmutable: true,
+			}, nil
+		}
+		if url != "" {
+			return aws.Endpoint{
+				PartitionID:   "aws",
+				URL:           url,
+				SigningRegion: region,
+				SigningMethod: "v4",
+			}, nil
+		}
+		// returning EndpointNotFoundError will allow the service to fallback to its default resolution
+		return aws.Endpoint{}, &aws.EndpointNotFoundError{}
+	}
+}
+
+func parseBucketURL(u *url.URL, cloudProvider s3Provider) (aws.EndpointResolverWithOptionsFunc, string, string) {
+	url, bucket, prefix := getBucketInfo(u, cloudProvider)
+	return getEndpointResolver(url, cloudProvider), bucket, prefix
 }
 
 type s3Provider int
@@ -130,33 +161,13 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
 	}
+	cloudProvider := getCloudProvider(u)
+	customResolver, bucket, prefix := parseBucketURL(u, cloudProvider)
 	c, cancel := context.WithCancel(ctx)
 	p.ctx = c
 	p.cancel = cancel
-	var url string
-	cloudProvider := getCloudProvider(u)
-	url, p.bucket, p.prefix = getBucketInfo(u, cloudProvider)
-
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(_service, region string, _options ...interface{}) (aws.Endpoint, error) {
-		if cloudProvider == googleProvider {
-			return aws.Endpoint{
-				URL:               "https://storage.googleapis.com",
-				SigningRegion:     "auto",
-				Source:            aws.EndpointSourceCustom,
-				HostnameImmutable: true,
-			}, nil
-		}
-		if url != "" {
-			return aws.Endpoint{
-				PartitionID:   "aws",
-				URL:           url,
-				SigningRegion: region,
-				SigningMethod: "v4",
-			}, nil
-		}
-		// returning EndpointNotFoundError will allow the service to fallback to its default resolution
-		return aws.Endpoint{}, &aws.EndpointNotFoundError{}
-	})
+	p.bucket = bucket
+	p.prefix = prefix
 
 	region := os.Getenv("AWS_REGION")
 	if u.Query().Get("region") != "" {
