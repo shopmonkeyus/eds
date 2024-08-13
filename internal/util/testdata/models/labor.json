@@ -22,8 +22,13 @@
     "completed": {
       "description": "Checks if the editing of labor completed",
       "type": "boolean"
+    },
+    "startDate": {
+      "description": "The start datetime",
+      "type": "string",
+      "format": "date-time"
     }
   },
 
-  "required": ["orderId", "serviceId", "id", "completed"]
+  "required": ["orderId", "serviceId", "id", "completed", "startDate"]
 }

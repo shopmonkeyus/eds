@@ -88,8 +88,8 @@ func (v *SchemaValidator) Validate(event internal.DBChangeEvent) (bool, bool, st
 			return true, false, "", fmt.Errorf("error converting to SchemaDBChangeEvent: %w", err)
 		}
 		if err := rule.schema.Validate(o); err != nil {
-			if _, ok := err.(*js.ValidationError); ok {
-				return true, false, "", nil
+			if verr, ok := err.(*js.ValidationError); ok {
+				return true, false, "", verr
 			}
 			return true, false, "", err
 		}
