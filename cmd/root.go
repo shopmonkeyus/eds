@@ -51,7 +51,7 @@ func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 		if err := viper.ReadInConfig(); err != nil {
-			fmt.Printf("err: %s\n", err)
+			fmt.Printf("warning: %s\n", err)
 		}
 	}
 }
