@@ -407,7 +407,7 @@ func (c *Consumer) Name() string {
 
 type CredentialInfo struct {
 	companyIDs []string
-	companyID  string
+	serverID   string
 	sessionID  string
 }
 
@@ -418,7 +418,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	if util.IsLocalhost(url) || creds == "" {
 		info = &CredentialInfo{
 			companyIDs: []string{"*"},
-			companyID:  "dev",
+			serverID:   "dev",
 			sessionID:  uuid.NewString(),
 		}
 		logger.Debug("using localhost nats server")
@@ -431,7 +431,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	}
 
 	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-server-"+info.companyID, url, natsCredentials)
+	nc, err := cnats.NewNats(logger, "eds-server-"+info.serverID, url, natsCredentials)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
 	}
@@ -566,13 +566,13 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("error creating jetstream connection: %w", err)
 	}
 
-	consumer.logger.Info("using info from credentials, name: %s companies: %s, session %s", info.companyID, info.companyIDs, info.sessionID)
+	consumer.logger.Info("using info from credentials, server: %s companies: %s, session %s", info.serverID, info.companyIDs, info.sessionID)
 
 	var suffix string
 	if config.Suffix != "" {
 		suffix = "-" + config.Suffix
 	}
-	name := fmt.Sprintf("eds-server-%s%s", info.companyID, suffix)
+	name := fmt.Sprintf("eds-server-%s%s", info.serverID, suffix)
 	var subjects []string
 	for _, companyID := range info.companyIDs {
 		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
