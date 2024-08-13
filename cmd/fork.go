@@ -50,6 +50,7 @@ var forkCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		logger := newLogger(cmd)
+		companyIds, _ := cmd.Flags().GetStringSlice("company-id")
 		datadir := mustFlagString(cmd, "data-dir", true)
 		logDir := mustFlagString(cmd, "logs-dir", true)
 		sink, err := newLogFileSink(logDir)
@@ -201,6 +202,7 @@ var forkCmd = &cobra.Command{
 						ExportTableTimestamps: exportTableTimestamps,
 						DeliverAll:            restartFlag,
 						SchemaValidator:       validator,
+						CompanyIDs:            companyIds,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)
@@ -285,13 +287,14 @@ func init() {
 	forkCmd.Hidden = true // don't expose this since its only called by the main server process in the wrapper
 
 	// NOTE: sync these with serverCmd
-	forkCmd.Flags().String("data-dir", "", "the data directory for storing state, logs, and other data")
 	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
 	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
+	serverCmd.Flags().String("eds-server-id", "", "the EDS server ID")
 	forkCmd.Flags().String("url", "", "driver connection string")
 	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
+	forkCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")

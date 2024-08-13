@@ -14,6 +14,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	// Register all drivers
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/eventhub"
@@ -26,6 +27,8 @@ import (
 	_ "github.com/shopmonkeyus/eds-server/internal/drivers/sqlserver"
 )
 
+var dataDir string
+
 func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 	val, err := cmd.Flags().GetString(name)
 	if err != nil {
@@ -37,6 +40,16 @@ func mustFlagString(cmd *cobra.Command, name string, required bool) string {
 		os.Exit(3)
 	}
 	return val
+}
+
+func initConfig() {
+	cfgFile := filepath.Join(dataDir, "config.toml")
+	if dataDir != "" {
+		viper.SetConfigFile(cfgFile)
+		if err := viper.ReadInConfig(); err != nil && !util.SliceContains(os.Args, "enroll") {
+			fmt.Printf("error loading %s: %s", cfgFile, err)
+		}
+	}
 }
 
 func mustFlagInt(cmd *cobra.Command, name string, required bool) int {
@@ -239,10 +252,17 @@ func Execute() {
 }
 
 func init() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Println("couldn't get current working directory: ", err)
+		os.Exit(1)
+	}
+	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
 	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
 	rootCmd.PersistentFlags().Bool("timestamp", false, "turn on timestamps in logs")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", filepath.Join(cwd, "dataDir"), "the data directory for storing state, logs, and other data")
 }
