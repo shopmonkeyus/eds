@@ -42,13 +42,13 @@ type driverMeta struct {
 }
 
 type sessionStart struct {
-	Version   string     `json:"version"`
-	Hostname  string     `json:"hostname"`
-	IPAddress string     `json:"ipAddress"`
-	MachineId string     `json:"machineId"`
-	OsInfo    any        `json:"osinfo"`
-	Driver    driverMeta `json:"driver"`
-	ServerID  string     `json:"serverId"`
+	Version   string      `json:"version"`
+	Hostname  string      `json:"hostname"`
+	IPAddress string      `json:"ipAddress"`
+	MachineId string      `json:"machineId"`
+	OsInfo    any         `json:"osinfo"`
+	Driver    *driverMeta `json:"driver,omitempty"`
+	ServerID  string      `json:"serverId"`
 }
 
 type edsSession struct {
@@ -121,19 +121,23 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.OsInfo = osinfo
 	body.ServerID = edsServerId
 
-	driverMeta, err := internal.GetDriverMetadataForURL(driverUrl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get driver metadata: %w", err)
-	}
-	if driverMeta == nil {
-		return nil, fmt.Errorf("invalid driver URL: %s", driverUrl)
-	}
-	body.Driver.Description = driverMeta.Description
-	body.Driver.Name = driverMeta.Name
-	body.Driver.ID = driverMeta.Scheme
-	body.Driver.URL, err = util.MaskURL(driverUrl)
-	if err != nil {
-		return nil, fmt.Errorf("failed to mask driver URL: %w", err)
+	if driverUrl != "" {
+		driverMetadata, err := internal.GetDriverMetadataForURL(driverUrl)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get driver metadata: %w", err)
+		}
+		if driverMetadata == nil {
+			return nil, fmt.Errorf("invalid driver URL: %s", driverUrl)
+		}
+		var driverInfo driverMeta
+		driverInfo.Description = driverMetadata.Description
+		driverInfo.Name = driverMetadata.Name
+		driverInfo.ID = driverMetadata.Scheme
+		driverInfo.URL, err = util.MaskURL(driverUrl)
+		if err != nil {
+			return nil, fmt.Errorf("failed to mask driver URL: %w", err)
+		}
+		body.Driver = &driverInfo
 	}
 
 	logger.Trace("sending session start: %s", util.JSONStringify(body))
@@ -342,6 +346,7 @@ var serverIgnoreFlags = map[string]bool{
 	"--renew-interval": true,
 	"--wrapper":        true,
 	"--parent":         true,
+	"--url":            true,
 }
 
 func collectCommandArgs() []string {
@@ -531,7 +536,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		apiurl := mustFlagString(cmd, "api-url", false)
-		driverURL := mustFlagString(cmd, "url", true)
+		driverURL := viper.GetString("url")
 		server := mustFlagString(cmd, "server", false)
 		edsServerId := viper.GetString("server_id")
 		dataDir := getDataDir(cmd, logger)
@@ -704,17 +709,37 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
+		configured := driverURL != ""
+		configureChannel := make(chan bool, 1)
+		configure := func(config *notification.ServerConfigPayload) {
+			logger.Trace("received driver configuration: %s", util.JSONStringify(config))
+			viper.Set("url", config.URL)
+			if err := viper.WriteConfig(); err != nil {
+				logger.Error("failed to write config: %s", err)
+				return
+			}
+			driverURL = config.URL
+			if !configured {
+				logger.Trace("driver configured")
+				configureChannel <- true
+			} else {
+				// restart the server
+				restart()
+			}
+		}
+
 		natsurl := mustFlagString(cmd, "server", true)
 
 		// create a notification consumer that will listen for notification actions and handle them here
 		notificationConsumer := notification.New(logger, natsurl, notification.NotificationHandler{
-			Restart:  restart,
-			Renew:    renew,
-			Shutdown: shutdown,
-			Pause:    pause,
-			Unpause:  unpause,
-			Upgrade:  upgrade,
-			SendLogs: sendLogs,
+			Restart:   restart,
+			Renew:     renew,
+			Shutdown:  shutdown,
+			Pause:     pause,
+			Unpause:   unpause,
+			Upgrade:   upgrade,
+			SendLogs:  sendLogs,
+			Configure: configure,
 		})
 
 		// setup tickers
@@ -766,10 +791,16 @@ var serverCmd = &cobra.Command{
 			if err := notificationConsumer.Start(sessionId, credsFile); err != nil {
 				logger.Fatal("failed to start notification consumer: %s", err)
 			}
+			if !configured {
+				logger.Info("waiting for driver configuration... add your driver in the Shopmonkey EDS UI or pass in the --url flag")
+				<-configureChannel
+				configured = true
+			}
 			sessionLogsDir := filepath.Join(sessionDir, "logs")
 			args := append(_args,
 				"--creds", credsFile,
 				"--logs-dir", sessionLogsDir,
+				"--url", driverURL,
 			)
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
@@ -889,6 +920,7 @@ func init() {
 
 	// NOTE: sync these with forkCmd
 	serverCmd.Flags().String("url", "", "driver connection string")
+	viper.BindPFlag("url", serverCmd.Flags().Lookup("url"))
 	serverCmd.Flags().String("api-key", os.Getenv("SM_APIKEY"), "shopmonkey API key")
 	viper.BindPFlag("token", serverCmd.Flags().Lookup("api-key"))
 
