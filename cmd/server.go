@@ -335,6 +335,7 @@ func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, session
 var serverIgnoreFlags = map[string]bool{
 	"--api-url":        true,
 	"--api-key":        true,
+	"--eds-server-id":  true,
 	"--silent":         true,
 	"--port":           true,
 	"--health-port":    true,
