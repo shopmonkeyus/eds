@@ -349,6 +349,7 @@ var serverIgnoreFlags = map[string]bool{
 	"--parent":         true,
 	"--url":            true,
 	"--server":         true,
+	"--keep-logs":      true,
 }
 
 func collectCommandArgs() []string {
@@ -543,6 +544,7 @@ var serverCmd = &cobra.Command{
 		edsServerId := viper.GetString("server_id")
 		dataDir := getDataDir(cmd, logger)
 		apikey := viper.GetString("token")
+		keepLogs := viper.GetBool("keep_logs")
 		logger.Trace("using parameter api token %s", cstr.Mask(apikey))
 		logger.Info("using parameter server id: %s", edsServerId)
 
@@ -567,7 +569,7 @@ var serverCmd = &cobra.Command{
 			// make sure we remove the temporary credential
 			os.Remove(credsFile)
 			// if this is the last file in the directory, go ahead and remove it too
-			if files, _ := os.ReadDir(sessionDir); len(files) == 0 {
+			if files, _ := os.ReadDir(sessionDir); len(files) == 0 && !keepLogs {
 				os.RemoveAll(sessionDir)
 			}
 		}()
@@ -702,8 +704,10 @@ var serverCmd = &cobra.Command{
 			}
 
 			// fork will be done writing to the file, so we can remove it
-			logger.Debug("removing old logfile: %s", logFile)
-			os.Remove(logFile)
+			if !keepLogs {
+				logger.Debug("removing old logfile: %s", logFile)
+				os.Remove(logFile)
+			}
 
 			return &notification.SendLogsResponse{
 				Path:      path,
@@ -843,7 +847,9 @@ var serverCmd = &cobra.Command{
 				}
 				if ec == 0 {
 					// on success, remove the logs
-					os.RemoveAll(sessionDir)
+					if !keepLogs {
+						os.RemoveAll(sessionDir)
+					}
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
@@ -935,6 +941,8 @@ func init() {
 	viper.BindPFlag("server_id", serverCmd.Flags().Lookup("eds-server-id"))
 	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
 	serverCmd.Flags().MarkHidden("companyIds") // not intended for production use
+	serverCmd.Flags().Bool("keep-logs", false, "keep logs after the server exits instead of deleting them")
+	viper.BindPFlag("keep_logs", serverCmd.Flags().Lookup("keep-logs"))
 
 	// deprecated but left for backwards compatibility
 	serverCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
