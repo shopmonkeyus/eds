@@ -348,6 +348,7 @@ var serverIgnoreFlags = map[string]bool{
 	"--wrapper":        true,
 	"--parent":         true,
 	"--url":            true,
+	"--server":         true,
 }
 
 func collectCommandArgs() []string {
@@ -730,6 +731,9 @@ var serverCmd = &cobra.Command{
 		}
 
 		natsurl := mustFlagString(cmd, "server", true)
+		if strings.Contains(apiurl, "localhost") {
+			natsurl = "nats://localhost:4222"
+		}
 
 		// create a notification consumer that will listen for notification actions and handle them here
 		notificationConsumer := notification.New(logger, natsurl, notification.NotificationHandler{
@@ -802,6 +806,7 @@ var serverCmd = &cobra.Command{
 				"--creds", credsFile,
 				"--logs-dir", sessionLogsDir,
 				"--url", driverURL,
+				"--server", natsurl,
 			)
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
