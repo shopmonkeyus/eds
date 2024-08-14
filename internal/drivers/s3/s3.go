@@ -82,51 +82,45 @@ var _ internal.Importer = (*s3Driver)(nil)
 var _ internal.ImporterHelp = (*s3Driver)(nil)
 var _ importer.Handler = (*s3Driver)(nil)
 
-func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string) error {
-	u, err := url.Parse(urlString)
-	if err != nil {
-		return fmt.Errorf("unable to parse url: %w", err)
+func addFinalSlash(s string) string {
+	if s == "" {
+		return ""
+	}
+	if !strings.HasSuffix(s, "/") {
+		return s + "/"
+	}
+	return s
+}
+
+// getBucketInfo returns the provider url, bucket and prefix
+func getBucketInfo(u *url.URL, provider s3Provider) (string, string, string) {
+	if provider == awsProvider {
+		return "", u.Host, addFinalSlash(strings.TrimPrefix(u.Path, "/"))
+	}
+	var prefix, bucket string
+	pathParts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(pathParts) > 0 {
+		bucket = pathParts[0]
+		prefix = addFinalSlash(strings.Join(pathParts[1:], "/"))
+	}
+	if provider == localstackProvider {
+		return "http://" + u.Host, bucket, prefix
 	}
 
-	c, cancel := context.WithCancel(ctx)
-	p.ctx = c
-	p.cancel = cancel
+	return "https://" + u.Host, bucket, prefix
+}
 
-	host := u.Host
-	p.bucket = u.Path
-
-	if u.Path == "" {
-		p.bucket = u.Host
-		host = ""
-	} else {
-		p.bucket = u.Path[1:] // trim off the forward slash
-
-		tok := strings.Split(p.bucket, "/")
-		if len(tok) > 1 {
-			p.bucket = tok[0]
-			p.prefix = strings.Join(tok[1:], "/")
-			if !strings.HasSuffix(p.prefix, "/") {
-				p.prefix += "/"
-			}
+func getEndpointResolver(url string, cloudProvider s3Provider) aws.EndpointResolverWithOptionsFunc {
+	return func(_service, region string, _options ...interface{}) (aws.Endpoint, error) {
+		if cloudProvider == googleProvider {
+			return aws.Endpoint{
+				URL:               "https://storage.googleapis.com",
+				SigningRegion:     "auto",
+				Source:            aws.EndpointSourceCustom,
+				HostnameImmutable: true,
+			}, nil
 		}
-	}
-
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-		if host != "" {
-			var url string
-			if strings.Contains(host, "localhost") {
-				url = "http://" + host
-			} else {
-				url = "https://" + host
-			}
-			if strings.Contains(url, "googleapis.com") {
-				return aws.Endpoint{
-					URL:               "https://storage.googleapis.com",
-					SigningRegion:     "auto",
-					Source:            aws.EndpointSourceCustom,
-					HostnameImmutable: true,
-				}, nil
-			}
+		if url != "" {
 			return aws.Endpoint{
 				PartitionID:   "aws",
 				URL:           url,
@@ -136,7 +130,44 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 		}
 		// returning EndpointNotFoundError will allow the service to fallback to its default resolution
 		return aws.Endpoint{}, &aws.EndpointNotFoundError{}
-	})
+	}
+}
+
+func parseBucketURL(u *url.URL, cloudProvider s3Provider) (aws.EndpointResolverWithOptionsFunc, string, string) {
+	url, bucket, prefix := getBucketInfo(u, cloudProvider)
+	return getEndpointResolver(url, cloudProvider), bucket, prefix
+}
+
+type s3Provider int
+
+const (
+	awsProvider s3Provider = iota
+	googleProvider
+	localstackProvider
+)
+
+func getCloudProvider(u *url.URL) s3Provider {
+	if strings.Contains(u.Host, "localhost") {
+		return localstackProvider
+	}
+	if strings.Contains(u.Host, "googleapis.com") {
+		return googleProvider
+	}
+	return awsProvider
+}
+
+func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string) error {
+	u, err := url.Parse(urlString)
+	if err != nil {
+		return fmt.Errorf("unable to parse url: %w", err)
+	}
+	cloudProvider := getCloudProvider(u)
+	customResolver, bucket, prefix := parseBucketURL(u, cloudProvider)
+	c, cancel := context.WithCancel(ctx)
+	p.ctx = c
+	p.cancel = cancel
+	p.bucket = bucket
+	p.prefix = prefix
 
 	region := os.Getenv("AWS_REGION")
 	if u.Query().Get("region") != "" {
@@ -173,7 +204,7 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 
 	provider := config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, sessionToken))
 
-	if strings.Contains(host, "googleapis.com") {
+	if cloudProvider == googleProvider {
 		cfg, err = config.LoadDefaultConfig(ctx,
 			config.WithRegion("auto"),
 			config.WithEndpointResolverWithOptions(customResolver),
@@ -200,16 +231,18 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	if _, err := p.s3.ListObjects(ctx, &awss3.ListObjectsInput{Bucket: aws.String(p.bucket), MaxKeys: aws.Int32(1)}); err != nil {
 		var bnf *types.NoSuchBucket
 		// only attempt to create the bucket if we are using localhost
-		if strings.Contains(host, "localhost") {
+		if cloudProvider == localstackProvider {
 			if errors.As(err, &bnf) {
 				if _, err := p.s3.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(p.bucket)}); err != nil {
 					return fmt.Errorf("bucket not found and unable to create bucket %s: %w", p.bucket, err)
 				}
 				logger.Info("created bucket %s", p.bucket)
-				return nil // we created the bucket ok
+				err = nil // we created the bucket ok, so reset the error
 			}
 		}
-		return fmt.Errorf("unable to verify bucket %s: %w", p.bucket, bnf)
+		if err != nil {
+			return fmt.Errorf("unable to verify bucket %s: %w", p.bucket, err)
+		}
 	}
 
 	maxBatchSize := 1_000 // maximum number of events to batch
