@@ -24,6 +24,7 @@ import (
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
+	cstr "github.com/shopmonkeyus/go-common/string"
 	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -462,7 +463,7 @@ func runWrapperLoop(logger logger.Logger) {
 	var completed bool
 
 	for failures < maxFailures && !completed {
-		logger.Trace("starting process: %s %s", parentProcess, strings.Join(args, " "))
+		logger.Trace("starting process: %s %s", parentProcess, strings.Join(util.MaskArguments(args), " "))
 		cmd := exec.Command(parentProcess, args...)
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
@@ -541,7 +542,7 @@ var serverCmd = &cobra.Command{
 		edsServerId := viper.GetString("server_id")
 		dataDir := getDataDir(cmd, logger)
 		apikey := viper.GetString("token")
-		logger.Trace("using parameter api token %s", apikey)
+		logger.Trace("using parameter api token %s", cstr.Mask(apikey))
 		logger.Info("using parameter server id: %s", edsServerId)
 
 		apiurl = strings.TrimSuffix(apiurl, "/") // remove trailing slash

@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -29,7 +30,7 @@ func MaskURL(urlString string) (string, error) {
 	}
 	str.WriteString(u.Host)
 	p := u.Path
-	if p != "/" {
+	if p != "/" && p != "" {
 		str.WriteString("/")
 		if len(p) > 1 && p[0] == '/' {
 			str.WriteString(cstr.Mask(p[1:]))
@@ -45,4 +46,36 @@ func MaskURL(urlString string) (string, error) {
 		str.WriteString(strings.Join(qs, "&"))
 	}
 	return str.String(), nil
+}
+
+func MaskEmail(val string) string {
+	tok := strings.Split(val, "@")
+	dot := strings.Split(tok[1], ".")
+	return cstr.Mask(tok[0]) + "@" + cstr.Mask(dot[0]) + "." + strings.Join(dot[1:], ".")
+}
+
+var isURL = regexp.MustCompile(`^(\w+)://`)
+var isEmail = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+var isJWT = regexp.MustCompile(`^[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+$`)
+
+// MaskArguments masks sensitive information in the given arguments.
+func MaskArguments(args []string) []string {
+	masked := make([]string, len(args))
+	for i, arg := range args {
+		if isURL.MatchString(arg) {
+			u, err := MaskURL(arg)
+			if err == nil {
+				masked[i] = u
+			} else {
+				masked[i] = cstr.Mask(arg)
+			}
+		} else if isEmail.MatchString(arg) {
+			masked[i] = MaskEmail(arg)
+		} else if isJWT.MatchString(arg) {
+			masked[i] = cstr.Mask(arg)
+		} else {
+			masked[i] = arg
+		}
+	}
+	return masked
 }
