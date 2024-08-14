@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/shopmonkeyus/eds-server/internal/util"
@@ -71,6 +72,9 @@ var enrollCmd = &cobra.Command{
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode == http.StatusNotFound {
+				logger.Fatal("invalid enrollment code or it has already been used")
+			}
 			logger.Fatal("%s", handleAPIError(resp, "enroll"))
 		}
 
@@ -97,7 +101,16 @@ var enrollCmd = &cobra.Command{
 			logger.Fatal("failed to write to token file: %w", err)
 		}
 		logger.Info("Enrollment successful!")
-		logger.Info("run `eds-server server` to start the server")
+		ex, err := os.Executable()
+		if err != nil {
+			ex = os.Args[0]
+		}
+		if strings.Contains(ex, "go-build") {
+			// If we are running in a go build environment, we need to tell the user how to start the server
+			logger.Info("run `go run . server` to start the server")
+		} else {
+			logger.Info("run `%s server` to start the server", filepath.Base(ex))
+		}
 	},
 }
 
