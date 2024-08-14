@@ -47,7 +47,6 @@ func getNatsCreds(creds string) (nats.Option, *CredentialInfo, error) {
 	claim, err := jwt.DecodeUserClaims(natsJWT)
 	if err != nil {
 		return nil, nil, fmt.Errorf("decoding JWT claims: %s", err)
-
 	}
 	var companyIDs []string
 	var sessionID string
@@ -62,15 +61,15 @@ func getNatsCreds(creds string) (nats.Option, *CredentialInfo, error) {
 		}
 	}
 	if len(companyIDs) == 0 {
-		return nil, nil, errors.New("issue parsing company ID from JWT claims. Ensure the JWT has the correct permissions")
+		return nil, nil, errors.New("issue parsing company IDs from JWT claims. Ensure the JWT has the correct permissions")
 	}
-	companyID := claim.Name
-	if companyID == "" {
-		return nil, nil, errors.New("missing company name in credential")
+	serverID := claim.Name
+	if serverID == "" {
+		return nil, nil, errors.New("missing server id in credential")
 	}
 	return natsCredentials, &CredentialInfo{
 		companyIDs: companyIDs,
-		companyID:  companyID,
+		serverID:   serverID,
 		sessionID:  sessionID,
 	}, nil
 }
