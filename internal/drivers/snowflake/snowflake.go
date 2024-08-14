@@ -238,6 +238,10 @@ func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 		logger.Debug("created table %s", table)
 	}
 
+	if config.SchemaOnly {
+		return nil
+	}
+
 	// create a stage
 	stageName := "eds_import_" + config.JobID
 	logger.Debug("creating stage %s", stageName)
@@ -330,6 +334,15 @@ func (p *snowflakeDriver) Help() string {
 	var help strings.Builder
 	help.WriteString(util.GenerateHelpSection("Schema", "The database will match the public schema from the Shopmonkey transactional database.\n"))
 	return help.String()
+}
+
+// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+func (p *snowflakeDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	db, err := p.connectToDB(ctx, url)
+	if err != nil {
+		return err
+	}
+	return db.Close()
 }
 
 func init() {

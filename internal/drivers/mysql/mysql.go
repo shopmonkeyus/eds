@@ -229,6 +229,15 @@ func (p *mysqlDriver) Help() string {
 	return help.String()
 }
 
+// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+func (p *mysqlDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	db, err := p.connectToDB(ctx, url)
+	if err != nil {
+		return err
+	}
+	return db.Close()
+}
+
 func init() {
 	var driver mysqlDriver
 	internal.RegisterDriver("mysql", &driver)

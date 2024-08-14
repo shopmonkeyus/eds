@@ -44,6 +44,9 @@ type ImporterConfig struct {
 
 	// Single is true if only a single row should be imported at a time vs batching.
 	Single bool
+
+	// Only create the schema but do not import any data.
+	SchemaOnly bool
 }
 
 // Importer is the interface that must be implemented by all importer implementations

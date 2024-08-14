@@ -1,6 +1,7 @@
 package file
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -151,6 +152,9 @@ func (p *fileDriver) ImportCompleted() error {
 }
 
 func (p *fileDriver) Import(config internal.ImporterConfig) error {
+	if config.SchemaOnly {
+		return nil
+	}
 	p.logger = config.Logger.WithPrefix("[file]")
 	if _, err := p.GetPathFromURL(config.URL); err != nil {
 		return err
@@ -162,6 +166,12 @@ func (p *fileDriver) Import(config internal.ImporterConfig) error {
 // SupportsDelete returns true if the importer supports deleting data.
 func (p *fileDriver) SupportsDelete() bool {
 	return false
+}
+
+// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+func (p *fileDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	_, err := p.GetPathFromURL(url)
+	return err
 }
 
 func init() {

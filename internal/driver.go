@@ -62,6 +62,9 @@ type Driver interface {
 
 	// Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 	Flush(logger logger.Logger) error
+
+	// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+	Test(ctx context.Context, logger logger.Logger, url string) error
 }
 
 // DriverAlias is an interface that Drivers implement for specifying additional protocol schemes for URLs that the driver can handle.
@@ -186,5 +189,23 @@ func NewDriver(ctx context.Context, logger logger.Logger, urlString string, regi
 		}
 	}
 
+	return driver, nil
+}
+
+func NewDriverForImport(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry, tracker *tracker.Tracker, datadir string) (Driver, error) {
+	u, err := url.Parse(urlString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+	driver := driverRegistry[u.Scheme]
+	if driver == nil {
+		protocol := driverAliasRegistry[u.Scheme]
+		if protocol != "" {
+			driver = driverRegistry[protocol]
+		}
+		if driver == nil {
+			return nil, fmt.Errorf("no driver registered for protocol %s", u.Scheme)
+		}
+	}
 	return driver, nil
 }

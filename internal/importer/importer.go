@@ -36,6 +36,9 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 	if err := handler.CreateDatasource(schema); err != nil {
 		return err
 	}
+	if config.SchemaOnly {
+		return nil
+	}
 	var total int
 	for _, file := range files {
 		table, tv, ok := util.ParseCRDBExportFile(file)
