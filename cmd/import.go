@@ -430,12 +430,12 @@ var importCmd = &cobra.Command{
 		driver, err := internal.NewDriverForImport(ctx, logger, driverUrl, registry, nil, dataDir)
 		if err != nil {
 			fmt.Println(err.Error())
-			os.Exit(3) /// this means the test failed
+			os.Exit(3) // this means the test failed
 		}
 		timedCtx, timedCancel := context.WithTimeout(ctx, 15*time.Second)
 		if err := driver.Test(timedCtx, logger, driverUrl); err != nil {
 			fmt.Println(err.Error())
-			os.Exit(3) /// this means the test failed
+			os.Exit(3) // this means the test failed
 		}
 		timedCancel()
 		logger.Debug("driver test successful")
