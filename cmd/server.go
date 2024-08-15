@@ -791,7 +791,7 @@ var serverCmd = &cobra.Command{
 		configured := driverURL != ""
 		configureChannel := make(chan bool, 1)
 		configure := func(config *notification.ServerConfigPayload) *notification.ConfigureResponse {
-			logger.Trace("received driver configuration. url: %s, import: %v", cstr.Mask(config.URL), config.Import)
+			logger.Trace("received driver configuration. url: %s", cstr.Mask(config.URL))
 			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true)
 			if success && validated {
 				viper.Set("url", config.URL)

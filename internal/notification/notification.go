@@ -68,8 +68,7 @@ type Notification struct {
 }
 
 type ServerConfigPayload struct {
-	URL    string `json:"url" msgpack:"url"`
-	Import bool   `json:"import" msgpack:"import"`
+	URL string `json:"url" msgpack:"url"`
 }
 
 func (n *Notification) String() string {
@@ -239,9 +238,6 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		var config ServerConfigPayload
 		if v, ok := notification.Data["url"].(string); ok {
 			config.URL = v
-		}
-		if v, ok := notification.Data["import"].(string); ok {
-			config.Import = v == "true"
 		}
 		c.configure(config)
 	case "import":
