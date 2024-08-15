@@ -717,20 +717,79 @@ var serverCmd = &cobra.Command{
 
 		configured := driverURL != ""
 		configureChannel := make(chan bool, 1)
-		configure := func(config *notification.ServerConfigPayload) {
-			logger.Trace("received driver configuration: %s", util.JSONStringify(config))
-			viper.Set("url", config.URL)
-			if err := viper.WriteConfig(); err != nil {
-				logger.Error("failed to write config: %s", err)
-				return
+		configure := func(config *notification.ServerConfigPayload) *notification.ConfigureResponse {
+			logger.Trace("received driver configuration. url: %s, import: %v", cstr.Mask(config.URL), config.Import)
+			importargs := []string{"--url", config.URL, "--api-key", apikey, "--verbose", "--no-confirm"}
+			if !config.Import {
+				importargs = append(importargs, "--schema-only")
 			}
-			driverURL = config.URL
-			if !configured {
-				logger.Trace("driver configured")
-				configureChannel <- true
+			logger.Info("configuring the driver, one moment please...")
+			result, err := command.Fork(command.ForkArgs{
+				Log:              logger,
+				Command:          "import",
+				Args:             importargs,
+				LogFilenameLabel: "import",
+				SaveLogs:         true,
+				ForwardInterrupt: true,
+				Dir:              sessionDir,
+			})
+			if err != nil && result == nil {
+				s := "Error importing data. Please contact support for assistance."
+				return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: false, Message: &s}
 			} else {
-				// restart the server
-				restart()
+				ec := result.ProcessState.ExitCode()
+				logger.Debug("import exit code: %d, last log line: %s", ec, result.LastErrorLines)
+				switch ec {
+				case 0:
+					viper.Set("url", config.URL)
+					if err := viper.WriteConfig(); err != nil {
+						logger.Error("failed to write config: %s", err)
+						errmsg := err.Error()
+						return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: false, Message: &errmsg}
+					}
+					driverURL = config.URL
+					if !configured {
+						logger.Trace("driver configured")
+						configureChannel <- true
+					} else {
+						// restart the server
+						restart()
+					}
+					return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: true}
+				case 3:
+					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
+					var msg string
+					if len(tok) > 1 {
+						msg = tok[len(tok)-1]
+					} else {
+						msg = strings.TrimSpace(result.LastErrorLines)
+					}
+					return &notification.ConfigureResponse{SessionID: sessionId, Success: false, Validated: false, Message: &msg} // this means the url is invalid
+				default:
+					var uploadLogPath string
+					uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
+					if err != nil {
+						logger.Error("failed to get upload URL: %s", err)
+					} else {
+						logFile := filepath.Join(sessionDir, "import_stdout.txt")
+						if fi, err := os.Stat(logFile); err == nil && fi.Size() > 0 {
+							p, err := uploadLogFile(logger, uploadURL, logFile)
+							if err != nil {
+								logger.Error("failed to upload stdout logfile: %s", err)
+							} else {
+								uploadLogPath = p
+							}
+						}
+						logFile = filepath.Join(sessionDir, "import_stderr.txt")
+						if fi, err := os.Stat(logFile); err == nil && fi.Size() > 0 {
+							if _, err := uploadLogFile(logger, uploadURL, logFile); err != nil {
+								logger.Error("failed to upload stderr logfile: %s", err)
+							}
+						}
+					}
+					s := "Error importing data. See the error logs for more details or contact support for further assistance."
+					return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: false, Message: &s, LogPath: uploadLogPath}
+				}
 			}
 		}
 
@@ -802,8 +861,12 @@ var serverCmd = &cobra.Command{
 			}
 			if !configured {
 				logger.Info("waiting for driver configuration... add your driver in the Shopmonkey EDS UI or pass in the --url flag")
-				<-configureChannel
-				configured = true
+				select {
+				case <-configureChannel:
+					configured = true
+				case <-sys.CreateShutdownChannel():
+					return
+				}
 			}
 			sessionLogsDir := filepath.Join(sessionDir, "logs")
 			args := append(_args,

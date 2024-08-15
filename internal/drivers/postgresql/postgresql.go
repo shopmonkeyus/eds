@@ -166,6 +166,10 @@ func (p *postgresqlDriver) Import(config internal.ImporterConfig) error {
 		logger.Debug("created table %s", table)
 	}
 
+	if config.SchemaOnly {
+		return nil
+	}
+
 	files, err := util.ListDir(config.DataDir)
 	if err != nil {
 		return fmt.Errorf("unable to list dir: %w", err)
@@ -256,6 +260,15 @@ func (p *postgresqlDriver) Help() string {
 
 func (p *postgresqlDriver) Aliases() []string {
 	return []string{"postgresql"}
+}
+
+// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+func (p *postgresqlDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	db, err := p.connectToDB(ctx, url)
+	if err != nil {
+		return err
+	}
+	return db.Close()
 }
 
 func init() {

@@ -233,6 +233,9 @@ func (p *eventHubDriver) ImportCompleted() error {
 }
 
 func (p *eventHubDriver) Import(config internal.ImporterConfig) error {
+	if config.SchemaOnly {
+		return nil
+	}
 	p.logger = config.Logger.WithPrefix("[eventhub]")
 	if err := p.connect(config.URL); err != nil {
 		return err
@@ -247,6 +250,14 @@ func (p *eventHubDriver) Import(config internal.ImporterConfig) error {
 // SupportsDelete returns true if the importer supports deleting data.
 func (p *eventHubDriver) SupportsDelete() bool {
 	return false
+}
+
+// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+func (p *eventHubDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	if err := p.connect(url); err != nil {
+		return err
+	}
+	return p.producer.Close(context.Background())
 }
 
 func init() {

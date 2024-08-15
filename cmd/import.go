@@ -370,6 +370,7 @@ var importCmd = &cobra.Command{
 		jobID := mustFlagString(cmd, "job-id", false)
 		single, _ := cmd.Flags().GetBool("single")
 		dir := mustFlagString(cmd, "dir", false)
+		schemaOnly := mustFlagBool(cmd, "schema-only", false)
 
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[import]")
@@ -425,6 +426,21 @@ var importCmd = &cobra.Command{
 			logger.Fatal("error creating registry: %s", err)
 		}
 
+		// create the driver for testing the connection
+		driver, err := internal.NewDriverForImport(ctx, logger, driverUrl, registry, nil, dataDir)
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(3) // this means the test failed
+		}
+		timedCtx, timedCancel := context.WithTimeout(ctx, 15*time.Second)
+		if err := driver.Test(timedCtx, logger, driverUrl); err != nil {
+			fmt.Println(err.Error())
+			os.Exit(3) // this means the test failed
+		}
+		timedCancel()
+		logger.Debug("driver test successful")
+		// NOTE: we don't stop the driver here since we need it for the importer
+
 		// save the new schema file
 		if err := registry.Save(schemaFile); err != nil {
 			logger.Fatal("error saving schema: %s", err)
@@ -446,7 +462,7 @@ var importCmd = &cobra.Command{
 			skipDeleteConfirm = !importerHelp.SupportsDelete()
 		}
 
-		if !dryRun && !noconfirm && !skipDeleteConfirm {
+		if !dryRun && !noconfirm && !skipDeleteConfirm && !schemaOnly {
 
 			meta, err := internal.GetDriverMetadataForURL(driverUrl)
 			if err != nil {
@@ -514,62 +530,84 @@ var importCmd = &cobra.Command{
 		defer util.RecoverPanic(logger) // panic recover needs to happen after the defer above
 
 		if dir == "" {
-			if jobID == "" {
-				logger.Info("Requesting Export...")
-				jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
-					Tables:      only,
-					CompanyIDs:  companyIds,
-					LocationIDs: locationIds,
-				})
-				if err != nil {
-					logger.Error("error creating export job: %s", err)
+			if !schemaOnly {
+				if jobID == "" {
+					logger.Info("Requesting Export...")
+					jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
+						Tables:      only,
+						CompanyIDs:  companyIds,
+						LocationIDs: locationIds,
+					})
+					if err != nil {
+						logger.Fatal("error creating export job: %s", err)
+					}
+					logger.Trace("created job: %s", jobID)
+				}
+
+				logger.Info("Waiting for Export to Complete...")
+				job, err := pollUntilComplete(ctx, logger, apiURL, apiKey, jobID)
+				if err != nil && !isCancelled(ctx) {
+					logger.Fatal("error polling job: %s", err)
+				}
+
+				if isCancelled(ctx) {
 					return
 				}
-				logger.Trace("created job: %s", jobID)
-			}
 
-			logger.Info("Waiting for Export to Complete...")
-			job, err := pollUntilComplete(ctx, logger, apiURL, apiKey, jobID)
-			if err != nil && !isCancelled(ctx) {
-				logger.Error("error polling job: %s", err)
-				return
-			}
+				// download the files
+				dir, err = os.MkdirTemp(dataDir, "import-"+jobID+"-*")
+				if err != nil {
+					logger.Fatal("error creating temp dir: %s", err)
+				}
+				logger.Trace("temp dir created: %s", dir)
 
-			if isCancelled(ctx) {
-				return
-			}
+				logger.Info("Downloading export data...")
+				tableData, err := bulkDownloadData(logger, job.Tables, dir)
+				if err != nil {
+					logger.Fatal("error downloading files: %s", err)
+				}
 
-			// download the files
-			dir, err = os.MkdirTemp(dataDir, "import-"+jobID+"-*")
-			if err != nil {
-				logger.Error("error creating temp dir: %s", err)
-				return
-			}
-			logger.Trace("temp dir created: %s", dir)
+				if isCancelled(ctx) {
+					return
+				}
 
-			logger.Info("Downloading export data...")
-			tableData, err := bulkDownloadData(logger, job.Tables, dir)
-			if err != nil {
-				logger.Error("error downloading files: %s", err)
-				return
+				to, err := os.Create(filepath.Join(dir, "tables.json"))
+				if err != nil {
+					logger.Fatal("couldn't open temp tables file: %s", err)
+				}
+				enc := json.NewEncoder(to)
+				if err := enc.Encode(tableData); err != nil {
+					logger.Fatal("error encoding tables: %s", err)
+				}
+				to.Close()
+				tables = tableNames(tableData)
+			} else {
+				logger.Debug("schema only, skipping download")
+				// we need to manually create all the tables in this specific case since we are --schema-only
+				schema, err := registry.GetLatestSchema()
+				if err != nil {
+					logger.Fatal("error getting latest schema: %s", err)
+				}
+				to, err := os.Create(filepath.Join(dir, "tables.json"))
+				if err != nil {
+					logger.Fatal("couldn't open temp tables file: %s", err)
+					return
+				}
+				time := time.Now()
+				var tableData []TableExportInfo
+				for _, data := range schema {
+					tableData = append(tableData, TableExportInfo{
+						Table:     data.Table,
+						Timestamp: time,
+					})
+				}
+				enc := json.NewEncoder(to)
+				if err := enc.Encode(tableData); err != nil {
+					logger.Fatal("error encoding tables: %s", err)
+				}
+				to.Close()
+				tables = tableNames(tableData)
 			}
-
-			if isCancelled(ctx) {
-				return
-			}
-
-			to, err := os.Create(filepath.Join(dir, "tables.json"))
-			if err != nil {
-				logger.Error("couldn't open temp tables file: %s", err)
-				return
-			}
-			enc := json.NewEncoder(to)
-			if err := enc.Encode(tableData); err != nil {
-				logger.Error("error encoding tables: %s", err)
-				return
-			}
-			to.Close()
-			tables = tableNames(tableData)
 		} else {
 			fp := filepath.Join(dir, "tables.json")
 			tableData, err := loadTablesJSON(fp)
@@ -603,6 +641,7 @@ var importCmd = &cobra.Command{
 			Tables:          tables,
 			Single:          single,
 			SchemaValidator: validator,
+			SchemaOnly:      schemaOnly,
 		}); err != nil {
 			logger.Error("error running import: %s", err)
 			return
@@ -625,6 +664,7 @@ func init() {
 	importCmd.Flags().Bool("no-confirm", false, "skip the confirmation prompt")
 	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
 	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
+	importCmd.Flags().Bool("schema-only", false, "run the schema creation only, skipping the data import")
 
 	// tuning and testing flags
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks (if supported by driver)")

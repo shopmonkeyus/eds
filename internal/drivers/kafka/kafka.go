@@ -208,6 +208,9 @@ func (p *kafkaDriver) ImportCompleted() error {
 }
 
 func (p *kafkaDriver) Import(config internal.ImporterConfig) error {
+	if config.SchemaOnly {
+		return nil
+	}
 	p.logger = config.Logger.WithPrefix("[kafka]")
 	p.ctx = config.Context
 	p.importConfig = config
@@ -220,6 +223,14 @@ func (p *kafkaDriver) Import(config internal.ImporterConfig) error {
 // SupportsDelete returns true if the importer supports deleting data.
 func (p *kafkaDriver) SupportsDelete() bool {
 	return false
+}
+
+// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+func (p *kafkaDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	if err := p.connect(url); err != nil {
+		return err
+	}
+	return p.writer.Close()
 }
 
 func init() {

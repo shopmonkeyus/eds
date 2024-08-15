@@ -35,12 +35,20 @@ type NotificationHandler struct {
 	SendLogs func() *SendLogsResponse
 
 	// Configure action is called to configure the server with a driver
-	Configure func(config *ServerConfigPayload)
+	Configure func(config *ServerConfigPayload) *ConfigureResponse
 }
 
 type SendLogsResponse struct {
 	Path      string `json:"path"`
 	SessionId string `json:"sessionId"`
+}
+
+type ConfigureResponse struct {
+	Success   bool    `json:"success"`
+	Message   *string `json:"message,omitempty"`
+	Validated bool    `json:"validated"` // if the driver url was valid, but the import failed
+	SessionID string  `json:"-" msgpack:"-"`
+	LogPath   string  `json:"-" msgpack:"-"`
 }
 
 type Notification struct {
@@ -49,7 +57,8 @@ type Notification struct {
 }
 
 type ServerConfigPayload struct {
-	URL string `json:"url" msgpack:"url"`
+	URL    string `json:"url" msgpack:"url"`
+	Import bool   `json:"import" msgpack:"import"`
 }
 
 func (n *Notification) String() string {
@@ -135,6 +144,17 @@ func (c *NotificationConsumer) CallSendLogs() {
 	}
 }
 
+func (c *NotificationConsumer) configure(config ServerConfigPayload) {
+	response := c.handler.Configure(&config)
+	if err := c.publishResponse(response.SessionID, "configure", []byte(util.JSONStringify(response))); err != nil {
+		c.logger.Error("failed to send configure response: %s", err)
+	} else if response.LogPath != "" {
+		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: response.LogPath, SessionId: response.SessionID}); err != nil {
+			c.logger.Error("failed to publish send logs response during configure: %s", err)
+		}
+	}
+}
+
 func (c *NotificationConsumer) callback(m *nats.Msg) {
 	var notification Notification
 	if err := util.DecodeNatsMsg(m, &notification); err != nil {
@@ -188,7 +208,10 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		if v, ok := notification.Data["url"].(string); ok {
 			config.URL = v
 		}
-		c.handler.Configure(&config)
+		if v, ok := notification.Data["import"].(string); ok {
+			config.Import = v == "true"
+		}
+		c.configure(config)
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

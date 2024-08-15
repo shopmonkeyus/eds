@@ -156,7 +156,7 @@ func getCloudProvider(u *url.URL) s3Provider {
 	return awsProvider
 }
 
-func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string) error {
+func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string, testonly bool) error {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return fmt.Errorf("unable to parse url: %w", err)
@@ -245,6 +245,10 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 		}
 	}
 
+	if testonly {
+		return nil
+	}
+
 	maxBatchSize := 1_000 // maximum number of events to batch
 	uploadTasks := 4      // number of concurrent upload tasks
 
@@ -307,7 +311,7 @@ func (p *s3Driver) run() {
 func (p *s3Driver) Start(pc internal.DriverConfig) error {
 	p.config = pc
 	p.logger = pc.Logger.WithPrefix("[s3]")
-	if err := p.connect(pc.Context, p.logger, pc.URL); err != nil {
+	if err := p.connect(pc.Context, p.logger, pc.URL, false); err != nil {
 		return err
 	}
 	return nil
@@ -318,7 +322,9 @@ func (p *s3Driver) Stop() error {
 	p.cancel()
 	p.logger.Debug("stopping s3 driver")
 	p.jobWaitGroup.Wait()
-	close(p.ch)
+	if p.ch != nil {
+		close(p.ch)
+	}
 	p.waitGroup.Wait()
 	p.logger.Debug("stopped s3 driver")
 	return nil
@@ -415,9 +421,12 @@ func (p *s3Driver) ImportCompleted() error {
 }
 
 func (p *s3Driver) Import(config internal.ImporterConfig) error {
+	if config.SchemaOnly {
+		return nil
+	}
 	p.logger = config.Logger.WithPrefix("[s3]")
 	p.importConfig = config
-	if err := p.connect(config.Context, p.logger, config.URL); err != nil {
+	if err := p.connect(config.Context, p.logger, config.URL, false); err != nil {
 		return err
 	}
 	return importer.Run(p.logger, config, p)
@@ -426,6 +435,14 @@ func (p *s3Driver) Import(config internal.ImporterConfig) error {
 // SupportsDelete returns true if the importer supports deleting data.
 func (p *s3Driver) SupportsDelete() bool {
 	return false
+}
+
+// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
+func (p *s3Driver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	if err := p.connect(ctx, logger, url, true); err != nil {
+		return err
+	}
+	return nil
 }
 
 func init() {
