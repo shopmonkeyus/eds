@@ -566,7 +566,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("error creating jetstream connection: %w", err)
 	}
 
-	consumer.logger.Info("using info from credentials, server: %s companies: %s, session %s", info.serverID, info.companyIDs, info.sessionID)
+	consumer.logger.Info("using info from credentials, server: %s companies: %s, session: %s", info.serverID, info.companyIDs, info.sessionID)
 
 	var suffix string
 	if config.Suffix != "" {

@@ -538,6 +538,9 @@ var serverCmd = &cobra.Command{
 			return
 		}
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		apiurl := mustFlagString(cmd, "api-url", false)
 		driverURL := viper.GetString("url")
 		server := mustFlagString(cmd, "server", false)
@@ -545,8 +548,9 @@ var serverCmd = &cobra.Command{
 		dataDir := getDataDir(cmd, logger)
 		apikey := viper.GetString("token")
 		keepLogs := viper.GetBool("keep_logs")
+		verbose := mustFlagBool(cmd, "verbose", false)
 		logger.Trace("using parameter api token %s", cstr.Mask(apikey))
-		logger.Info("using parameter server id: %s", edsServerId)
+		logger.Info("server id: %s", edsServerId)
 
 		apiurl = strings.TrimSuffix(apiurl, "/") // remove trailing slash
 
@@ -715,47 +719,39 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		configured := driverURL != ""
-		configureChannel := make(chan bool, 1)
-		configure := func(config *notification.ServerConfigPayload) *notification.ConfigureResponse {
-			logger.Trace("received driver configuration. url: %s, import: %v", cstr.Mask(config.URL), config.Import)
-			importargs := []string{"--url", config.URL, "--api-key", apikey, "--verbose", "--no-confirm"}
-			if !config.Import {
+		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool) (bool, bool, *string, *string) {
+			importargs := []string{"--url", url, "--api-key", apikey, fmt.Sprintf("--verbose=%v", verbose), "--no-confirm"}
+			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
 			}
-			logger.Info("configuring the driver, one moment please...")
+			if validateOnly {
+				importargs = append(importargs, "--validate-only")
+			}
+			if validateOnly {
+				logger.Info("configuring the driver, one moment please...")
+			} else {
+				logger.Info("running an import, one moment please...")
+			}
 			result, err := command.Fork(command.ForkArgs{
+				Context:          ctx,
 				Log:              logger,
 				Command:          "import",
 				Args:             importargs,
 				LogFilenameLabel: "import",
 				SaveLogs:         true,
 				ForwardInterrupt: true,
+				WriteToStd:       true,
 				Dir:              sessionDir,
 			})
 			if err != nil && result == nil {
 				s := "Error importing data. Please contact support for assistance."
-				return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: false, Message: &s}
+				return true, false, &s, nil
 			} else {
 				ec := result.ProcessState.ExitCode()
 				logger.Debug("import exit code: %d, last log line: %s", ec, result.LastErrorLines)
 				switch ec {
 				case 0:
-					viper.Set("url", config.URL)
-					if err := viper.WriteConfig(); err != nil {
-						logger.Error("failed to write config: %s", err)
-						errmsg := err.Error()
-						return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: false, Message: &errmsg}
-					}
-					driverURL = config.URL
-					if !configured {
-						logger.Trace("driver configured")
-						configureChannel <- true
-					} else {
-						// restart the server
-						restart()
-					}
-					return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: true}
+					return true, true, nil, nil
 				case 3:
 					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
 					var msg string
@@ -764,7 +760,7 @@ var serverCmd = &cobra.Command{
 					} else {
 						msg = strings.TrimSpace(result.LastErrorLines)
 					}
-					return &notification.ConfigureResponse{SessionID: sessionId, Success: false, Validated: false, Message: &msg} // this means the url is invalid
+					return false, false, &msg, nil // this means the url is invalid
 				default:
 					var uploadLogPath string
 					uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
@@ -788,9 +784,39 @@ var serverCmd = &cobra.Command{
 						}
 					}
 					s := "Error importing data. See the error logs for more details or contact support for further assistance."
-					return &notification.ConfigureResponse{SessionID: sessionId, Success: true, Validated: false, Message: &s, LogPath: uploadLogPath}
+					return true, false, &s, &uploadLogPath
 				}
 			}
+		}
+
+		configured := driverURL != ""
+		configureChannel := make(chan bool, 1)
+		configure := func(config *notification.ServerConfigPayload) *notification.ConfigureResponse {
+			logger.Trace("received driver configuration. url: %s", cstr.Mask(config.URL))
+			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true)
+			if success && validated {
+				viper.Set("url", config.URL)
+				if err := viper.WriteConfig(); err != nil {
+					logger.Error("failed to write config: %s", err)
+				}
+				driverURL = config.URL
+				if !configured {
+					logger.Trace("driver configured")
+					configureChannel <- true
+				} else {
+					// restart the server
+					restart()
+				}
+			}
+			return &notification.ConfigureResponse{SessionID: sessionId, Success: validated, Message: msg, LogPath: uploadLogPath}
+		}
+
+		importaction := func() *notification.ImportResponse {
+			logger.Trace("received import action")
+			pause() // pause the consumer from processing any data while we are importing
+			success, _, msg, uploadLogPath := runImport(ctx, driverURL, false, false)
+			restart() // once we have finished the import, restart the server to pick up the new timestamps, etc
+			return &notification.ImportResponse{SessionID: sessionId, Success: success, Message: msg, LogPath: uploadLogPath}
 		}
 
 		natsurl := mustFlagString(cmd, "server", true)
@@ -808,6 +834,7 @@ var serverCmd = &cobra.Command{
 			Upgrade:   upgrade,
 			SendLogs:  sendLogs,
 			Configure: configure,
+			Import:    importaction,
 		})
 
 		// setup tickers
@@ -864,7 +891,10 @@ var serverCmd = &cobra.Command{
 				select {
 				case <-configureChannel:
 					configured = true
+				case <-ctx.Done():
+					return
 				case <-sys.CreateShutdownChannel():
+					cancel()
 					return
 				}
 			}
