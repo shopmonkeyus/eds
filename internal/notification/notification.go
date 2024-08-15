@@ -2,6 +2,7 @@ package notification
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -34,8 +35,11 @@ type NotificationHandler struct {
 	// SendLogs action is called to send logs to the server, should return the storage path.
 	SendLogs func() *SendLogsResponse
 
-	// Configure action is called to configure the server with a driver
+	// Configure action is called to configure the server with a driver.
 	Configure func(config *ServerConfigPayload) *ConfigureResponse
+
+	// Import action is called to import data using the driver.
+	Import func() *ImportResponse
 }
 
 type SendLogsResponse struct {
@@ -48,7 +52,14 @@ type ConfigureResponse struct {
 	Message   *string `json:"message,omitempty"`
 	Validated bool    `json:"validated"` // if the driver url was valid, but the import failed
 	SessionID string  `json:"-" msgpack:"-"`
-	LogPath   string  `json:"-" msgpack:"-"`
+	LogPath   *string `json:"-" msgpack:"-"`
+}
+
+type ImportResponse struct {
+	Success   bool    `json:"success"`
+	Message   *string `json:"message,omitempty"`
+	SessionID string  `json:"-" msgpack:"-"`
+	LogPath   *string `json:"-" msgpack:"-"`
 }
 
 type Notification struct {
@@ -71,6 +82,7 @@ type NotificationConsumer struct {
 	logger  logger.Logger
 	natsurl string
 	handler NotificationHandler
+	wg      sync.WaitGroup
 }
 
 // New will create a new NotificationConsumer.
@@ -100,6 +112,7 @@ func (c *NotificationConsumer) Start(sessionId string, credsFile string) error {
 
 // Stop will stop the consumer.
 func (c *NotificationConsumer) Stop() {
+	c.wg.Wait()
 	if c.sub != nil {
 		if err := c.sub.Unsubscribe(); err != nil {
 			c.logger.Error("failed to unsubscribe from nats: %s", err)
@@ -148,14 +161,33 @@ func (c *NotificationConsumer) configure(config ServerConfigPayload) {
 	response := c.handler.Configure(&config)
 	if err := c.publishResponse(response.SessionID, "configure", []byte(util.JSONStringify(response))); err != nil {
 		c.logger.Error("failed to send configure response: %s", err)
-	} else if response.LogPath != "" {
-		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: response.LogPath, SessionId: response.SessionID}); err != nil {
+	} else if response.LogPath != nil {
+		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionId: response.SessionID}); err != nil {
 			c.logger.Error("failed to publish send logs response during configure: %s", err)
 		}
 	}
 }
 
+func (c *NotificationConsumer) importaction() {
+	c.wg.Add(1)
+	// NOTE: we're going to run this on a background goroutine so we can return the response immediately and allow
+	// other commands (like restart) to be processed while the import is running since the import could take a long time.
+	go func() {
+		defer c.wg.Done()
+		response := c.handler.Import()
+		if err := c.publishResponse(response.SessionID, "import", []byte(util.JSONStringify(response))); err != nil {
+			c.logger.Error("failed to send import response: %s", err)
+		} else if response.LogPath != nil {
+			if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionId: response.SessionID}); err != nil {
+				c.logger.Error("failed to publish send logs response during import: %s", err)
+			}
+		}
+	}()
+}
+
 func (c *NotificationConsumer) callback(m *nats.Msg) {
+	c.wg.Add(1)
+	defer c.wg.Done()
 	var notification Notification
 	if err := util.DecodeNatsMsg(m, &notification); err != nil {
 		c.logger.Error("failed to decode notification message: %s", err)
@@ -212,6 +244,8 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 			config.Import = v == "true"
 		}
 		c.configure(config)
+	case "import":
+		c.importaction()
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

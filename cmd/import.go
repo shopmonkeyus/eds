@@ -371,6 +371,7 @@ var importCmd = &cobra.Command{
 		single, _ := cmd.Flags().GetBool("single")
 		dir := mustFlagString(cmd, "dir", false)
 		schemaOnly := mustFlagBool(cmd, "schema-only", false)
+		validateOnly := mustFlagBool(cmd, "validate-only", false)
 
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[import]")
@@ -440,6 +441,10 @@ var importCmd = &cobra.Command{
 		timedCancel()
 		logger.Debug("driver test successful")
 		// NOTE: we don't stop the driver here since we need it for the importer
+
+		if validateOnly {
+			os.Exit(0)
+		}
 
 		// save the new schema file
 		if err := registry.Save(schemaFile); err != nil {
@@ -665,6 +670,7 @@ func init() {
 	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
 	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
 	importCmd.Flags().Bool("schema-only", false, "run the schema creation only, skipping the data import")
+	importCmd.Flags().Bool("validate-only", false, "run the validation only, skipping the data import")
 
 	// tuning and testing flags
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks (if supported by driver)")
