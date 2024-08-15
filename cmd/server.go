@@ -807,7 +807,7 @@ var serverCmd = &cobra.Command{
 					restart()
 				}
 			}
-			return &notification.ConfigureResponse{SessionID: sessionId, Success: success, Validated: validated, Message: msg, LogPath: uploadLogPath}
+			return &notification.ConfigureResponse{SessionID: sessionId, Success: validated, Message: msg, LogPath: uploadLogPath}
 		}
 
 		importaction := func() *notification.ImportResponse {

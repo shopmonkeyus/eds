@@ -50,7 +50,6 @@ type SendLogsResponse struct {
 type ConfigureResponse struct {
 	Success   bool    `json:"success"`
 	Message   *string `json:"message,omitempty"`
-	Validated bool    `json:"validated"` // if the driver url was valid, but the import failed
 	SessionID string  `json:"-" msgpack:"-"`
 	LogPath   *string `json:"-" msgpack:"-"`
 }
