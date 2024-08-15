@@ -110,7 +110,6 @@ func (c *NotificationConsumer) Start(sessionId string, credsFile string) error {
 
 // Stop will stop the consumer.
 func (c *NotificationConsumer) Stop() {
-	c.wg.Wait()
 	if c.sub != nil {
 		if err := c.sub.Unsubscribe(); err != nil {
 			c.logger.Error("failed to unsubscribe from nats: %s", err)
@@ -121,6 +120,7 @@ func (c *NotificationConsumer) Stop() {
 		c.nc.Close()
 		c.nc = nil
 	}
+	c.wg.Wait()
 }
 
 // Restart will stop the consumer and start it again.
