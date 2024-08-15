@@ -548,8 +548,9 @@ var serverCmd = &cobra.Command{
 		dataDir := getDataDir(cmd, logger)
 		apikey := viper.GetString("token")
 		keepLogs := viper.GetBool("keep_logs")
+		verbose := mustFlagBool(cmd, "verbose", false)
 		logger.Trace("using parameter api token %s", cstr.Mask(apikey))
-		logger.Info("using parameter server id: %s", edsServerId)
+		logger.Info("server id: %s", edsServerId)
 
 		apiurl = strings.TrimSuffix(apiurl, "/") // remove trailing slash
 
@@ -719,7 +720,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool) (bool, bool, *string, *string) {
-			importargs := []string{"--url", url, "--api-key", apikey, "--verbose", "--no-confirm"}
+			importargs := []string{"--url", url, "--api-key", apikey, fmt.Sprintf("--verbose=%v", verbose), "--no-confirm"}
 			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
 			}
