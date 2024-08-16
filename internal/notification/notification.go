@@ -192,6 +192,16 @@ func (c *NotificationConsumer) importaction(req *ImportRequest) {
 	}()
 }
 
+func getBool(val any) bool {
+	if v, ok := val.(bool); ok {
+		return v
+	}
+	if v, ok := val.(string); ok {
+		return v == "true"
+	}
+	return false
+}
+
 func (c *NotificationConsumer) callback(m *nats.Msg) {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -243,16 +253,15 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 	case "sendlogs":
 		c.CallSendLogs()
 	case "configure":
-		var config ConfigureRequest
+		var req ConfigureRequest
 		if v, ok := notification.Data["url"].(string); ok {
-			config.URL = v
+			req.URL = v
 		}
-		c.configure(config)
+		req.Backfill = getBool(notification.Data["backfill"])
+		c.configure(req)
 	case "import":
 		var req ImportRequest
-		if v, ok := notification.Data["backfill"].(string); ok {
-			req.Backfill = v == "true"
-		}
+		req.Backfill = getBool(notification.Data["backfill"])
 		c.importaction(&req)
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
