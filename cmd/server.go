@@ -715,7 +715,7 @@ var serverCmd = &cobra.Command{
 
 			return &notification.SendLogsResponse{
 				Path:      path,
-				SessionId: sessionId,
+				SessionID: sessionId,
 			}
 		}
 
@@ -791,31 +791,48 @@ var serverCmd = &cobra.Command{
 
 		configured := driverURL != ""
 		configureChannel := make(chan bool, 1)
-		configure := func(config *notification.ServerConfigPayload) *notification.ConfigureResponse {
+		configure := func(config *notification.ConfigureRequest) *notification.ConfigureResponse {
 			logger.Trace("received driver configuration. url: %s", cstr.Mask(config.URL))
 			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true)
+			var maskedURL *string
 			if success && validated {
 				viper.Set("url", config.URL)
 				if err := viper.WriteConfig(); err != nil {
 					logger.Error("failed to write config: %s", err)
 				}
+				logger.Info("driver configured successfully, waiting for import action...")
 				driverURL = config.URL
-				if !configured {
-					logger.Trace("driver configured")
-					configureChannel <- true
+				if masked, err := util.MaskURL(config.URL); err != nil {
+					logger.Warn("could not mask URL, will not display in app: %s", err)
 				} else {
+					maskedURL = &masked
+				}
+				if !configured {
 					// restart the server
 					restart()
 				}
 			}
-			return &notification.ConfigureResponse{SessionID: sessionId, Success: validated, Message: msg, LogPath: uploadLogPath}
+
+			return &notification.ConfigureResponse{
+				SessionID: sessionId,
+				Success:   validated,
+				LogPath:   uploadLogPath,
+				MaskedURL: maskedURL,
+				Message:   msg,
+				Backfill:  config.Backfill,
+			}
 		}
 
-		importaction := func() *notification.ImportResponse {
+		importaction := func(req *notification.ImportRequest) *notification.ImportResponse {
 			logger.Trace("received import action")
-			pause() // pause the consumer from processing any data while we are importing
-			success, _, msg, uploadLogPath := runImport(ctx, driverURL, false, false)
-			restart() // once we have finished the import, restart the server to pick up the new timestamps, etc
+			pause() // pause the consumer, if any, from processing any data while we are importing
+			success, _, msg, uploadLogPath := runImport(ctx, driverURL, !req.Backfill, false)
+			if !configured {
+				logger.Trace("driver configured")
+				configureChannel <- true
+			} else {
+				restart() // once we have finished the import, restart the server to pick up the new timestamps, etc
+			}
 			return &notification.ImportResponse{SessionID: sessionId, Success: success, Message: msg, LogPath: uploadLogPath}
 		}
 
@@ -933,7 +950,7 @@ var serverCmd = &cobra.Command{
 					if err != nil {
 						logger.Error("failed to send end and upload logs: %s", err)
 					} else {
-						if err := notificationConsumer.PublishSendLogsResponse(&notification.SendLogsResponse{Path: logPath, SessionId: sessionId}); err != nil {
+						if err := notificationConsumer.PublishSendLogsResponse(&notification.SendLogsResponse{Path: logPath, SessionID: sessionId}); err != nil {
 							logger.Error("failed to publish send logs response: %s", err)
 						}
 					}
