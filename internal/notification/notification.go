@@ -36,38 +36,47 @@ type NotificationHandler struct {
 	SendLogs func() *SendLogsResponse
 
 	// Configure action is called to configure the server with a driver.
-	Configure func(config *ServerConfigPayload) *ConfigureResponse
+	Configure func(config *ConfigureRequest) *ConfigureResponse
 
 	// Import action is called to import data using the driver.
-	Import func() *ImportResponse
+	Import func(*ImportRequest) *ImportResponse
 }
 
 type SendLogsResponse struct {
-	Path      string `json:"path"`
-	SessionId string `json:"sessionId"`
+	Path      string `json:"path" msgpack:"path"`
+	SessionID string `json:"sessionId" msgpack:"sessionId"`
 }
 
-type ConfigureResponse struct {
-	Success   bool    `json:"success"`
-	Message   *string `json:"message,omitempty"`
-	SessionID string  `json:"-" msgpack:"-"`
-	LogPath   *string `json:"-" msgpack:"-"`
+type ImportRequest struct {
+	Backfill bool `json:"backfill" msgpack:"backfill"`
 }
 
 type ImportResponse struct {
-	Success   bool    `json:"success"`
-	Message   *string `json:"message,omitempty"`
-	SessionID string  `json:"-" msgpack:"-"`
+	Success   bool    `json:"success" msgpack:"success"`
+	Message   *string `json:"message,omitempty" msgpack:"message,omitempty"`
+	SessionID string  `json:"sessionId" msgpack:"sessionId"`
+	LogPath   *string `json:"-" msgpack:"-"`
+}
+
+type ConfigureRequest struct {
+	URL string `json:"url" msgpack:"url"`
+	// Backfill is a flag to indicate if the driver should backfill data.
+	// Configure does not perform a backfill, it is returned in the response so the next action can perform the backfill.
+	Backfill bool `json:"backfill" msgpack:"backfill"`
+}
+
+type ConfigureResponse struct {
+	Success   bool    `json:"success" msgpack:"success"`
+	Message   *string `json:"message,omitempty" msgpack:"message,omitempty"`
+	MaskedURL *string `json:"maskedURL,omitempty" msgpack:"maskedURL,omitempty"`
+	SessionID string  `json:"sessionId" msgpack:"sessionId"`
+	Backfill  bool    `json:"backfill" msgpack:"backfill"`
 	LogPath   *string `json:"-" msgpack:"-"`
 }
 
 type Notification struct {
 	Action string         `json:"action" msgpack:"action"`
 	Data   map[string]any `json:"data,omitempty" msgpack:"data,omitempty"`
-}
-
-type ServerConfigPayload struct {
-	URL string `json:"url" msgpack:"url"`
 }
 
 func (n *Notification) String() string {
@@ -141,7 +150,7 @@ func (c *NotificationConsumer) publishResponse(sessionId string, action string, 
 }
 
 func (c *NotificationConsumer) PublishSendLogsResponse(response *SendLogsResponse) error {
-	return c.publishResponse(response.SessionId, "sendlogs", []byte(util.JSONStringify(response)))
+	return c.publishResponse(response.SessionID, "sendlogs", []byte(util.JSONStringify(response)))
 }
 
 func (c *NotificationConsumer) CallSendLogs() {
@@ -155,32 +164,42 @@ func (c *NotificationConsumer) CallSendLogs() {
 	}
 }
 
-func (c *NotificationConsumer) configure(config ServerConfigPayload) {
+func (c *NotificationConsumer) configure(config ConfigureRequest) {
 	response := c.handler.Configure(&config)
 	if err := c.publishResponse(response.SessionID, "configure", []byte(util.JSONStringify(response))); err != nil {
 		c.logger.Error("failed to send configure response: %s", err)
 	} else if response.LogPath != nil {
-		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionId: response.SessionID}); err != nil {
+		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
 			c.logger.Error("failed to publish send logs response during configure: %s", err)
 		}
 	}
 }
 
-func (c *NotificationConsumer) importaction() {
+func (c *NotificationConsumer) importaction(req *ImportRequest) {
 	c.wg.Add(1)
 	// NOTE: we're going to run this on a background goroutine so we can return the response immediately and allow
 	// other commands (like restart) to be processed while the import is running since the import could take a long time.
 	go func() {
 		defer c.wg.Done()
-		response := c.handler.Import()
+		response := c.handler.Import(req)
 		if err := c.publishResponse(response.SessionID, "import", []byte(util.JSONStringify(response))); err != nil {
 			c.logger.Error("failed to send import response: %s", err)
 		} else if response.LogPath != nil {
-			if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionId: response.SessionID}); err != nil {
+			if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
 				c.logger.Error("failed to publish send logs response during import: %s", err)
 			}
 		}
 	}()
+}
+
+func getBool(val any) bool {
+	if v, ok := val.(bool); ok {
+		return v
+	}
+	if v, ok := val.(string); ok {
+		return v == "true"
+	}
+	return false
 }
 
 func (c *NotificationConsumer) callback(m *nats.Msg) {
@@ -234,13 +253,16 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 	case "sendlogs":
 		c.CallSendLogs()
 	case "configure":
-		var config ServerConfigPayload
+		var req ConfigureRequest
 		if v, ok := notification.Data["url"].(string); ok {
-			config.URL = v
+			req.URL = v
 		}
-		c.configure(config)
+		req.Backfill = getBool(notification.Data["backfill"])
+		c.configure(req)
 	case "import":
-		c.importaction()
+		var req ImportRequest
+		req.Backfill = getBool(notification.Data["backfill"])
+		c.importaction(&req)
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}
