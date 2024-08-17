@@ -30,7 +30,7 @@ type NotificationHandler struct {
 	Unpause func()
 
 	// Upgrade action is called to upgrade the server version.
-	Upgrade func(version string, url string)
+	Upgrade func(version string) UpgradeResponse
 
 	// SendLogs action is called to send logs to the server, should return the storage path.
 	SendLogs func() *SendLogsResponse
@@ -56,6 +56,14 @@ type ImportResponse struct {
 	Message   *string `json:"message,omitempty" msgpack:"message,omitempty"`
 	SessionID string  `json:"sessionId" msgpack:"sessionId"`
 	LogPath   *string `json:"-" msgpack:"-"`
+}
+
+type UpgradeResponse struct {
+	Success   bool    `json:"success" msgpack:"success"`
+	Message   string  `json:"message,omitempty" msgpack:"message,omitempty"`
+	SessionID string  `json:"sessionId" msgpack:"sessionId"`
+	LogPath   *string `json:"-" msgpack:"-"`
+	Version   string  `json:"version" msgpack:"version"`
 }
 
 type ConfigureRequest struct {
@@ -175,6 +183,17 @@ func (c *NotificationConsumer) configure(config ConfigureRequest) {
 	}
 }
 
+func (c *NotificationConsumer) upgrade(version string) {
+	response := c.handler.Upgrade(version)
+	if err := c.publishResponse(response.SessionID, "upgrade", []byte(util.JSONStringify(response))); err != nil {
+		c.logger.Error("failed to send upgrade response: %s", err)
+	} else if response.LogPath != nil {
+		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
+			c.logger.Error("failed to publish send logs response during upgrade: %s", err)
+		}
+	}
+}
+
 func (c *NotificationConsumer) importaction(req *ImportRequest) {
 	c.wg.Add(1)
 	// NOTE: we're going to run this on a background goroutine so we can return the response immediately and allow
@@ -236,20 +255,14 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 	case "unpause":
 		c.handler.Unpause()
 	case "upgrade":
-		var url, version string
-		if v, ok := notification.Data["url"].(string); ok {
-			url = v
-		} else {
-			c.logger.Warn("invalid upgrade notification. missing url for: %s", notification.String())
-			return
-		}
+		var version string
 		if v, ok := notification.Data["version"].(string); ok {
 			version = v
 		} else {
 			c.logger.Warn("invalid upgrade notification. missing version for: %s", notification.String())
 			return
 		}
-		c.handler.Upgrade(version, url)
+		c.upgrade(version)
 	case "sendlogs":
 		c.CallSendLogs()
 	case "configure":

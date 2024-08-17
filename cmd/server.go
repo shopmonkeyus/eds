@@ -21,6 +21,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/notification"
+	"github.com/shopmonkeyus/eds-server/internal/upgrade"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -403,37 +404,10 @@ func runWrapperLoop(logger logger.Logger) {
 	}
 	httphandler.HandleFunc("/restart", func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("received restart request")
-		buf, err := io.ReadAll(r.Body)
-		if err != nil {
-			logger.Error("failed to read body: %s", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		r.Body.Close()
 		inUpgrade = true
-		tok := strings.Split(string(buf), ",") // format is: version,command
-		newVersion := tok[0]
-		newCmd := tok[1]
-		logger.Trace("received restart cmd: %s with expected version: %s", newCmd, newVersion)
 		// NOTE: we do this is a separate goroutine so we can respond to the request w/o blocking
 		// since we will need to shutdown the child process
 		go func() {
-			defer util.RecoverPanic(logger)
-			var output bytes.Buffer
-			cmd := exec.Command(newCmd, "version")
-			cmd.Stdout = &output
-			if err := cmd.Run(); err != nil {
-				logger.Error("failed to run new command: %s", err)
-			} else {
-				if newVersion != strings.TrimSpace(output.String()) {
-					logger.Error("new version does not match: %s != %s, not upgrading", newVersion, output.String())
-				} else {
-					logger.Debug("new version matches: %s", newVersion)
-					logger.Debug("swapping out old process: %s with new process: %s", parentProcess, newCmd)
-					parentProcess = newCmd
-				}
-			}
-			// TODO: in all failure cases we need to send back some kind of error response to our API
 			restart <- true
 		}()
 		w.WriteHeader(http.StatusAccepted)
@@ -452,13 +426,13 @@ func runWrapperLoop(logger logger.Logger) {
 
 	shutdownHTTP := func() {
 		defer util.RecoverPanic(logger)
-		logger.Info("initiating HTTP server shutdown")
+		logger.Debug("initiating HTTP server shutdown")
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancelShutdown()
 		if err := httpsrv.Shutdown(shutdownCtx); err != nil {
 			logger.Error("HTTP server shutdown error: %s", err)
 		}
-		logger.Info("HTTP server successfully shutdown")
+		logger.Debug("HTTP server successfully shutdown")
 	}
 
 	var failures int
@@ -478,7 +452,7 @@ func runWrapperLoop(logger logger.Logger) {
 			defer util.RecoverPanic(logger)
 			defer waitGroup.Done()
 			if err := cmd.Wait(); err != nil {
-				logger.Error("wrapper process exited: %s", err)
+				logger.Debug("wrapper process exited: %s", err)
 			}
 			exitCode = cmd.ProcessState.ExitCode()
 			logger.Trace("wrapper process exited with exit code: %d", exitCode)
@@ -527,30 +501,34 @@ var serverCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := newLogger(cmd)
-
 		logger = logger.WithPrefix("[server]")
-
 		defer util.RecoverPanic(logger)
 
+		// NOTE: do these before bothering with the wrapper since they are required to run
+		edsServerId := viper.GetString("server_id")
+		if edsServerId == "" {
+			logger.Fatal("Server ID not found. Make sure you run %s before continuing.", getCommandExample("enroll", "[CODE]"))
+		}
+		dataDir := getDataDir(cmd, logger)
+		apiurl := mustFlagString(cmd, "api-url", false)
+		driverURL := viper.GetString("url")
+		server := mustFlagString(cmd, "server", false)
+		apikey := viper.GetString("token")
+		keepLogs := viper.GetBool("keep_logs")
+		verbose := mustFlagBool(cmd, "verbose", false)
+
+		// run the wrapper to handle the rest of the code from inside the wrapper
 		wrapper := mustFlagBool(cmd, "wrapper", false)
 		if !wrapper {
 			runWrapperLoop(logger)
 			return
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		apiurl := mustFlagString(cmd, "api-url", false)
-		driverURL := viper.GetString("url")
-		server := mustFlagString(cmd, "server", false)
-		edsServerId := viper.GetString("server_id")
-		dataDir := getDataDir(cmd, logger)
-		apikey := viper.GetString("token")
-		keepLogs := viper.GetBool("keep_logs")
-		verbose := mustFlagBool(cmd, "verbose", false)
 		logger.Trace("using parameter api token %s", cstr.Mask(apikey))
 		logger.Info("server id: %s", edsServerId)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		apiurl = strings.TrimSuffix(apiurl, "/") // remove trailing slash
 
@@ -592,28 +570,34 @@ var serverCmd = &cobra.Command{
 		_args = append(_args, "--api-url", apiurl)
 
 		var sessionId string
+		configured := driverURL != ""
+		configureChannel := make(chan bool, 1)
 
 		processCallback := func(p *os.Process) {
 			logger.Debug("fork process started with pid: %d", p.Pid)
 		}
 
 		restart := func() {
-			logger.Info("need to restart")
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", port))
-			if err != nil {
-				logger.Error("restart failed: %s", err)
-			} else {
-				logger.Debug("restart response: %d", resp.StatusCode)
+			if configured {
+				logger.Info("need to restart")
+				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", port))
+				if err != nil {
+					logger.Error("restart failed: %s", err)
+				} else {
+					logger.Debug("restart response: %d", resp.StatusCode)
+				}
 			}
 		}
 
 		shutdown := func(msg string) {
-			logger.Info("shutdown requested: %s", msg)
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", port))
-			if err != nil {
-				logger.Fatal("shutdown failed: %s", err)
-			} else {
-				logger.Debug("shutdown response: %d", resp.StatusCode)
+			if configured {
+				logger.Info("shutdown requested: %s", msg)
+				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", port))
+				if err != nil {
+					logger.Fatal("shutdown failed: %s", err)
+				} else {
+					logger.Debug("shutdown response: %d", resp.StatusCode)
+				}
 			}
 		}
 
@@ -633,39 +617,106 @@ var serverCmd = &cobra.Command{
 		}
 
 		pause := func() {
-			logger.Info("server pause requested")
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/pause", port))
-			if err != nil {
-				logger.Error("pause failed: %s", err)
-			} else {
-				logger.Debug("pause response: %d", resp.StatusCode)
+			if configured {
+				logger.Info("server pause requested")
+				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/pause", port))
+				if err != nil {
+					logger.Error("pause failed: %s", err)
+				} else {
+					logger.Debug("pause response: %d", resp.StatusCode)
+				}
 			}
 		}
 
 		unpause := func() {
-			logger.Info("server unpause requested")
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/unpause", port))
-			if err != nil {
-				logger.Error("unpause failed: %s", err)
-			} else {
-				logger.Debug("unpause response: %d", resp.StatusCode)
+			if configured {
+				logger.Info("server unpause requested")
+				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/unpause", port))
+				if err != nil {
+					logger.Error("unpause failed: %s", err)
+				} else {
+					logger.Debug("unpause response: %d", resp.StatusCode)
+				}
 			}
 		}
 
-		upgrade := func(version string, url string) {
-			logger.Info("server upgrade requested to version: %s from url: %s", version, url)
+		upgrade := func(version string) notification.UpgradeResponse {
+			logger.Info("server upgrade requested to version: %s", version)
 			pause()
-			// TODO - run the upgrade and when completed and ready, exit with special exit code for force a restart
-			// to the new binary
-			var body bytes.Buffer
-			body.WriteString(version)
-			body.WriteString(",")
-			body.WriteString(os.Args[0]) /// FIXME: change this to the new binary
-			resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/restart", parentPort), "text/plain", &body)
+			fn := filepath.Join(dataDir, "eds-server-"+version)
+			c := exec.Command(os.Args[0], "download", version, fn, fmt.Sprintf("--verbose=%v", verbose))
+			c.Stdout = os.Stdout
+			c.Stderr = os.Stderr
+			if err := c.Run(); err != nil {
+				logger.Error("upgrade failed: %s", err)
+				unpause()
+				return notification.UpgradeResponse{
+					Success:   false,
+					Message:   fmt.Sprintf("failed to download version %s: %s", version, err),
+					SessionID: sessionId,
+					Version:   version,
+				}
+			}
+			c = exec.Command(fn, "version")
+			var out strings.Builder
+			c.Stdout = &out
+			c.Stderr = os.Stderr
+			if err := c.Run(); err != nil {
+				logger.Error("upgrade failed checking version: %s", err)
+				unpause()
+				return notification.UpgradeResponse{
+					Success:   false,
+					Message:   fmt.Sprintf("upgrade failed checking version: %s", err),
+					SessionID: sessionId,
+					Version:   version,
+				}
+			}
+			newversion := strings.TrimSpace(out.String())
+			if newversion != version {
+				logger.Error("upgrade failed checking version: %s, was: %s", version, newversion)
+				unpause()
+				return notification.UpgradeResponse{
+					Success:   false,
+					Message:   fmt.Sprintf("upgrade failed checking version: %s, was: %s", version, newversion),
+					SessionID: sessionId,
+					Version:   version,
+				}
+			}
+
+			exec := getExecutable() // current running executable path
+
+			if err := upgrade.Apply(exec, fn); err != nil {
+				if rerr := upgrade.RollbackError(err); rerr != nil {
+					logger.Fatal("failed to apply upgrade: %s", rerr)
+				} else {
+					logger.Error("failed to apply upgrade: %s", err)
+					unpause()
+					return notification.UpgradeResponse{
+						Success:   false,
+						Message:   fmt.Sprintf("failed to rename old binary: %s", err),
+						SessionID: sessionId,
+						Version:   version,
+					}
+				}
+			}
+
+			// if we get here our new binary is in place and we can restart
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/restart", parentPort))
 			if err != nil {
-				logger.Error("restart failed: %s", err)
+				logger.Fatal("restart failed: %s", err)
+				return notification.UpgradeResponse{
+					Success:   false,
+					Message:   fmt.Sprintf("upgrade failed. tried restarting: %s", err),
+					SessionID: sessionId,
+					Version:   version,
+				}
 			} else {
 				logger.Debug("restart response: %d", resp.StatusCode)
+				return notification.UpgradeResponse{
+					Success:   true,
+					SessionID: sessionId,
+					Version:   version,
+				}
 			}
 		}
 
@@ -789,8 +840,6 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		configured := driverURL != ""
-		configureChannel := make(chan bool, 1)
 		configure := func(config *notification.ConfigureRequest) *notification.ConfigureResponse {
 			logger.Trace("received driver configuration. url: %s", cstr.Mask(config.URL))
 			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true)
