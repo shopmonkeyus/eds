@@ -289,7 +289,7 @@ func OptionalNumberField(name, description string, defval *int) DriverField {
 	}
 	return DriverField{
 		Name:        name,
-		Type:        DriverTypeString,
+		Type:        DriverTypeNumber,
 		Description: description,
 		Required:    false,
 		Default:     defstr,
