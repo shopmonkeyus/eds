@@ -452,8 +452,8 @@ func (p *s3Driver) Configuration() []internal.DriverField {
 		internal.RequiredStringField("Bucket", "The bucket name", nil),
 		internal.OptionalStringField("Prefix", "The prefix to prepend to the filename", nil),
 		internal.OptionalStringField("Region", "The AWS region to use", nil),
-		internal.OptionalStringField("Access Key ID", "The AWS AWS Key ID", nil),
-		internal.OptionalStringField("Secret Access Key", "The AWS Secret Access Key", nil),
+		internal.OptionalPasswordField("Access Key ID", "The AWS AWS Key ID", nil),
+		internal.OptionalPasswordField("Secret Access Key", "The AWS Secret Access Key", nil),
 		internal.OptionalStringField("Endpoint", "The Endpoint hostname to override if using an AWS compatible provider", nil),
 	}
 }

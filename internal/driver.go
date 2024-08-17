@@ -81,6 +81,7 @@ type DriverAlias interface {
 }
 
 type DriverType string
+type DriverFormat string
 
 const (
 	DriverTypeString  DriverType = "string"
@@ -88,13 +89,18 @@ const (
 	DriverTypeBoolean DriverType = "boolean"
 )
 
+const (
+	DriverFormatPassword DriverFormat = "password"
+)
+
 // DriverField is a field in the driver configuration.
 type DriverField struct {
-	Name        string     `json:"name"`
-	Type        DriverType `json:"type"`
-	Default     *string    `json:"default,omitempty"` // its a string for display purposes
-	Description string     `json:"description"`
-	Required    bool       `json:"required"`
+	Name        string       `json:"name"`
+	Type        DriverType   `json:"type"`
+	Format      DriverFormat `json:"format,omitempty"`
+	Default     *string      `json:"default,omitempty"` // its a string for display purposes
+	Description string       `json:"description"`
+	Required    bool         `json:"required"`
 }
 
 // DriverHelp is an interface that Drivers implement for controlling the help system.
@@ -298,6 +304,17 @@ func OptionalStringField(name, description string, defval *string) DriverField {
 	}
 }
 
+func OptionalPasswordField(name, description string, defval *string) DriverField {
+	return DriverField{
+		Name:        name,
+		Type:        DriverTypeString,
+		Format:      DriverFormatPassword,
+		Description: description,
+		Required:    false,
+		Default:     defval,
+	}
+}
+
 func OptionalNumberField(name, description string, defval *int) DriverField {
 	var defstr *string
 	if defval != nil {
@@ -401,7 +418,7 @@ func NewDatabaseConfiguration(defport int) []DriverField {
 	fields := []DriverField{
 		RequiredStringField("Database", "The database name to use", nil),
 		OptionalStringField("Username", "The username to database", nil),
-		OptionalStringField("Password", "The password to database", nil),
+		OptionalPasswordField("Password", "The password to database", nil),
 		RequiredStringField("Hostname", "The hostname or ip address to database", nil),
 	}
 	if defport > 0 {
