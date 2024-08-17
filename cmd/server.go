@@ -836,6 +836,14 @@ var serverCmd = &cobra.Command{
 			return &notification.ImportResponse{SessionID: sessionId, Success: success, Message: msg, LogPath: uploadLogPath}
 		}
 
+		driverconfig := func() *notification.DriverConfigResponse {
+			config := internal.GetDriverConfiguration()
+			return &notification.DriverConfigResponse{
+				SessionID: sessionId,
+				Drivers:   config,
+			}
+		}
+
 		natsurl := mustFlagString(cmd, "server", true)
 		if strings.Contains(apiurl, "localhost") {
 			natsurl = "nats://localhost:4222"
@@ -843,15 +851,16 @@ var serverCmd = &cobra.Command{
 
 		// create a notification consumer that will listen for notification actions and handle them here
 		notificationConsumer := notification.New(logger, natsurl, notification.NotificationHandler{
-			Restart:   restart,
-			Renew:     renew,
-			Shutdown:  shutdown,
-			Pause:     pause,
-			Unpause:   unpause,
-			Upgrade:   upgrade,
-			SendLogs:  sendLogs,
-			Configure: configure,
-			Import:    importaction,
+			Restart:      restart,
+			Renew:        renew,
+			Shutdown:     shutdown,
+			Pause:        pause,
+			Unpause:      unpause,
+			Upgrade:      upgrade,
+			SendLogs:     sendLogs,
+			Configure:    configure,
+			Import:       importaction,
+			DriverConfig: driverconfig,
 		})
 
 		// setup tickers

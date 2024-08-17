@@ -45,3 +45,40 @@ func TestDBConnectionString(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://localhost:15432?application_name=foo", val)
 }
+
+func TestValidate(t *testing.T) {
+	var driver postgresqlDriver
+	url, err := driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "postgres://hostname:5432/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Port":     1234,
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "postgres://hostname:1234/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Port":     1234,
+		"Username": "user",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "postgres://user:@hostname:1234/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Port":     1234,
+		"Username": "user",
+		"Password": "pass",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "postgres://user:pass@hostname:1234/db", url)
+}

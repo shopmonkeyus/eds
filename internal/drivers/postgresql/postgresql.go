@@ -248,7 +248,7 @@ func (p *postgresqlDriver) Description() string {
 
 // ExampleURL should return an example URL for configuring the driver.
 func (p *postgresqlDriver) ExampleURL() string {
-	return "postgres://localhost:26257/database"
+	return "postgres://localhost:5432/database"
 }
 
 // Help should return a detailed help documentation for the driver.
@@ -269,6 +269,16 @@ func (p *postgresqlDriver) Test(ctx context.Context, logger logger.Logger, url s
 		return err
 	}
 	return db.Close()
+}
+
+// Configuration returns the configuration fields for the driver.
+func (p *postgresqlDriver) Configuration() []internal.DriverField {
+	return internal.NewDatabaseConfiguration(5432)
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *postgresqlDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	return internal.URLFromDatabaseConfiguration("postgres", 5432, values), nil
 }
 
 func init() {

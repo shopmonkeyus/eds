@@ -233,6 +233,23 @@ func (p *kafkaDriver) Test(ctx context.Context, logger logger.Logger, url string
 	return p.writer.Close()
 }
 
+// Configuration returns the configuration fields for the driver.
+func (p *kafkaDriver) Configuration() []internal.DriverField {
+	return []internal.DriverField{
+		internal.RequiredStringField("Hostname", "The hostname or ip address to the kafka broker", nil),
+		internal.OptionalNumberField("Port", "The port to connect to the kafka broker", internal.IntPointer(9092)),
+		internal.RequiredStringField("Topic", "The kafka topic to stream data", nil),
+	}
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *kafkaDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	hostname := internal.GetRequiredStringValue("Hostname", values)
+	port := internal.GetOptionalIntValue("Port", 9092, values)
+	topic := internal.GetRequiredStringValue("Topic", values)
+	return fmt.Sprintf("kafka://%s:%d/%s", hostname, port, topic), nil
+}
+
 func init() {
 	internal.RegisterDriver("kafka", &kafkaDriver{})
 	internal.RegisterImporter("kafka", &kafkaDriver{})

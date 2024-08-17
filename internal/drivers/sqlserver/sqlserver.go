@@ -219,7 +219,7 @@ func (p *sqlserverDriver) Description() string {
 
 // ExampleURL should return an example URL for configuring the driver.
 func (p *sqlserverDriver) ExampleURL() string {
-	return "sqlserver://user:password@localhost:11433/database"
+	return "sqlserver://user:password@localhost:1433/database"
 }
 
 // Help should return a detailed help documentation for the driver.
@@ -236,6 +236,16 @@ func (p *sqlserverDriver) Test(ctx context.Context, logger logger.Logger, url st
 		return err
 	}
 	return db.Close()
+}
+
+// Configuration returns the configuration fields for the driver.
+func (p *sqlserverDriver) Configuration() []internal.DriverField {
+	return internal.NewDatabaseConfiguration(1433)
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *sqlserverDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	return internal.URLFromDatabaseConfiguration("sqlserver", 1433, values), nil
 }
 
 func init() {

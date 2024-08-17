@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+	"github.com/shopmonkeyus/eds-server/internal"
 	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -40,6 +41,9 @@ type NotificationHandler struct {
 
 	// Import action is called to import data using the driver.
 	Import func(*ImportRequest) *ImportResponse
+
+	// DriverConfig action is called to get the driver configurations.
+	DriverConfig func() *DriverConfigResponse
 }
 
 type SendLogsResponse struct {
@@ -72,6 +76,11 @@ type ConfigureResponse struct {
 	SessionID string  `json:"sessionId" msgpack:"sessionId"`
 	Backfill  bool    `json:"backfill" msgpack:"backfill"`
 	LogPath   *string `json:"-" msgpack:"-"`
+}
+
+type DriverConfigResponse struct {
+	Drivers   map[string]internal.DriverConfigurator `json:"drivers"`
+	SessionID string                                 `json:"sessionId" msgpack:"sessionId"`
 }
 
 type Notification struct {
@@ -192,6 +201,13 @@ func (c *NotificationConsumer) importaction(req *ImportRequest) {
 	}()
 }
 
+func (c *NotificationConsumer) driverconfig(m *nats.Msg) {
+	response := c.handler.DriverConfig()
+	if err := m.Respond([]byte(util.JSONStringify(response))); err != nil {
+		c.logger.Error("failed to send driverconfig response: %s", err)
+	}
+}
+
 func getBool(val any) bool {
 	if v, ok := val.(bool); ok {
 		return v
@@ -263,6 +279,8 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		var req ImportRequest
 		req.Backfill = getBool(notification.Data["backfill"])
 		c.importaction(&req)
+	case "driverconfig":
+		c.driverconfig(m)
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

@@ -174,6 +174,24 @@ func (p *fileDriver) Test(ctx context.Context, logger logger.Logger, url string)
 	return err
 }
 
+// Configuration returns the configuration fields for the driver.
+func (p *fileDriver) Configuration() []internal.DriverField {
+	return []internal.DriverField{
+		internal.RequiredStringField("Directory", "The directory on the server to store files", nil),
+	}
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *fileDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	dir := internal.GetRequiredStringValue("Directory", values)
+	if !util.Exists(dir) {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("unable to create directory: %s", err))}
+		}
+	}
+	return "file://" + filepath.ToSlash(dir), nil
+}
+
 func init() {
 	internal.RegisterDriver("file", &fileDriver{})
 	internal.RegisterImporter("file", &fileDriver{})
