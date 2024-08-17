@@ -12,11 +12,11 @@ import (
 
 var downloadCmd = &cobra.Command{
 	Use:   "download [version] [filename]",
-	Short: "Download and install the upgraded version",
+	Short: "Download a new version of the server from the GitHub releases page",
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := newLogger(cmd)
-		logger = logger.WithPrefix("[install]")
+		logger = logger.WithPrefix("[download]")
 		Host, err := host.Info()
 		if err != nil {
 			logger.Fatal("error getting host information: %s", err)
