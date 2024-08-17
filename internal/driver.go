@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/shopmonkeyus/eds-server/internal/tracker"
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -159,7 +160,7 @@ func GetDriverConfiguration() map[string]DriverConfigurator {
 			metadata.Name = help.Name()
 			metadata.Description = help.Description()
 			metadata.ExampleURL = help.ExampleURL()
-			metadata.Help = help.Help()
+			metadata.Help = ansi.Strip(help.Help())
 			metadata.SupportsImport = importerRegistry[scheme] != nil
 		}
 		res[scheme] = DriverConfigurator{
