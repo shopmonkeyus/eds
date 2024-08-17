@@ -44,6 +44,9 @@ type NotificationHandler struct {
 
 	// DriverConfig action is called to get the driver configurations.
 	DriverConfig func() *DriverConfigResponse
+
+	// Validate action is called to validate the driver configurations.
+	Validate func(driver string, values map[string]any) *ValidateResponse
 }
 
 type SendLogsResponse struct {
@@ -79,8 +82,16 @@ type ConfigureResponse struct {
 }
 
 type DriverConfigResponse struct {
-	Drivers   map[string]internal.DriverConfigurator `json:"drivers"`
+	Drivers   map[string]internal.DriverConfigurator `json:"drivers" msgpack:"drivers"`
 	SessionID string                                 `json:"sessionId" msgpack:"sessionId"`
+}
+
+type ValidateResponse struct {
+	Success     bool                  `json:"success" msgpack:"success"`
+	Message     string                `json:"messsage,omitempty" msgpack:"message,omitempty"`
+	FieldErrors []internal.FieldError `json:"field_errors,omitempty" msgpack:"field_errors,omitempty"`
+	SessionID   string                `json:"sessionId" msgpack:"sessionId"`
+	URL         string                `json:"url,omitempty" msgpack:"url,omitempty"`
 }
 
 type Notification struct {
@@ -208,6 +219,13 @@ func (c *NotificationConsumer) driverconfig(m *nats.Msg) {
 	}
 }
 
+func (c *NotificationConsumer) validate(driver string, vals map[string]any, m *nats.Msg) {
+	response := c.handler.Validate(driver, vals)
+	if err := m.Respond([]byte(util.JSONStringify(response))); err != nil {
+		c.logger.Error("failed to send validate response: %s", err)
+	}
+}
+
 func getBool(val any) bool {
 	if v, ok := val.(bool); ok {
 		return v
@@ -281,6 +299,22 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		c.importaction(&req)
 	case "driverconfig":
 		c.driverconfig(m)
+	case "validate":
+		var driver string
+		var config map[string]any
+		if v, ok := notification.Data["driver"].(string); ok {
+			driver = v
+		} else {
+			c.logger.Error("invalid validate notification. missing driver for: %s", notification.String())
+			return
+		}
+		if v, ok := notification.Data["config"].(map[string]any); ok {
+			config = v
+		} else {
+			c.logger.Error("invalid validate notification. missing config for: %s", notification.String())
+			return
+		}
+		c.validate(driver, config, m)
 	default:
 		c.logger.Warn("unknown action: %s", notification.Action)
 	}

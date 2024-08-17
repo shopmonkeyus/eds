@@ -844,6 +844,21 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
+		validate := func(driver string, values map[string]any) *notification.ValidateResponse {
+			url, fielderrs, err := internal.Validate(driver, values)
+			var msg string
+			if err != nil {
+				msg = err.Error()
+			}
+			return &notification.ValidateResponse{
+				Success:     err == nil && url != "",
+				SessionID:   sessionId,
+				FieldErrors: fielderrs,
+				URL:         url,
+				Message:     msg,
+			}
+		}
+
 		natsurl := mustFlagString(cmd, "server", true)
 		if strings.Contains(apiurl, "localhost") {
 			natsurl = "nats://localhost:4222"
@@ -861,6 +876,7 @@ var serverCmd = &cobra.Command{
 			Configure:    configure,
 			Import:       importaction,
 			DriverConfig: driverconfig,
+			Validate:     validate,
 		})
 
 		// setup tickers

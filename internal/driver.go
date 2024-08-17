@@ -261,6 +261,22 @@ func NewDriverForImport(ctx context.Context, logger logger.Logger, urlString str
 	return driver, nil
 }
 
+// Validate will validate a driver configuration and return the URL if the configuration is valid.
+func Validate(schema string, values map[string]any) (string, []FieldError, error) {
+	driver := driverRegistry[schema]
+	if driver == nil {
+		protocol := driverAliasRegistry[schema]
+		if protocol != "" {
+			driver = driverRegistry[protocol]
+		}
+		if driver == nil {
+			return "", nil, fmt.Errorf("no driver registered for protocol %s", schema)
+		}
+	}
+	url, errs := driver.Validate(values)
+	return url, errs, nil
+}
+
 func RequiredStringField(name, description string, defval *string) DriverField {
 	return DriverField{
 		Name:        name,
@@ -308,18 +324,18 @@ func IntPointer(val int) *int {
 }
 
 type FieldError struct {
-	Field   string `json:"field"`
-	Message error  `json:"error"`
+	Field   string `json:"field" msgpack:"field"`
+	Message string `json:"error" msgpack:"error"`
 }
 
 func (f FieldError) Error() string {
-	return f.Message.Error()
+	return f.Message
 }
 
 func NewFieldError(field, message string) FieldError {
 	return FieldError{
 		Field:   field,
-		Message: fmt.Errorf(message),
+		Message: message,
 	}
 }
 

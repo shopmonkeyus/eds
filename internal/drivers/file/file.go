@@ -184,12 +184,19 @@ func (p *fileDriver) Configuration() []internal.DriverField {
 // Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
 func (p *fileDriver) Validate(values map[string]any) (string, []internal.FieldError) {
 	dir := internal.GetRequiredStringValue("Directory", values)
-	if !util.Exists(dir) {
-		if err := os.MkdirAll(dir, 0700); err != nil {
+	if dir == "/" {
+		return "", []internal.FieldError{internal.NewFieldError("Directory", "cannot be the root directory")}
+	}
+	absdir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", []internal.FieldError{internal.NewFieldError("Directory", err.Error())}
+	}
+	if !util.Exists(absdir) {
+		if err := os.MkdirAll(absdir, 0700); err != nil {
 			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("unable to create directory: %s", err))}
 		}
 	}
-	return "file://" + filepath.ToSlash(dir), nil
+	return "file://" + filepath.ToSlash(absdir), nil
 }
 
 func init() {
