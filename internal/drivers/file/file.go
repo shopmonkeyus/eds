@@ -192,8 +192,21 @@ func (p *fileDriver) Validate(values map[string]any) (string, []internal.FieldEr
 		return "", []internal.FieldError{internal.NewFieldError("Directory", err.Error())}
 	}
 	if !util.Exists(absdir) {
-		if err := os.MkdirAll(absdir, 0700); err != nil {
-			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("unable to create directory: %s", err))}
+		parent := filepath.Dir(absdir)
+		ok, err := util.IsDirWritable(parent)
+		if err != nil {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("error checking for parent %s directory permission: %s", parent, err))}
+		}
+		if !ok {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("%s directory isn't writable and directory currently does not exist: %s", parent, err))}
+		}
+	} else {
+		ok, err := util.IsDirWritable(absdir)
+		if err != nil {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("error checking directory permission: %s", err))}
+		}
+		if !ok {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("%s directory isn't writable", absdir))}
 		}
 	}
 	return "file://" + filepath.ToSlash(absdir), nil
