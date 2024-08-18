@@ -642,3 +642,69 @@ func TestTableSkipOldEvents(t *testing.T) {
 		assert.NoError(t, consumer.Stop())
 	})
 }
+
+type mockValidator struct {
+	validator func(event internal.DBChangeEvent) (bool, bool, string, error)
+}
+
+func (v *mockValidator) Validate(event internal.DBChangeEvent) (bool, bool, string, error) {
+	if v.validator != nil {
+		return v.validator(event)
+	}
+	return false, false, "", nil
+}
+
+func TestTableSchemaValidator(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+		var testEvent *internal.DBChangeEvent
+
+		mockDriver := &mockDriver{
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvent = &event
+				return false, nil
+			},
+		}
+
+		var valid bool
+
+		mockValidator := &mockValidator{
+			validator: func(event internal.DBChangeEvent) (bool, bool, string, error) {
+				return true, valid, "", nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:         context.Background(),
+			Logger:          logger.NewTestLogger(),
+			Driver:          mockDriver,
+			URL:             natsurl,
+			SchemaValidator: mockValidator,
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.Nil(t, testEvent)
+
+		valid = true
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.2", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.NotNil(t, testEvent)
+
+		assert.NoError(t, consumer.Stop())
+	})
+}
