@@ -8,33 +8,45 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
-var PendingEvents = promauto.NewGauge(prometheus.GaugeOpts{
-	Name: "eds_pending_events",
-	Help: "The number of pending events",
-})
+var PendingEvents prometheus.Gauge
+var TotalEvents prometheus.Counter
+var FlushDuration prometheus.Histogram
+var FlushCount prometheus.Histogram
+var ProcessingDuration prometheus.Histogram
 
-var TotalEvents = promauto.NewCounter(prometheus.CounterOpts{
-	Name: "eds_total_events",
-	Help: "The total number of events processed",
-})
+func createCounters() {
+	PendingEvents = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "eds_pending_events",
+		Help: "The number of pending events",
+	})
 
-var FlushDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-	Name:    "eds_flush_duration_seconds",
-	Help:    "The duration of driver flushes",
-	Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
-})
+	TotalEvents = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "eds_total_events",
+		Help: "The total number of events processed",
+	})
 
-var FlushCount = promauto.NewHistogram(prometheus.HistogramOpts{
-	Name:    "eds_flush_count",
-	Help:    "The count of events flushed",
-	Buckets: []float64{1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000},
-})
+	FlushDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "eds_flush_duration_seconds",
+		Help:    "The duration of driver flushes",
+		Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+	})
 
-var ProcessingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-	Name:    "eds_processing_duration_seconds",
-	Help:    "The latency in duration of processing events from receving them to flushing them",
-	Buckets: []float64{1, 2, 3, 5, 10, 60, 300, 600, 1800, 3600},
-})
+	FlushCount = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "eds_flush_count",
+		Help:    "The count of events flushed",
+		Buckets: []float64{1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000},
+	})
+
+	ProcessingDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "eds_processing_duration_seconds",
+		Help:    "The latency in duration of processing events from receving them to flushing them",
+		Buckets: []float64{1, 2, 3, 5, 10, 60, 300, 600, 1800, 3600},
+	})
+}
+
+func init() {
+	createCounters()
+}
 
 // SystemStats contains the metrics and system stats
 type SystemStats struct {
@@ -47,6 +59,16 @@ type SystemStats struct {
 	} `json:"metrics"`
 	Memory *mem.VirtualMemoryStat `json:"memory"`
 	Load   *load.AvgStat          `json:"load"`
+}
+
+// MetricsReset resets the metrics but should *only* be used for testing
+func MetricsReset() {
+	prometheus.DefaultRegisterer.Unregister(PendingEvents)
+	prometheus.DefaultRegisterer.Unregister(TotalEvents)
+	prometheus.DefaultRegisterer.Unregister(FlushDuration)
+	prometheus.DefaultRegisterer.Unregister(FlushCount)
+	prometheus.DefaultRegisterer.Unregister(ProcessingDuration)
+	createCounters()
 }
 
 // collect calls the function for each metric associated with the Collector

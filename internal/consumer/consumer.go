@@ -26,6 +26,13 @@ const (
 	traceLogNatsProcessDetail = true                  // turn on trace logging for nats processing
 )
 
+// Driver is a local interface which slims down the driver to only the methods we need to make it easier to test.
+type Driver interface {
+	Flush(logger logger.Logger) error
+	Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error)
+	MaxBatchSize() int
+}
+
 // ConsumerConfig is the configuration for the consumer.
 type ConsumerConfig struct {
 
@@ -54,7 +61,7 @@ type ConsumerConfig struct {
 	MaxPendingBuffer int
 
 	// Driver is the driver for the consumer.
-	Driver internal.Driver
+	Driver Driver
 
 	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
 	ExportTableTimestamps map[string]*time.Time
@@ -64,30 +71,37 @@ type ConsumerConfig struct {
 
 	// SchemaValidator is the schema validator to use for the importer or nil if not needed.
 	SchemaValidator internal.SchemaValidator
+
+	// HeartbeatInterval is the interval to send heartbeats. Defaults to 1 minute.
+	HeartbeatInterval time.Duration
+
+	sessionIDCallback func(id string) // only used in testing
 }
 
 type Consumer struct {
-	ctx             context.Context
-	cancel          context.CancelFunc
-	max             int
-	driver          internal.Driver
-	conn            *nats.Conn
-	jsconn          jetstream.Consumer
-	logger          logger.Logger
-	subscriber      jetstream.ConsumeContext
-	buffer          chan jetstream.Msg
-	pending         []jetstream.Msg
-	started         *time.Time
-	pendingStarted  *time.Time
-	pauseStarted    *time.Time
-	waitGroup       sync.WaitGroup
-	once            sync.Once
-	lock            sync.Mutex
-	stopping        bool
-	subError        chan error
-	sessionID       string
-	tableTimestamps map[string]*time.Time
-	validator       internal.SchemaValidator
+	ctx               context.Context
+	cancel            context.CancelFunc
+	max               int
+	driver            Driver
+	conn              *nats.Conn
+	jsconn            jetstream.Consumer
+	logger            logger.Logger
+	subscriber        jetstream.ConsumeContext
+	buffer            chan jetstream.Msg
+	pending           []jetstream.Msg
+	started           *time.Time
+	pendingStarted    *time.Time
+	pauseStarted      *time.Time
+	waitGroup         sync.WaitGroup
+	once              sync.Once
+	lock              sync.Mutex
+	stopping          bool
+	subError          chan error
+	sessionID         string
+	tableTimestamps   map[string]*time.Time
+	validator         internal.SchemaValidator
+	heartbeatInterval time.Duration
+	offset            int64
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -119,6 +133,7 @@ func (c *Consumer) Stop() error {
 			c.conn.Close()
 			c.logger.Debug("stopped nats connection")
 		}
+		close(c.buffer)
 		c.subscriber = nil
 		c.conn = nil
 	})
@@ -230,6 +245,9 @@ func (c *Consumer) bufferer() {
 			c.nackEverything()
 			return
 		case msg := <-c.buffer:
+			if msg == nil {
+				return
+			}
 			m, err := msg.Metadata()
 			if err != nil {
 				c.handleError(err)
@@ -309,7 +327,7 @@ func (c *Consumer) bufferer() {
 			}
 		default:
 			count := len(c.pending)
-			if count > 0 && count < c.max && time.Since(*c.pendingStarted) >= minPendingLatency {
+			if count > 0 && count < c.max && c.pendingStarted != nil && time.Since(*c.pendingStarted) >= minPendingLatency {
 				if traceLogNatsProcessDetail {
 					c.logger.Trace("flush 3 called. count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
 				}
@@ -340,10 +358,11 @@ func (c *Consumer) process(msg jetstream.Msg) {
 }
 
 type heartbeat struct {
-	SessionId string                `json:"sessionId" msgpack:"sessionId"`
-	Uptime    time.Duration         `json:"uptime" msgpack:"uptime"`
-	Stats     *internal.SystemStats `json:"stats" msgpack:"stats"`
-	Paused    *time.Time            `json:"paused,omitempty" msgpack:"paused,omitempty"`
+	SessionId string               `json:"sessionId" msgpack:"sessionId"`
+	Offset    int64                `json:"offset" msgpack:"offset"`
+	Uptime    time.Duration        `json:"uptime" msgpack:"uptime"`
+	Stats     internal.SystemStats `json:"stats" msgpack:"stats"`
+	Paused    *time.Time           `json:"paused,omitempty" msgpack:"paused,omitempty"`
 }
 
 func (c *Consumer) heartbeat() error {
@@ -356,18 +375,21 @@ func (c *Consumer) heartbeat() error {
 
 	hb := heartbeat{
 		SessionId: c.sessionID,
-		Stats:     stats,
+		Stats:     *stats,
 		Uptime:    time.Duration(time.Since(*c.started).Seconds()),
 		Paused:    c.pauseStarted,
+		Offset:    c.offset,
 	}
 
-	buffer := bytes.Buffer{}
+	c.offset++
+
+	var buffer bytes.Buffer
 	enc := msgpack.NewEncoder(&buffer).UseJSONTag(true)
 	if err := enc.Encode(hb); err != nil {
 		return fmt.Errorf("error encoding heartbeat: %w", err)
 	}
 	msg := nats.NewMsg(subject)
-	msgId := util.Hash(time.Now().UnixNano())
+	msgId := util.Hash(time.Now().UnixNano(), c.offset)
 	msg.Header.Set(nats.MsgIdHdr, msgId)
 	msg.Header.Set("content-encoding", "msgpack")
 	msg.Data = buffer.Bytes()
@@ -386,7 +408,7 @@ func (c *Consumer) sendHeartbeats() {
 		c.logger.Error("error sending heartbeat: %s", err)
 	}
 	// we dont need the WG here since this doesnt need to gracefully complete
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(c.heartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -470,7 +492,7 @@ func (c *Consumer) Unpause() error {
 	return nil
 }
 
-func (c *Consumer) Start() error {
+func (c *Consumer) start() error {
 	if c.subscriber != nil {
 		return fmt.Errorf("consumer already started")
 	}
@@ -496,7 +518,16 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		return nil, err
 	}
 
+	// for unit testing only
+	if config.sessionIDCallback != nil {
+		config.sessionIDCallback(info.sessionID)
+	}
+
 	ctx, cancel := context.WithCancel(config.Context)
+
+	if config.MaxAckPending <= 0 {
+		config.MaxAckPending = 25_000
+	}
 
 	var startAt *time.Time
 	var consumer Consumer
@@ -512,6 +543,10 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
 	consumer.validator = config.SchemaValidator
+	consumer.heartbeatInterval = config.HeartbeatInterval
+	if consumer.heartbeatInterval == 0 {
+		consumer.heartbeatInterval = time.Minute
+	}
 
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
 	if config.ExportTableTimestamps != nil {
@@ -647,7 +682,7 @@ func NewConsumer(config ConsumerConfig) (*Consumer, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := consumer.Start(); err != nil {
+	if err := consumer.start(); err != nil {
 		return nil, err
 	}
 	return consumer, nil
