@@ -570,3 +570,75 @@ func TestPause(t *testing.T) {
 		assert.Equal(t, sendEvent.MVCCTimestamp, testEvent.MVCCTimestamp)
 	})
 }
+
+func TestTableSkipOldEvents(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+		var testEvent *internal.DBChangeEvent
+		var flushed bool
+
+		mockDriver := &mockDriver{
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvent = &event
+				return false, nil
+			},
+			flush: func(logger logger.Logger) error {
+				flushed = true
+				return nil
+			},
+		}
+
+		oldtv := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
+		tv := time.Now()
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:               context.Background(),
+			Logger:                logger.NewTestLogger(),
+			Driver:                mockDriver,
+			URL:                   natsurl,
+			ExportTableTimestamps: map[string]*time.Time{"order": &tv},
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = oldtv.UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", oldtv.UnixNano())
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.Nil(t, testEvent)
+		assert.False(t, flushed)
+
+		time.Sleep(time.Millisecond * 100)
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.2", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.NotNil(t, testEvent)
+
+		testEvent = nil
+
+		// change to validate that a new table not in the table map will still process
+		sendEvent.Table = "user"
+		sendEvent.Timestamp = oldtv.UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", oldtv.UnixNano())
+
+		_, err = js.Publish(context.Background(), "dbchange.user.INSERT.CID.LID.PUBLIC.2", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.NotNil(t, testEvent)
+
+		assert.NoError(t, consumer.Stop())
+	})
+}
