@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net"
 	"testing"
 	"time"
 
@@ -19,16 +18,14 @@ import (
 )
 
 func runNatsTestServer(fn func(natsurl string, nc *nats.Conn, js jetstream.JetStream)) {
-	l, err := net.Listen("tcp", ":0")
+	port, err := util.GetFreePort()
 	if err != nil {
 		panic(err)
 	}
-	port := l.Addr().(*net.TCPAddr).Port
 	opts := natsserver.DefaultTestOptions
 	opts.Port = port
 	opts.Cluster.Name = "testing"
 	opts.JetStream = true
-	l.Close()
 	srv := natsserver.RunServer(&opts)
 	defer srv.Shutdown()
 	url := fmt.Sprintf("nats://localhost:%d", port)
@@ -515,5 +512,61 @@ func TestMultipleMessagesWithIdleDelayFlush(t *testing.T) {
 		assert.Equal(t, 3, flushed)
 
 		assert.NoError(t, consumer.Stop())
+	})
+}
+
+func TestPause(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+		var testEvent *internal.DBChangeEvent
+		var flushed bool
+
+		mockDriver := &mockDriver{
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvent = &event
+				return false, nil
+			},
+			flush: func(logger logger.Logger) error {
+				flushed = true
+				return nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context: context.Background(),
+			Logger:  logger.NewTestLogger(),
+			Driver:  mockDriver,
+			URL:     natsurl,
+		})
+
+		assert.NoError(t, err)
+
+		consumer.Pause()
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.Nil(t, testEvent)
+		assert.False(t, flushed)
+
+		consumer.Unpause()
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.NoError(t, consumer.Stop())
+		assert.NotNil(t, testEvent)
+		assert.True(t, flushed)
+
+		assert.Equal(t, sendEvent.Table, testEvent.Table)
+		assert.Equal(t, sendEvent.Operation, testEvent.Operation)
+		assert.Equal(t, sendEvent.Timestamp, testEvent.Timestamp)
+		assert.Equal(t, sendEvent.MVCCTimestamp, testEvent.MVCCTimestamp)
 	})
 }
