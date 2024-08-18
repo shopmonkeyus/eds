@@ -7,6 +7,7 @@ import (
 	"os"
 )
 
+// GzipFile compresses a file using gzip.
 func GzipFile(filepath string) error {
 	infile, err := os.Open(filepath)
 	if err != nil {

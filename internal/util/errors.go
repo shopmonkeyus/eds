@@ -16,6 +16,7 @@ import (
 // so RecoverPanic should pop three frames.
 var depth = 3
 
+// RecoverPanic recovers from a panic and logs the error along with the current goroutines.
 func RecoverPanic(logger logger.Logger) {
 	if r := recover(); r != nil {
 		v := panicError(depth, r)
