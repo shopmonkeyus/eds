@@ -167,7 +167,7 @@ You should use the arguments without the name of the binary such as:
 ```
 
 > [!IMPORTANT]
-> You should enroll the server outside of Docker initially and mount the resulting `config.toml` file after setup. This file should be treated as a secret and should not be committed to your Docker image.
+> You should enroll the server outside of Docker initially and mount the generated `config.toml` file after setup into your container at runtime. This file should be treated as a secret and should not be committed to your Docker image.
 
 # Security
 
