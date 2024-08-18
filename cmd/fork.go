@@ -287,13 +287,15 @@ func init() {
 	rootCmd.AddCommand(forkCmd)
 
 	// NOTE: sync these with serverCmd
-	// these flags are alterd by the server
+	// these flags are altered by the server
 	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("url", "", "driver connection string")
 	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
+	forkCmd.Flags().Duration("minPendingLatency", 0, "the minimum accumulation period before flushing (0 uses default)")
+	forkCmd.Flags().Duration("maxPendingLatency", 0, "the maximum accumulation period before flushing (0 uses default)")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
 
 	// NOTE: sync these with serverCmd

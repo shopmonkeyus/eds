@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	emptyBufferPauseTime      = time.Millisecond * 50 // time to wait when the buffer is empty to prevent CPU spinning
-	minPendingLatency         = time.Second * 2       // minimum accumulation period before flushing
-	maxPendingLatency         = time.Second * 30      // maximum accumulation period before flushing
-	traceLogNatsProcessDetail = true                  // turn on trace logging for nats processing
+	defaultEmptyBufferPauseTime = time.Millisecond * 10 // time to wait when the buffer is empty to prevent CPU spinning
+	DefaultMinPendingLatency    = time.Second * 2       // minimum accumulation period before flushing
+	DefaultMaxPendingLatency    = time.Second * 30      // maximum accumulation period before flushing
+	traceLogNatsProcessDetail   = true                  // turn on trace logging for nats processing
 )
 
 // Driver is a local interface which slims down the driver to only the methods we need to make it easier to test.
@@ -75,33 +75,45 @@ type ConsumerConfig struct {
 	// HeartbeatInterval is the interval to send heartbeats. Defaults to 1 minute.
 	HeartbeatInterval time.Duration
 
+	// MinPendingLatency is the minimum accumulation period before flushing.
+	MinPendingLatency time.Duration
+
+	// MaxPendingLatency is the maximum accumulation period before flushing.
+	MaxPendingLatency time.Duration
+
+	// EmptyBufferPauseTime is the time to wait when the buffer is empty to prevent CPU spinning.
+	EmptyBufferPauseTime time.Duration
+
 	sessionIDCallback func(id string) // only used in testing
 }
 
 type Consumer struct {
-	ctx               context.Context
-	cancel            context.CancelFunc
-	max               int
-	driver            Driver
-	conn              *nats.Conn
-	jsconn            jetstream.Consumer
-	logger            logger.Logger
-	subscriber        jetstream.ConsumeContext
-	buffer            chan jetstream.Msg
-	pending           []jetstream.Msg
-	started           *time.Time
-	pendingStarted    *time.Time
-	pauseStarted      *time.Time
-	waitGroup         sync.WaitGroup
-	once              sync.Once
-	lock              sync.Mutex
-	stopping          bool
-	subError          chan error
-	sessionID         string
-	tableTimestamps   map[string]*time.Time
-	validator         internal.SchemaValidator
-	heartbeatInterval time.Duration
-	offset            int64
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	max                  int
+	driver               Driver
+	conn                 *nats.Conn
+	jsconn               jetstream.Consumer
+	logger               logger.Logger
+	subscriber           jetstream.ConsumeContext
+	buffer               chan jetstream.Msg
+	pending              []jetstream.Msg
+	started              *time.Time
+	pendingStarted       *time.Time
+	pauseStarted         *time.Time
+	waitGroup            sync.WaitGroup
+	once                 sync.Once
+	lock                 sync.Mutex
+	stopping             bool
+	subError             chan error
+	sessionID            string
+	tableTimestamps      map[string]*time.Time
+	validator            internal.SchemaValidator
+	heartbeatInterval    time.Duration
+	minPendingLatency    time.Duration
+	maxPendingLatency    time.Duration
+	emptyBufferPauseTime time.Duration
+	offset               int64
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -313,10 +325,10 @@ func (c *Consumer) bufferer() {
 				ts := time.Now()
 				c.pendingStarted = &ts
 			}
-			if md.NumPending > uint64(c.max) && time.Since(*c.pendingStarted) < maxPendingLatency*2 {
+			if md.NumPending > uint64(c.max) && time.Since(*c.pendingStarted) < c.maxPendingLatency*2 {
 				continue // if we have a large number, just keep going to try and catchup
 			}
-			if len(c.pending) >= c.max || time.Since(*c.pendingStarted) >= maxPendingLatency {
+			if len(c.pending) >= c.max || time.Since(*c.pendingStarted) >= c.maxPendingLatency {
 				if traceLogNatsProcessDetail {
 					log.Trace("flush 2 called. flush=%v,pending=%d,max=%d,started=%v", flush, len(c.pending), maxsize, time.Since(*c.pendingStarted))
 				}
@@ -327,7 +339,7 @@ func (c *Consumer) bufferer() {
 			}
 		default:
 			count := len(c.pending)
-			if count > 0 && count < c.max && c.pendingStarted != nil && time.Since(*c.pendingStarted) >= minPendingLatency {
+			if count > 0 && count < c.max && c.pendingStarted != nil && time.Since(*c.pendingStarted) >= c.minPendingLatency {
 				if traceLogNatsProcessDetail {
 					c.logger.Trace("flush 3 called. count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
 				}
@@ -345,7 +357,7 @@ func (c *Consumer) bufferer() {
 				c.nackEverything()
 				return
 			default:
-				time.Sleep(emptyBufferPauseTime)
+				time.Sleep(c.emptyBufferPauseTime)
 			}
 		}
 	}
@@ -546,6 +558,18 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.heartbeatInterval = config.HeartbeatInterval
 	if consumer.heartbeatInterval == 0 {
 		consumer.heartbeatInterval = time.Minute
+	}
+	consumer.minPendingLatency = config.MinPendingLatency
+	if consumer.minPendingLatency == 0 {
+		consumer.minPendingLatency = DefaultMinPendingLatency
+	}
+	consumer.maxPendingLatency = config.MaxPendingLatency
+	if consumer.maxPendingLatency == 0 {
+		consumer.maxPendingLatency = DefaultMaxPendingLatency
+	}
+	consumer.emptyBufferPauseTime = config.EmptyBufferPauseTime
+	if consumer.emptyBufferPauseTime == 0 {
+		consumer.emptyBufferPauseTime = defaultEmptyBufferPauseTime
 	}
 
 	consumer.logger = config.Logger.WithPrefix("[consumer]")

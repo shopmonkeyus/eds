@@ -412,3 +412,108 @@ func TestHeartbeats(t *testing.T) {
 		assert.Equal(t, float64(0), payload2.Stats.Metrics.PendingEvents)
 	})
 }
+
+func TestMultipleMessagesWithMultipleBatches(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+
+		var testEvents []internal.DBChangeEvent
+		var flushed int
+
+		max := 100
+
+		mockDriver := &mockDriver{
+			maxBatchSize: 10,
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvents = append(testEvents, event)
+				return false, nil
+			},
+			flush: func(logger logger.Logger) error {
+				flushed++
+				return nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:       context.Background(),
+			Logger:        logger.NewTestLogger(),
+			Driver:        mockDriver,
+			URL:           natsurl,
+			MaxAckPending: max,
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+
+		for i := 0; i < max; i++ {
+			_, err = js.Publish(context.Background(), fmt.Sprintf("dbchange.order.INSERT.CID.%d.PUBLIC.1", i+1), []byte(util.JSONStringify(sendEvent)))
+			assert.NoError(t, err)
+		}
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.Len(t, testEvents, max)
+		assert.Equal(t, 10, flushed)
+
+		assert.NoError(t, consumer.Stop())
+	})
+}
+
+func TestMultipleMessagesWithIdleDelayFlush(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+
+		var testEvents []internal.DBChangeEvent
+		var flushed int
+
+		max := 6
+
+		mockDriver := &mockDriver{
+			maxBatchSize: -1,
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvents = append(testEvents, event)
+				return false, nil
+			},
+			flush: func(logger logger.Logger) error {
+				flushed++
+				return nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:           context.Background(),
+			Logger:            logger.NewTestLogger(),
+			Driver:            mockDriver,
+			URL:               natsurl,
+			MaxAckPending:     max,
+			MinPendingLatency: time.Millisecond * 500,
+			MaxPendingLatency: time.Millisecond * 500,
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+
+		for i := 0; i < max; i++ {
+			_, err = js.Publish(context.Background(), fmt.Sprintf("dbchange.order.INSERT.CID.%d.PUBLIC.1", i+1), []byte(util.JSONStringify(sendEvent)))
+			assert.NoError(t, err)
+			if i%2 == 0 {
+				time.Sleep(time.Millisecond * 600)
+			}
+		}
+
+		time.Sleep(time.Millisecond * 500)
+
+		assert.Len(t, testEvents, max)
+		assert.Equal(t, 3, flushed)
+
+		assert.NoError(t, consumer.Stop())
+	})
+}

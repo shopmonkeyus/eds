@@ -20,6 +20,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds-server/internal/consumer"
 	"github.com/shopmonkeyus/eds-server/internal/notification"
 	"github.com/shopmonkeyus/eds-server/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
@@ -1073,6 +1074,10 @@ func init() {
 	serverCmd.Flags().MarkHidden("maxAckPending")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
 	serverCmd.Flags().MarkHidden("maxPendingBuffer")
+	serverCmd.Flags().Duration("minPendingLatency", consumer.DefaultMinPendingLatency, "the minimum accumulation period before flushing (0 uses default)")
+	serverCmd.Flags().MarkHidden("minPendingLatency")
+	serverCmd.Flags().Duration("maxPendingLatency", consumer.DefaultMaxPendingLatency, "the maximum accumulation period before flushing (0 uses default)")
+	serverCmd.Flags().MarkHidden("maxPendingLatency")
 	serverCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
 	serverCmd.Flags().MarkHidden("restart")
 	serverCmd.Flags().Duration("renew-interval", time.Hour*24, "the interval to renew the session")
