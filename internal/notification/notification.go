@@ -184,17 +184,6 @@ func (c *NotificationConsumer) configure(config ConfigureRequest) {
 }
 
 func (c *NotificationConsumer) upgrade(version string) {
-	if util.IsRunningInsideDocker() {
-		msg := "upgrade is not supported inside a virtualized container system"
-		response := ImportResponse{
-			Success: false,
-			Message: &msg,
-		}
-		if err := c.publishResponse(response.SessionID, "upgrade", []byte(util.JSONStringify(response))); err != nil {
-			c.logger.Error("failed to send upgrade response: %s", err)
-		}
-		return
-	}
 	response := c.handler.Upgrade(version)
 	if err := c.publishResponse(response.SessionID, "upgrade", []byte(util.JSONStringify(response))); err != nil {
 		c.logger.Error("failed to send upgrade response: %s", err)

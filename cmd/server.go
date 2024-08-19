@@ -641,9 +641,17 @@ var serverCmd = &cobra.Command{
 		}
 
 		upgrade := func(version string) notification.UpgradeResponse {
-			logger.Info("server upgrade requested to version: %s", version)
-			pause()
 			versionWithoutV := strings.TrimPrefix(version, "v")
+			logger.Info("server upgrade requested to version: %s", versionWithoutV)
+			if util.IsRunningInsideDocker() {
+				return notification.UpgradeResponse{
+					Success:   false,
+					Message:   "upgrade is not supported inside a virtualized container system",
+					SessionID: sessionId,
+					Version:   version,
+				}
+			}
+			pause()
 			fn := filepath.Join(dataDir, "eds-server-"+versionWithoutV)
 			c := exec.Command(os.Args[0], "download", version, fn, fmt.Sprintf("--verbose=%v", verbose))
 			c.Stdout = os.Stdout
