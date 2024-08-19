@@ -643,7 +643,8 @@ var serverCmd = &cobra.Command{
 		upgrade := func(version string) notification.UpgradeResponse {
 			logger.Info("server upgrade requested to version: %s", version)
 			pause()
-			fn := filepath.Join(dataDir, "eds-server-"+version)
+			versionWithoutV := strings.TrimPrefix(version, "v")
+			fn := filepath.Join(dataDir, "eds-server-"+versionWithoutV)
 			c := exec.Command(os.Args[0], "download", version, fn, fmt.Sprintf("--verbose=%v", verbose))
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
@@ -652,9 +653,9 @@ var serverCmd = &cobra.Command{
 				unpause()
 				return notification.UpgradeResponse{
 					Success:   false,
-					Message:   fmt.Sprintf("failed to download version %s: %s", version, err),
+					Message:   fmt.Sprintf("failed to download version %s: %s", versionWithoutV, err),
 					SessionID: sessionId,
-					Version:   version,
+					Version:   versionWithoutV,
 				}
 			}
 			c = exec.Command(fn, "version")
@@ -668,18 +669,18 @@ var serverCmd = &cobra.Command{
 					Success:   false,
 					Message:   fmt.Sprintf("upgrade failed checking version: %s", err),
 					SessionID: sessionId,
-					Version:   version,
+					Version:   versionWithoutV,
 				}
 			}
 			newversion := strings.TrimSpace(out.String())
-			if newversion != version {
-				logger.Error("upgrade failed checking version: %s, was: %s", version, newversion)
+			if newversion != versionWithoutV {
+				logger.Error("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion)
 				unpause()
 				return notification.UpgradeResponse{
 					Success:   false,
-					Message:   fmt.Sprintf("upgrade failed checking version: %s, was: %s", version, newversion),
+					Message:   fmt.Sprintf("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion),
 					SessionID: sessionId,
-					Version:   version,
+					Version:   versionWithoutV,
 				}
 			}
 
@@ -695,7 +696,7 @@ var serverCmd = &cobra.Command{
 						Success:   false,
 						Message:   fmt.Sprintf("failed to rename old binary: %s", err),
 						SessionID: sessionId,
-						Version:   version,
+						Version:   versionWithoutV,
 					}
 				}
 			}
@@ -708,14 +709,14 @@ var serverCmd = &cobra.Command{
 					Success:   false,
 					Message:   fmt.Sprintf("upgrade failed. tried restarting: %s", err),
 					SessionID: sessionId,
-					Version:   version,
+					Version:   versionWithoutV,
 				}
 			} else {
 				logger.Debug("restart response: %d", resp.StatusCode)
 				return notification.UpgradeResponse{
 					Success:   true,
 					SessionID: sessionId,
-					Version:   version,
+					Version:   versionWithoutV,
 				}
 			}
 		}
