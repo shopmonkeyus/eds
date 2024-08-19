@@ -48,6 +48,7 @@ func MaskURL(urlString string) (string, error) {
 	return str.String(), nil
 }
 
+// MaskEmail masks the email address attempting to hide sensitive information.
 func MaskEmail(val string) string {
 	tok := strings.Split(val, "@")
 	dot := strings.Split(tok[1], ".")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"time"
@@ -12,12 +13,13 @@ import (
 	"strings"
 )
 
+// JSONStringify converts any value to a JSON string.
 func JSONStringify(val any) string {
 	buf, _ := json.Marshal(val)
 	return string(buf)
 }
 
-// Exists returns true if the filename or directory specified by fn exists
+// Exists returns true if the filename or directory specified by fn exists.
 func Exists(fn string) bool {
 	if _, err := os.Stat(fn); os.IsNotExist(err) {
 		return false
@@ -25,6 +27,7 @@ func Exists(fn string) bool {
 	return true
 }
 
+// SliceContains returns true if the slice contains the value.
 func SliceContains(slice []string, val string) bool {
 	for _, s := range slice {
 		if s == val {
@@ -39,14 +42,15 @@ func ToFileURI(dir string, file string) string {
 	absDir := filepath.Clean(dir)
 	if os.PathSeparator == '\\' {
 		// if windows replace the backslashes
-		return fmt.Sprintf("file://%s/%s", strings.ReplaceAll(absDir, "\\", "/"), file)
+		return fmt.Sprintf("file://%s", path.Join(filepath.ToSlash(absDir), file))
 	}
-	return fmt.Sprintf("file://%s/%s", absDir, file)
+	return fmt.Sprintf("file://%s", path.Join(absDir, file))
 }
 
-// IsLocalhost returns true if the URL is localhost or 127.0.0.1
+// IsLocalhost returns true if the URL is localhost or 127.0.0.1 or 0.0.0.0.
 func IsLocalhost(url string) bool {
-	return strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1")
+	// technically 127.0.0.0 – 127.255.255.255 is the loopback range but most people use 127.0.0.1
+	return strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1") || strings.Contains(url, "0.0.0.0")
 }
 
 // GetFreePort asks the kernel for a free open port that is ready to use.
@@ -97,6 +101,7 @@ func parsePreciseDate(dateStr string) (time.Time, error) {
 	return time.Parse(format, trimmed)
 }
 
+// ParseCRDBExportFile will parse the CockroachDB changefeed filename and return the table name and timestamp.
 func ParseCRDBExportFile(file string) (string, time.Time, bool) {
 	filename := filepath.Base(file)
 	if !crdbExportFileRegex.MatchString(filename) {

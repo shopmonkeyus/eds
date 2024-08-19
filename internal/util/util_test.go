@@ -12,6 +12,10 @@ func TestToFileURI(t *testing.T) {
 	assert.Equal(t, "file:///var/folders/60/rf284h4d67g343wcswq6jwmr0000gn/T/eds-import2764310919/*.ndjson.gz", fileURL)
 	fileURL = ToFileURI("/var/folders/60/rf284h4d67g343wcswq6jwmr0000gn/T/eds-import2764310919/", "*.ndjson.gz")
 	assert.Equal(t, "file:///var/folders/60/rf284h4d67g343wcswq6jwmr0000gn/T/eds-import2764310919/*.ndjson.gz", fileURL)
+	fileURL = ToFileURI("/var/folders/60/rf284h4d67g343wcswq6jwmr0000gn/T/eds-import2764310919", "*.ndjson.gz")
+	assert.Equal(t, "file:///var/folders/60/rf284h4d67g343wcswq6jwmr0000gn/T/eds-import2764310919/*.ndjson.gz", fileURL)
+	fileURL = ToFileURI("c:/foo/bar", "*.ndjson.gz")
+	assert.Equal(t, "file://c:/foo/bar/*.ndjson.gz", fileURL)
 }
 
 func TestParsePreciseDate(t *testing.T) {
@@ -41,4 +45,16 @@ func TestParseCRDBExportFile(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "labor_rate", table2)
 	assert.True(t, ts2.Before(ts))
+}
+
+func TestSliceContains(t *testing.T) {
+	assert.True(t, SliceContains([]string{"a", "b", "c"}, "b"))
+	assert.False(t, SliceContains([]string{"a", "b", "c"}, "d"))
+}
+
+func TestIsLocalhost(t *testing.T) {
+	assert.True(t, IsLocalhost("localhost"))
+	assert.True(t, IsLocalhost("0.0.0.0"))
+	assert.True(t, IsLocalhost("127.0.0.1"))
+	assert.False(t, IsLocalhost("google.com"))
 }

@@ -39,8 +39,6 @@ The target driver is configured using the `--url` option. The driver that is sel
 - **kafka** - used to stream data into a Kafka topic
 - **eventhub** - used to stream data to Microsoft Azure [EventHub](https://azure.microsoft.com/en-us/products/event-hubs)
 
-> Not all driver's currently support importing data
-
 You can get a list of drivers with example URL patterns by running the following:
 
 ```
@@ -78,6 +76,9 @@ The import command will ensure that you have a valid EDS session before running 
 
 ## Running the Server
 
+> [!IMPORTANT]
+> The server should be created using HQ. If you do not have access to HQ or the EDS capabilities within HQ, please contact your account team for further assistance. Running the server outside of HQ is not recommended.
+
 Running the server will start a process which will connect to the Shopmonkey system and stream change data capture (CDC) records in JSON format to the server which will forward them intelligently to the driver for specific handling. The Server will automatically handle logging, crash detection and sending health reports back to Shopmonkey for monitoring.
 
 When the server is started for the first time, it will create a subscription on the Shopmonkey system to register interest in your real-time CDC changes. However, if the server is shutdown after more than 7 days, the subscription will be expired and any pending data will be lost. In this case, you will have to re-import your data and start streaming again.
@@ -86,7 +87,7 @@ The server captures data is near real-time as they occur. However, EDS will atte
 
 ## Data Directory
 
-By default, the server will store log and data files in the current working directory where you start the server. However, you can change the location of this data directory by setting the `--data-dir` to a writable directory. This directory must exist before starting the server and the server will error on startup if it does not.
+By default, the server will store log and data files in the current working directory where you start the server. However, you can change the location of this data directory by setting the `--data-dir` to a writable directory. This directory will default to `cwd/data` if not provided and the server attempt to make this directory on startup if it does not exist.
 
 ## Monitoring the Server
 
@@ -164,6 +165,9 @@ You should use the arguments without the name of the binary such as:
 ```
 ["server", "--data-dir", "/var/data", "--verbose"]
 ```
+
+> [!IMPORTANT]
+> You should enroll the server outside of Docker initially and mount the generated `config.toml` file after setup into your container at runtime. This file should be treated as a secret and should not be committed to your Docker image.
 
 # Security
 

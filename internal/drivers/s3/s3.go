@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -180,6 +181,7 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	}
 
 	var accessKeyID, secretAccessKey, sessionToken string
+	var maxRetries int
 
 	if u.Query().Has("region") {
 		region = u.Query().Get("region")
@@ -198,6 +200,16 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 		sessionToken = u.Query().Get("session-token")
 	} else {
 		sessionToken = os.Getenv("AWS_SESSION_TOKEN")
+	}
+	if u.Query().Has("max-retries") {
+		max := u.Query().Get("max-retries")
+		maxRetries, err = strconv.Atoi(max)
+		if err != nil {
+			logger.Warn("skipping max-retires value: %s. %d", max, err)
+			maxRetries = 5
+		}
+	} else {
+		maxRetries = 5
 	}
 
 	var cfg aws.Config
@@ -224,8 +236,13 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 		return fmt.Errorf("unable to load AWS config: %w", err)
 	}
 
+	customRetry := retry.NewStandard(func(o *retry.StandardOptions) {
+		o.MaxAttempts = maxRetries
+	})
+
 	p.s3 = awss3.NewFromConfig(cfg, func(o *awss3.Options) {
 		o.UsePathStyle = true
+		o.Retryer = customRetry
 	})
 
 	if _, err := p.s3.ListObjects(ctx, &awss3.ListObjectsInput{Bucket: aws.String(p.bucket), MaxKeys: aws.Int32(1)}); err != nil {
