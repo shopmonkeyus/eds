@@ -837,7 +837,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		driverconfig := func() *notification.DriverConfigResponse {
-			config := internal.GetDriverConfiguration()
+			config := internal.GetDriverConfigurations()
 			return &notification.DriverConfigResponse{
 				SessionID: sessionId,
 				Drivers:   config,

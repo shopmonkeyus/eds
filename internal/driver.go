@@ -154,8 +154,8 @@ type DriverConfigurator struct {
 	Fields   []DriverField  `json:"fields"`
 }
 
-// GetDriverConfiguration returns the configuration for all drivers
-func GetDriverConfiguration() map[string]DriverConfigurator {
+// GetDriverConfigurations returns the configurations for each supported driver.
+func GetDriverConfigurations() map[string]DriverConfigurator {
 	res := make(map[string]DriverConfigurator)
 	for scheme, driver := range driverRegistry {
 		metadata := DriverMetadata{
