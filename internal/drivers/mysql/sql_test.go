@@ -57,3 +57,40 @@ func TestParseDSN(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "root:password@tcp(localhost:3306)/dbname?multiStatements=true", dsn)
 }
+
+func TestValidate(t *testing.T) {
+	var driver mysqlDriver
+	url, err := driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "mysql://hostname:3306/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Port":     1234,
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "mysql://hostname:1234/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Port":     1234,
+		"Username": "user",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "mysql://user:@hostname:1234/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Port":     1234,
+		"Username": "user",
+		"Password": "pass",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "mysql://user:pass@hostname:1234/db", url)
+}

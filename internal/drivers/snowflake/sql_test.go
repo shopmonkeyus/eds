@@ -53,3 +53,30 @@ func TestConnectionString(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "user:password@account/db?application=eds-server&client_session_keep_alive=true&foo=bar", url)
 }
+
+func TestValidate(t *testing.T) {
+	var driver snowflakeDriver
+	url, err := driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "snowflake://hostname/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Username": "user",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "snowflake://user:@hostname/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+		"Username": "user",
+		"Password": "pass",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "snowflake://user:pass@hostname/db", url)
+}

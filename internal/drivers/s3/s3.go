@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -460,6 +461,55 @@ func (p *s3Driver) Test(ctx context.Context, logger logger.Logger, url string) e
 		return err
 	}
 	return nil
+}
+
+// Configuration returns the configuration fields for the driver.
+func (p *s3Driver) Configuration() []internal.DriverField {
+	return []internal.DriverField{
+		internal.RequiredStringField("Bucket", "The bucket name", nil),
+		internal.OptionalStringField("Prefix", "The prefix to prepend to the filename", nil),
+		internal.OptionalStringField("Region", "The AWS region to use", nil),
+		internal.OptionalPasswordField("Access Key ID", "The AWS AWS Key ID", nil),
+		internal.OptionalPasswordField("Secret Access Key", "The AWS Secret Access Key", nil),
+		internal.OptionalStringField("Endpoint", "The Endpoint hostname to override if using an AWS compatible provider", nil),
+	}
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *s3Driver) Validate(values map[string]any) (string, []internal.FieldError) {
+	bucket := internal.GetRequiredStringValue("Bucket", values)
+	prefix := internal.GetOptionalStringValue("Prefix", "", values)
+	region := internal.GetOptionalStringValue("Region", "", values)
+	accesskey := internal.GetOptionalStringValue("Access Key ID", "", values)
+	secret := internal.GetOptionalStringValue("Secret Access Key", "", values)
+	endpoint := internal.GetOptionalStringValue("Endpoint", "", values)
+	var url url.URL
+	url.Scheme = "s3"
+	if endpoint != "" {
+		url.Host = endpoint
+		url.Path = bucket
+	} else {
+		url.Host = bucket
+	}
+	if prefix != "" {
+		if url.Path == "" {
+			url.Path = prefix
+		} else {
+			url.Path = path.Join(url.Path, prefix)
+		}
+	}
+	q := url.Query()
+	if region != "" {
+		q.Set("region", region)
+	}
+	if accesskey != "" {
+		q.Set("access-key-id", accesskey)
+	}
+	if secret != "" {
+		q.Set("secret-access-key", secret)
+	}
+	url.RawQuery = q.Encode()
+	return url.String(), nil
 }
 
 func init() {

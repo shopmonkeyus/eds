@@ -345,6 +345,16 @@ func (p *snowflakeDriver) Test(ctx context.Context, logger logger.Logger, url st
 	return db.Close()
 }
 
+// Configuration returns the configuration fields for the driver.
+func (p *snowflakeDriver) Configuration() []internal.DriverField {
+	return internal.NewDatabaseConfiguration(-1)
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *snowflakeDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	return internal.URLFromDatabaseConfiguration("snowflake", -1, values), nil
+}
+
 func init() {
 	var driver snowflakeDriver
 	internal.RegisterDriver("snowflake", &driver)

@@ -174,6 +174,44 @@ func (p *fileDriver) Test(ctx context.Context, logger logger.Logger, url string)
 	return err
 }
 
+// Configuration returns the configuration fields for the driver.
+func (p *fileDriver) Configuration() []internal.DriverField {
+	return []internal.DriverField{
+		internal.RequiredStringField("Directory", "The directory on the server to store files", nil),
+	}
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *fileDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	dir := internal.GetRequiredStringValue("Directory", values)
+	if dir == "/" {
+		return "", []internal.FieldError{internal.NewFieldError("Directory", "cannot be the root directory")}
+	}
+	absdir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", []internal.FieldError{internal.NewFieldError("Directory", err.Error())}
+	}
+	if !util.Exists(absdir) {
+		parent := filepath.Dir(absdir)
+		ok, err := util.IsDirWritable(parent)
+		if err != nil {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("error checking for parent %s directory permission: %s", parent, err))}
+		}
+		if !ok {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("%s directory isn't writable and directory currently does not exist: %s", parent, err))}
+		}
+	} else {
+		ok, err := util.IsDirWritable(absdir)
+		if err != nil {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("error checking directory permission: %s", err))}
+		}
+		if !ok {
+			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("%s directory isn't writable", absdir))}
+		}
+	}
+	return "file://" + filepath.ToSlash(absdir), nil
+}
+
 func init() {
 	internal.RegisterDriver("file", &fileDriver{})
 	internal.RegisterImporter("file", &fileDriver{})

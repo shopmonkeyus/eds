@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/shopmonkeyus/eds-server/internal/tracker"
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -65,12 +66,41 @@ type Driver interface {
 
 	// Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 	Test(ctx context.Context, logger logger.Logger, url string) error
+
+	// Configuration returns the configuration fields for the driver.
+	Configuration() []DriverField
+
+	// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+	Validate(map[string]any) (string, []FieldError)
 }
 
 // DriverAlias is an interface that Drivers implement for specifying additional protocol schemes for URLs that the driver can handle.
 type DriverAlias interface {
 	// Aliases returns a list of additional protocol schemes that the driver can handle (from the main protocol that was registered).
 	Aliases() []string
+}
+
+type DriverType string
+type DriverFormat string
+
+const (
+	DriverTypeString  DriverType = "string"
+	DriverTypeNumber  DriverType = "number"
+	DriverTypeBoolean DriverType = "boolean"
+)
+
+const (
+	DriverFormatPassword DriverFormat = "password"
+)
+
+// DriverField is a field in the driver configuration.
+type DriverField struct {
+	Name        string       `json:"name"`
+	Type        DriverType   `json:"type"`
+	Format      DriverFormat `json:"format,omitempty"`
+	Default     *string      `json:"default,omitempty"` // its a string for display purposes
+	Description string       `json:"description"`
+	Required    bool         `json:"required"`
 }
 
 // DriverHelp is an interface that Drivers implement for controlling the help system.
@@ -90,12 +120,12 @@ type DriverHelp interface {
 }
 
 type DriverMetadata struct {
-	Scheme         string
-	Name           string
-	Description    string
-	ExampleURL     string
-	Help           string
-	SupportsImport bool
+	Scheme         string `json:"scheme"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	ExampleURL     string `json:"exampleURL"`
+	Help           string `json:"help"`
+	SupportsImport bool   `json:"supportsImport"`
 }
 
 var driverRegistry = map[string]Driver{}
@@ -114,6 +144,34 @@ func GetDriverMetadata() []DriverMetadata {
 				Help:           help.Help(),
 				SupportsImport: importerRegistry[scheme] != nil,
 			})
+		}
+	}
+	return res
+}
+
+type DriverConfigurator struct {
+	Metadata DriverMetadata `json:"metadata"`
+	Fields   []DriverField  `json:"fields"`
+}
+
+// GetDriverConfigurations returns the configurations for each supported driver.
+func GetDriverConfigurations() map[string]DriverConfigurator {
+	res := make(map[string]DriverConfigurator)
+	for scheme, driver := range driverRegistry {
+		metadata := DriverMetadata{
+			Scheme: scheme,
+			Name:   scheme,
+		}
+		if help, ok := driver.(DriverHelp); ok {
+			metadata.Name = help.Name()
+			metadata.Description = help.Description()
+			metadata.ExampleURL = help.ExampleURL()
+			metadata.Help = ansi.Strip(help.Help())
+			metadata.SupportsImport = importerRegistry[scheme] != nil
+		}
+		res[scheme] = DriverConfigurator{
+			Metadata: metadata,
+			Fields:   driver.Configuration(),
 		}
 	}
 	return res
@@ -208,4 +266,163 @@ func NewDriverForImport(ctx context.Context, logger logger.Logger, urlString str
 		}
 	}
 	return driver, nil
+}
+
+// Validate will validate a driver configuration and return the URL if the configuration is valid.
+func Validate(schema string, values map[string]any) (string, []FieldError, error) {
+	driver := driverRegistry[schema]
+	if driver == nil {
+		protocol := driverAliasRegistry[schema]
+		if protocol != "" {
+			driver = driverRegistry[protocol]
+		}
+		if driver == nil {
+			return "", nil, fmt.Errorf("no driver registered for protocol %s", schema)
+		}
+	}
+	url, errs := driver.Validate(values)
+	return url, errs, nil
+}
+
+func RequiredStringField(name, description string, defval *string) DriverField {
+	return DriverField{
+		Name:        name,
+		Type:        DriverTypeString,
+		Description: description,
+		Required:    true,
+		Default:     defval,
+	}
+}
+
+func OptionalStringField(name, description string, defval *string) DriverField {
+	return DriverField{
+		Name:        name,
+		Type:        DriverTypeString,
+		Description: description,
+		Required:    false,
+		Default:     defval,
+	}
+}
+
+func OptionalPasswordField(name, description string, defval *string) DriverField {
+	return DriverField{
+		Name:        name,
+		Type:        DriverTypeString,
+		Format:      DriverFormatPassword,
+		Description: description,
+		Required:    false,
+		Default:     defval,
+	}
+}
+
+func OptionalNumberField(name, description string, defval *int) DriverField {
+	var defstr *string
+	if defval != nil {
+		v := fmt.Sprintf("%d", *defval)
+		defstr = &v
+	}
+	return DriverField{
+		Name:        name,
+		Type:        DriverTypeNumber,
+		Description: description,
+		Required:    false,
+		Default:     defstr,
+	}
+}
+
+func StringPointer(val string) *string {
+	if val == "" {
+		return nil
+	}
+	return &val
+}
+
+func IntPointer(val int) *int {
+	return &val
+}
+
+type FieldError struct {
+	Field   string `json:"field" msgpack:"field"`
+	Message string `json:"error" msgpack:"error"`
+}
+
+func (f FieldError) Error() string {
+	return f.Message
+}
+
+func NewFieldError(field, message string) FieldError {
+	return FieldError{
+		Field:   field,
+		Message: message,
+	}
+}
+
+func GetRequiredStringValue(name string, values map[string]any) string {
+	if val, ok := values[name].(string); ok {
+		return val
+	}
+	panic("required field " + name + " not found") // should not happen
+}
+
+func GetRequiredIntValue(name string, values map[string]any) int {
+	if val, ok := values[name].(int); ok {
+		return val
+	}
+	if val, ok := values[name].(int64); ok {
+		return int(val)
+	}
+	panic("required field " + name + " not found") // should not happen
+}
+
+func GetOptionalStringValue(name string, def string, values map[string]any) string {
+	if val, ok := values[name].(string); ok && val != "" {
+		return val
+	}
+	return def
+}
+
+func GetOptionalIntValue(name string, def int, values map[string]any) int {
+	if val, ok := values[name].(int); ok {
+		return val
+	}
+	if val, ok := values[name].(int64); ok {
+		return int(val)
+	}
+	return def
+}
+
+func URLFromDatabaseConfiguration(schema string, defport int, values map[string]any) string {
+	hostname := GetRequiredStringValue("Hostname", values)
+	username := GetOptionalStringValue("Username", "", values)
+	password := GetOptionalStringValue("Password", "", values)
+	var port int
+	if defport > 0 {
+		port = GetOptionalIntValue("Port", defport, values)
+	}
+	database := GetRequiredStringValue("Database", values)
+	var u url.URL
+	u.Scheme = schema
+	if username != "" {
+		u.User = url.UserPassword(username, password)
+	}
+	if defport > 0 {
+		u.Host = fmt.Sprintf("%s:%d", hostname, port)
+	} else {
+		u.Host = hostname
+	}
+	u.Path = database
+	return u.String()
+}
+
+func NewDatabaseConfiguration(defport int) []DriverField {
+	fields := []DriverField{
+		RequiredStringField("Database", "The database name to use", nil),
+		OptionalStringField("Username", "The username to database", nil),
+		OptionalPasswordField("Password", "The password to database", nil),
+		RequiredStringField("Hostname", "The hostname or ip address to database", nil),
+	}
+	if defport > 0 {
+		fields = append(fields, OptionalNumberField("Port", "The port to database", IntPointer(defport)))
+	}
+	return fields
 }

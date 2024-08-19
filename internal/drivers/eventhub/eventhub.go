@@ -260,6 +260,28 @@ func (p *eventHubDriver) Test(ctx context.Context, logger logger.Logger, url str
 	return p.producer.Close(context.Background())
 }
 
+// Configuration returns the configuration fields for the driver.
+func (p *eventHubDriver) Configuration() []internal.DriverField {
+	return []internal.DriverField{
+		internal.RequiredStringField("Connection String", "The connection string primary key from the Event Hub console.", nil),
+	}
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *eventHubDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	val := internal.GetRequiredStringValue("Connection String", values)
+	// example:
+	// Endpoint=sb://shopmonkey-xx-test.servicebus.windows.net/;SharedAccessKeyName=send;SharedAccessKey=x/x+x+x+x=;EntityPath=shopmonkey-eds-test
+	if !strings.HasPrefix(val, "Endpoint=") {
+		return "", []internal.FieldError{internal.NewFieldError("Connection String", "expected to start with the prefix Endpoint=")}
+	}
+	i := strings.Index(val, "://")
+	if i < 0 {
+		return "", []internal.FieldError{internal.NewFieldError("Connection String", "expected a url scheme after Endpoint= prefix")}
+	}
+	return "eventhub://" + val[i+3:], nil
+}
+
 func init() {
 	internal.RegisterDriver("eventhub", &eventHubDriver{})
 	internal.RegisterImporter("eventhub", &eventHubDriver{})

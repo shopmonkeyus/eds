@@ -238,6 +238,16 @@ func (p *mysqlDriver) Test(ctx context.Context, logger logger.Logger, url string
 	return db.Close()
 }
 
+// Configuration returns the configuration fields for the driver.
+func (p *mysqlDriver) Configuration() []internal.DriverField {
+	return internal.NewDatabaseConfiguration(3306)
+}
+
+// Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
+func (p *mysqlDriver) Validate(values map[string]any) (string, []internal.FieldError) {
+	return internal.URLFromDatabaseConfiguration("mysql", 3306, values), nil
+}
+
 func init() {
 	var driver mysqlDriver
 	internal.RegisterDriver("mysql", &driver)
