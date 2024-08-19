@@ -6,7 +6,7 @@ import (
 	"net/url"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/shopmonkeyus/eds-server/internal/tracker"
+	"github.com/shopmonkeyus/eds/internal/tracker"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 

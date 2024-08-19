@@ -9,9 +9,9 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/importer"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/importer"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 

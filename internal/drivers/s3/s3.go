@@ -21,9 +21,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/importer"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/importer"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 

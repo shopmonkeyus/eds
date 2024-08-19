@@ -8,7 +8,7 @@ import (
 
 	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal/util"
 )
 
 var companyIDRE = regexp.MustCompile(`^dbchange\.\*\.\*\.([a-f0-9-]+)\.`)

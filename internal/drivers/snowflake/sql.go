@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/util"
 )
 
 var mustEscape = regexp.MustCompile(`['\n\r\t]`)
@@ -235,7 +235,7 @@ func getConnectionStringFromURL(urlString string) (string, error) {
 	str.WriteString(u.Path)
 	v := u.Query()
 	v.Set("client_session_keep_alive", "true")
-	v.Set("application", "eds-server")
+	v.Set("application", "eds")
 	str.WriteString("?")
 	str.WriteString(v.Encode())
 	return str.String(), nil

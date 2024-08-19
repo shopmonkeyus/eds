@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	js "github.com/santhosh-tekuri/jsonschema/v5"
-	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds/internal"
 )
 
 type SchemaValidator struct {

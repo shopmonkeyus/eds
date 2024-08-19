@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	cnats "github.com/shopmonkeyus/go-common/nats"
 	"github.com/vmihailenco/msgpack"
@@ -465,7 +465,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	}
 
 	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-server-"+info.serverID, url, natsCredentials)
+	nc, err := cnats.NewNats(logger, "eds-"+info.serverID, url, natsCredentials)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
 	}
@@ -631,7 +631,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	if config.Suffix != "" {
 		suffix = "-" + config.Suffix
 	}
-	name := fmt.Sprintf("eds-server-%s%s", info.serverID, suffix)
+	name := fmt.Sprintf("eds-%s%s", info.serverID, suffix)
 	var subjects []string
 	for _, companyID := range info.companyIDs {
 		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"

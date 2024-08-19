@@ -19,11 +19,11 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/consumer"
-	"github.com/shopmonkeyus/eds-server/internal/notification"
-	"github.com/shopmonkeyus/eds-server/internal/upgrade"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/consumer"
+	"github.com/shopmonkeyus/eds/internal/notification"
+	"github.com/shopmonkeyus/eds/internal/upgrade"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
 	cstr "github.com/shopmonkeyus/go-common/string"
@@ -342,7 +342,7 @@ func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, session
 var serverIgnoreFlags = map[string]bool{
 	"--api-url":        true,
 	"--api-key":        true,
-	"--eds-server-id":  true,
+	"--eds-id":         true,
 	"--silent":         true,
 	"--port":           true,
 	"--health-port":    true,
@@ -653,7 +653,7 @@ var serverCmd = &cobra.Command{
 				}
 			}
 			pause()
-			fn := filepath.Join(dataDir, "eds-server-"+versionWithoutV)
+			fn := filepath.Join(dataDir, "eds-"+versionWithoutV)
 			c := exec.Command(os.Args[0], "download", version, fn, fmt.Sprintf("--verbose=%v", verbose))
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
@@ -1131,8 +1131,8 @@ func init() {
 	viper.BindPFlag("token", serverCmd.Flags().Lookup("api-key"))
 
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
-	serverCmd.Flags().String("eds-server-id", "", "the EDS server ID")
-	viper.BindPFlag("server_id", serverCmd.Flags().Lookup("eds-server-id"))
+	serverCmd.Flags().String("eds-id", "", "the EDS server ID")
+	viper.BindPFlag("server_id", serverCmd.Flags().Lookup("eds-id"))
 	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
 	serverCmd.Flags().MarkHidden("companyIds") // not intended for production use
 	serverCmd.Flags().Bool("keep-logs", false, "keep logs after the server exits instead of deleting them")

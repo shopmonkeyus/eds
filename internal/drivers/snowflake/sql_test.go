@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/registry"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/registry"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,7 +51,7 @@ UPDATE "order" SET "updatedDate"='2024-07-11T21:16:51.70856Z' WHERE "id"='zzdb46
 func TestConnectionString(t *testing.T) {
 	url, err := getConnectionStringFromURL("snowflake://user:password@account/db?foo=bar")
 	assert.NoError(t, err)
-	assert.Equal(t, "user:password@account/db?application=eds-server&client_session_keep_alive=true&foo=bar", url)
+	assert.Equal(t, "user:password@account/db?application=eds&client_session_keep_alive=true&foo=bar", url)
 }
 
 func TestValidate(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds/internal"
 	"github.com/stretchr/testify/assert"
 )
 

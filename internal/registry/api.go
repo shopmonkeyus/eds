@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/util"
 )
 
 type APIRegistry struct {

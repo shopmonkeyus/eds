@@ -11,21 +11,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	// Register all drivers
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/eventhub"
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/file"
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/kafka"
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/mysql"
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/postgresql"
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/s3"
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/snowflake"
-	_ "github.com/shopmonkeyus/eds-server/internal/drivers/sqlserver"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/eventhub"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/file"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/kafka"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/mysql"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/postgresql"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/s3"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/snowflake"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/sqlserver"
 )
 
 var dataDir string
@@ -144,7 +144,7 @@ func (s *logFileSink) Rotate() (string, error) {
 	if err := os.MkdirAll(s.logDir, 0755); err != nil {
 		return "", err
 	}
-	f, err := os.Create(filepath.Join(s.logDir, fmt.Sprintf("eds-server-%d.log", time.Now().UnixMilli())))
+	f, err := os.Create(filepath.Join(s.logDir, fmt.Sprintf("eds-%d.log", time.Now().UnixMilli())))
 	if err != nil {
 		return "", err
 	}
@@ -246,8 +246,8 @@ func loadSchemaValidator(cmd *cobra.Command) (internal.SchemaValidator, error) {
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:  "eds-server",
-	Long: "Shopmonkey Enterprise Data Streaming server (EDS) \nFor detailed information, see: https://shopmonkey.dev/eds \nand https://github.com/shopmonkeyus/eds-server",
+	Use:  "eds",
+	Long: "Shopmonkey Enterprise Data Streaming server (EDS) \nFor detailed information, see: https://shopmonkey.dev/eds \nand https://github.com/shopmonkeyus/eds",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

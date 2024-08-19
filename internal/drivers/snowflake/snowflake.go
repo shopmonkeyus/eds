@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	sf "github.com/snowflakedb/gosnowflake"
 	"golang.org/x/sync/semaphore"
@@ -144,7 +144,7 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 	if count > 0 {
 		logger.Debug("flush: %d / %d", count, sequence+1)
 		sequence++
-		tag := fmt.Sprintf("eds-server-%s/%d/%d", p.sessionID, sequence, count)
+		tag := fmt.Sprintf("eds-%s/%d/%d", p.sessionID, sequence, count)
 		ctx := sf.WithQueryTag(context.Background(), tag)
 		var query strings.Builder
 		var statementCount int
