@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -211,11 +212,17 @@ func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
 	dataDir, _ = filepath.Abs(filepath.Clean(dataDir))
 
 	if !util.Exists(dataDir) {
-		os.MkdirAll(dataDir, 0700)
+		if ok, err := util.IsDirWritable(filepath.Dir(dataDir)); !ok {
+			logger.Fatal("%s", err)
+		}
+		if err := os.MkdirAll(dataDir, 0700); err != nil {
+			logger.Fatal("mkdir: %s", err)
+		}
 		logger.Debug("making data directory: %s", dataDir)
-	}
-	if ok, err := util.IsDirWritable(dataDir); !ok {
-		logger.Fatal("%s", err)
+	} else {
+		if ok, err := util.IsDirWritable(dataDir); !ok {
+			logger.Fatal("%s", err)
+		}
 	}
 
 	logger.Debug("using data directory: %s", dataDir)
@@ -252,6 +259,24 @@ func Execute() {
 	}
 }
 
+func getExecutable() string {
+	ex, err := os.Executable()
+	if err != nil {
+		ex = os.Args[0]
+	}
+	return ex
+}
+
+func getCommandExample(command string, args ...string) string {
+	ex := getExecutable()
+	if strings.Contains(ex, "go-build") {
+		// If we are running in a go build environment, we need to tell the user how to start the server
+		return fmt.Sprintf("`go run . %s %s`", command, strings.Join(args, " "))
+	} else {
+		return fmt.Sprintf("`%s %s %s`", ex, command, strings.Join(args, " "))
+	}
+}
+
 func init() {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -265,5 +290,5 @@ func init() {
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
-	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", filepath.Join(cwd, "dataDir"), "the data directory for storing state, logs, and other data")
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", filepath.Join(cwd, "data"), "the data directory for storing state, logs, and other data")
 }

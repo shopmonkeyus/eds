@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/shopmonkeyus/eds-server/internal/util"
@@ -101,16 +100,7 @@ var enrollCmd = &cobra.Command{
 			logger.Fatal("failed to write to token file: %w", err)
 		}
 		logger.Info("Enrollment successful!")
-		ex, err := os.Executable()
-		if err != nil {
-			ex = os.Args[0]
-		}
-		if strings.Contains(ex, "go-build") {
-			// If we are running in a go build environment, we need to tell the user how to start the server
-			logger.Info("run `go run . server` to start the server")
-		} else {
-			logger.Info("run `%s server` to start the server", filepath.Base(ex))
-		}
+		logger.Info("run %s to start the server", getCommandExample("server"))
 	},
 }
 

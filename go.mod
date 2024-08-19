@@ -5,6 +5,7 @@ go 1.22
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.2.2
 	github.com/BurntSushi/toml v1.4.0
+	github.com/ProtonMail/gopenpgp/v3 v3.0.0-alpha.4-proton
 	github.com/aws/aws-sdk-go-v2 v1.30.4
 	github.com/aws/aws-sdk-go-v2/config v1.27.28
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.28
@@ -47,6 +48,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.4.0 // indirect
 	github.com/Azure/go-amqp v1.0.5 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
+	github.com/ProtonMail/go-crypto v1.1.0-alpha.5-proton // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.4 // indirect
@@ -75,6 +77,7 @@ require (
 	github.com/charmbracelet/x/input v0.1.3 // indirect
 	github.com/charmbracelet/x/term v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.1.2 // indirect
+	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
 	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
