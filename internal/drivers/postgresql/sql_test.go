@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/registry"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/registry"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,10 +37,10 @@ func TestDBChanges(t *testing.T) {
 func TestDBConnectionString(t *testing.T) {
 	val, err := getConnectionStringFromURL("postgres://localhost")
 	assert.NoError(t, err)
-	assert.Equal(t, "postgresql://localhost:5432?application_name=eds-server", val)
+	assert.Equal(t, "postgresql://localhost:5432?application_name=eds", val)
 	val, err = getConnectionStringFromURL("postgres://localhost:15432")
 	assert.NoError(t, err)
-	assert.Equal(t, "postgresql://localhost:15432?application_name=eds-server", val)
+	assert.Equal(t, "postgresql://localhost:15432?application_name=eds", val)
 	val, err = getConnectionStringFromURL("postgres://localhost:15432?application_name=foo")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://localhost:15432?application_name=foo", val)

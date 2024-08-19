@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"os"
 
-	"github.com/shopmonkeyus/eds-server/cmd"
+	"github.com/shopmonkeyus/eds/cmd"
 )
 
 var version = "dev"

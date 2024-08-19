@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/consumer"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/consumer"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 

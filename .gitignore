@@ -1,6 +1,7 @@
 /dump
 /data
 /dist/
+/eds
 /eds-server
 *.creds
 .DS_Store
@@ -8,6 +9,7 @@
 /schema.json
 /tables.json
 /sqlserver-data/
+/eds-data.db
 /eds-server-data.db
 /datadir
 /shopmonkey.key.asc

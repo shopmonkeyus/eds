@@ -108,7 +108,7 @@ func (t *Tracker) DeleteKey(keys ...string) error {
 
 // TrackerFilenameFromDir returns the filename for the tracker database based on a specific directory.
 func TrackerFilenameFromDir(dir string) string {
-	return filepath.Join(dir, "eds-server-data.db")
+	return filepath.Join(dir, "eds-data.db")
 }
 
 // NewTracker will create a new tracker with the given configuration.

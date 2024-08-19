@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/shirou/gopsutil/v4/host"
-	"github.com/shopmonkeyus/eds-server/internal/upgrade"
+	"github.com/shopmonkeyus/eds/internal/upgrade"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +32,7 @@ var downloadCmd = &cobra.Command{
 		if Host.Platform == "windows" {
 			ext = "zip"
 		}
-		binaryURL := fmt.Sprintf("https://github.com/shopmonkeyus/eds-server/releases/download/%s/eds-server_%s_%s.%s", version, platform, arch, ext)
+		binaryURL := fmt.Sprintf("https://github.com/shopmonkeyus/eds/releases/download/%s/eds_%s_%s.%s", version, platform, arch, ext)
 		signatureURL := fmt.Sprintf("%s.sig", binaryURL)
 		if err := upgrade.Upgrade(upgrade.UpgradeConfig{
 			Logger:       logger,

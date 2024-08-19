@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ARTIFACT_REPO: public
-      IMAGE_NAME: eds-server
+      IMAGE_NAME: eds
       PLATFORM_PROJECT_ID: shopmonkey-v2
     steps:
       - name: Checkout code

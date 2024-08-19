@@ -1,4 +1,4 @@
-module github.com/shopmonkeyus/eds-server
+module github.com/shopmonkeyus/eds
 
 go 1.22
 

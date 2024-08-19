@@ -3,7 +3,7 @@
 ![shopmonkey!](https://www.shopmonkey.io/static/sm-light-logo-2c92d57bf5d188bb44c1b29353579e1f.svg)
 
 > [!IMPORTANT]
-> The main branch is now for the new v3 version. If you're looking for the previous v2 version, use the [v2 branch](https://github.com/shopmonkeyus/eds-server/tree/v2).
+> The main branch is now for the new v3 version. If you're looking for the previous v2 version, use the [v2 branch](https://github.com/shopmonkeyus/eds/tree/v2).
 
 # Overview
 
@@ -11,12 +11,12 @@ This repository contains the reference implementation of the Enterprise Data Str
 
 ## Download Release Binary
 
-You can download release binary for different operation systems from the [Release](https://github.com/shopmonkeyus/eds-server/releases) section.
+You can download release binary for different operation systems from the [Release](https://github.com/shopmonkeyus/eds/releases) section.
 
 ## Get Help
 
 ```
-./eds-server help
+./eds help
 ```
 
 ## Usage
@@ -42,19 +42,19 @@ The target driver is configured using the `--url` option. The driver that is sel
 You can get a list of drivers with example URL patterns by running the following:
 
 ```
-./eds-server server help
+./eds server help
 ```
 
 You can get specific help for a driver with the following:
 
 ```
-./eds-server server help [driver]
+./eds server help [driver]
 ```
 
 Such as:
 
 ```
-./eds-server server help s3
+./eds server help s3
 ```
 
 ## Importing Data
@@ -64,7 +64,7 @@ The import command will take a snapshot of the data in the Shopmonkey Database a
 Example:
 
 ```
-./eds-server import --api-key 123 --url "postgresql://admin:root@localhost:5432/test?sslmode=disable"
+./eds import --api-key 123 --url "postgresql://admin:root@localhost:5432/test?sslmode=disable"
 ```
 
 This command will import data from the Shopmonkey Database into PostgreSQL database and exit once completed.
@@ -124,7 +124,7 @@ The following system information is sent to Shopmonkey:
 - Version of Golang that the server was compiled with
 - Version of EDS server
 
-You can audit this information by reviewing the [sysinfo.go](https://github.com/shopmonkeyus/eds-server/blob/main/internal/util/sysinfo.go) and [consumer.go](https://github.com/shopmonkeyus/eds-server/blob/main/internal/consumer/consumer.go) files.
+You can audit this information by reviewing the [sysinfo.go](https://github.com/shopmonkeyus/eds/blob/main/internal/util/sysinfo.go) and [consumer.go](https://github.com/shopmonkeyus/eds/blob/main/internal/consumer/consumer.go) files.
 
 In addition, the server also deliver the metrics mentioned above.
 
@@ -144,16 +144,16 @@ Coming soon.
 
 You can use Docker to run the server.
 
-The image path is: `us-docker.pkg.dev/shopmonkey-v2/public/eds-server`
+The image path is: `us-docker.pkg.dev/shopmonkey-v2/public/eds`
 
 Each release will automatically add 2 image tags in the format:
 
-- `us-docker.pkg.dev/shopmonkey-v2/public/eds-server:<version>`
-- `us-docker.pkg.dev/shopmonkey-v2/public/eds-server:latest`
+- `us-docker.pkg.dev/shopmonkey-v2/public/eds:<version>`
+- `us-docker.pkg.dev/shopmonkey-v2/public/eds:latest`
 
 For example, for the v3.0.2 release, the Docker image tag to use is:
 
-`us-docker.pkg.dev/shopmonkey-v2/public/eds-server:v3.0.2`
+`us-docker.pkg.dev/shopmonkey-v2/public/eds:v3.0.2`
 
 > [!CAUTION]
 > You should pin the version of the release when referencing the Docker image in your deployment.
@@ -206,7 +206,7 @@ gpg --verify somefile.sig somefile
 You can also run the command `publickey` to print out the public key:
 
 ```
-./eds-server publickey
+./eds publickey
 ```
 
 ## Responsible Disclosure

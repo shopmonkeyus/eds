@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"strings"
 
-	"github.com/shopmonkeyus/eds-server/internal"
+	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 

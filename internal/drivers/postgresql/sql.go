@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	"github.com/shopmonkeyus/eds-server/internal"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/util"
 )
 
 const magicEscape = "$_H_$"
@@ -298,7 +298,7 @@ func getConnectionStringFromURL(urlstr string) (string, error) {
 	}
 	if !u.Query().Has("application_name") {
 		q := u.Query()
-		q.Set("application_name", "eds-server")
+		q.Set("application_name", "eds")
 		u.RawQuery = q.Encode()
 	}
 	return u.String(), nil

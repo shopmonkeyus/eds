@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/ProtonMail/gopenpgp/v3/crypto"
-	"github.com/shopmonkeyus/eds-server/internal/util"
+	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -33,7 +33,7 @@ func Upgrade(config UpgradeConfig) error {
 	defer func() {
 		config.Logger.Debug("download took %s", time.Since(started))
 	}()
-	tmp, err := os.CreateTemp("", "eds-server")
+	tmp, err := os.CreateTemp("", "eds")
 	if err != nil {
 		return fmt.Errorf("error creating temp file: %w", err)
 	}
@@ -142,7 +142,7 @@ func Upgrade(config UpgradeConfig) error {
 				return fmt.Errorf("error reading tar header: %w", err)
 			}
 			config.Logger.Trace("tar file: %s", header.Name)
-			if header.Name == "eds-server" {
+			if header.Name == "eds" {
 				if _, err := io.Copy(of, tr); err != nil {
 					return fmt.Errorf("error copying file from archive: %w", err)
 				}
