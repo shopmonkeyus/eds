@@ -588,7 +588,7 @@ var importCmd = &cobra.Command{
 				tableExportInfo = tableData
 			}
 		} else {
-			tableData, err := loadTableExportInfo(dataDir, theTracker)
+			tableData, err := loadTableExportInfo(logger, dataDir, theTracker)
 			if err != nil {
 				logger.Fatal("%s", err)
 			}

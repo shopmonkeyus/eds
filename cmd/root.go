@@ -231,7 +231,7 @@ func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
 	return dataDir
 }
 
-func loadTableExportInfo(datadir string, theTracker *tracker.Tracker) ([]TableExportInfo, error) {
+func loadTableExportInfo(logger logger.Logger, datadir string, theTracker *tracker.Tracker) ([]TableExportInfo, error) {
 	found, val, err := theTracker.GetKey(trackerTableExportKey)
 	if err != nil {
 		return nil, fmt.Errorf("error loading table export data from tracker: %w", err)
@@ -254,6 +254,7 @@ func loadTableExportInfo(datadir string, theTracker *tracker.Tracker) ([]TableEx
 			}
 			of.Close()
 			os.Remove(fn) // remove since this file has been migrated
+			logger.Info("migrated table export data from %s to tracker and removed it", fn)
 			return tableData, nil
 		}
 		return nil, fmt.Errorf("no table export data found in tracker")
