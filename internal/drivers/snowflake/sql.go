@@ -304,3 +304,18 @@ func createSQL(s *internal.Schema) string {
 	sql.WriteString("\n);\n")
 	return sql.String()
 }
+
+func addNewColumnsSQL(columns []string, s *internal.Schema) string {
+	var sql strings.Builder
+	for _, column := range columns {
+		prop := s.Properties[column]
+		sql.WriteString("ALTER TABLE ")
+		sql.WriteString(util.QuoteIdentifier(s.Table))
+		sql.WriteString(" ADD COLUMN ")
+		sql.WriteString(util.QuoteIdentifier(column))
+		sql.WriteString(" ")
+		sql.WriteString(propTypeToSQLType(prop))
+		sql.WriteString(";\n")
+	}
+	return sql.String()
+}

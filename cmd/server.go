@@ -1143,10 +1143,6 @@ func init() {
 	serverCmd.Flags().MarkDeprecated("health-port", "use --port instead")
 
 	// internal use only
-	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
-	serverCmd.Flags().MarkHidden("schema")
-	serverCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
-	serverCmd.Flags().MarkHidden("tables")
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().MarkHidden("api-url")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")

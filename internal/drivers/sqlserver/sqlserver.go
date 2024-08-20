@@ -229,6 +229,10 @@ func (p *sqlserverDriver) Help() string {
 	return help.String()
 }
 
+func (p *sqlserverDriver) Aliases() []string {
+	return []string{"mssql"}
+}
+
 // Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 func (p *sqlserverDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
 	db, err := p.connectToDB(ctx, url)
@@ -248,8 +252,25 @@ func (p *sqlserverDriver) Validate(values map[string]any) (string, []internal.Fi
 	return internal.URLFromDatabaseConfiguration("sqlserver", 1433, values), nil
 }
 
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := createSQL(schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (p *sqlserverDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := addNewColumnsSQL(columns, schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
 func init() {
-	var driver sqlserverDriver
-	internal.RegisterDriver("sqlserver", &driver)
-	internal.RegisterImporter("sqlserver", &driver)
+	internal.RegisterDriver("sqlserver", &sqlserverDriver{})
+	internal.RegisterImporter("sqlserver", &sqlserverDriver{})
 }

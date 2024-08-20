@@ -73,8 +73,6 @@ var forkCmd = &cobra.Command{
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
 		port := mustFlagInt(cmd, "port", false)
 
-		schemaFile, tablesFile := getSchemaAndTableFiles(datadir)
-
 		// check to see if there's a schema validator and if so load it
 		validator, err := loadSchemaValidator(cmd)
 		if err != nil {
@@ -92,42 +90,22 @@ var forkCmd = &cobra.Command{
 		}
 		defer tracker.Close()
 
-		var schemaRegistry internal.SchemaRegistry
-
-		if util.Exists(schemaFile) {
-			schemaRegistry, err = registry.NewFileRegistry(schemaFile)
-			if err != nil {
-				logger.Error("error creating registry: %s", err)
-				os.Exit(3)
-			}
-		} else {
-			apiUrl := mustFlagString(cmd, "api-url", true)
-			schemaRegistry, err = registry.NewAPIRegistry(apiUrl)
-			if err != nil {
-				logger.Error("error creating registry: %s", err)
-				os.Exit(3)
-			}
+		apiUrl := mustFlagString(cmd, "api-url", true)
+		schemaRegistry, err := registry.NewAPIRegistry(ctx, apiUrl, tracker)
+		if err != nil {
+			logger.Error("error creating registry: %s", err)
+			os.Exit(3)
 		}
 
-		// TODO: move these into the tracker
-		var exportTableTimestamps map[string]*time.Time
-		if exportTableData, err := loadTablesJSON(tablesFile); err != nil {
-			if cmd.Flags().Changed("tables") {
-				logger.Error("provided tables file %s not found!", tablesFile)
-				os.Exit(3)
-			}
-			if errors.Is(err, os.ErrNotExist) {
-				logger.Info("tables file %s not found", tablesFile)
-				// this is okay
-			} else {
-				logger.Error("error loading tables: %s", err)
-				os.Exit(3)
-			}
-		} else {
-			exportTableTimestamps = make(map[string]*time.Time)
-			for _, data := range exportTableData {
-				exportTableTimestamps[data.Table] = &data.Timestamp
-			}
+		tableData, err := loadTableExportInfo(datadir, tracker)
+		if err != nil {
+			logger.Error("error loading table export data: %s", err)
+			os.Exit(3)
+		}
+
+		exportTableTimestamps := make(map[string]*time.Time)
+		for _, data := range tableData {
+			exportTableTimestamps[data.Table] = &data.Timestamp
 		}
 
 		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker, datadir)
@@ -204,6 +182,7 @@ var forkCmd = &cobra.Command{
 						DeliverAll:            restartFlag,
 						SchemaValidator:       validator,
 						CompanyIDs:            companyIds,
+						Registry:              schemaRegistry,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)

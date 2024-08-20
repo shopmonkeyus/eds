@@ -30,6 +30,7 @@ var _ internal.Driver = (*postgresqlDriver)(nil)
 var _ internal.DriverLifecycle = (*postgresqlDriver)(nil)
 var _ internal.Importer = (*postgresqlDriver)(nil)
 var _ internal.DriverHelp = (*postgresqlDriver)(nil)
+var _ internal.DriverMigration = (*postgresqlDriver)(nil)
 
 func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
 	urlstr, err := getConnectionStringFromURL(url)
@@ -281,8 +282,25 @@ func (p *postgresqlDriver) Validate(values map[string]any) (string, []internal.F
 	return internal.URLFromDatabaseConfiguration("postgres", 5432, values), nil
 }
 
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (p *postgresqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := createSQL(schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (p *postgresqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := addNewColumnsSQL(columns, schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
 func init() {
-	var driver postgresqlDriver
-	internal.RegisterDriver("postgres", &driver)
-	internal.RegisterImporter("postgres", &driver)
+	internal.RegisterDriver("postgres", &postgresqlDriver{})
+	internal.RegisterImporter("postgres", &postgresqlDriver{})
 }

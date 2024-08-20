@@ -248,8 +248,25 @@ func (p *mysqlDriver) Validate(values map[string]any) (string, []internal.FieldE
 	return internal.URLFromDatabaseConfiguration("mysql", 3306, values), nil
 }
 
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (p *mysqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := createSQL(schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := addNewColumnsSQL(columns, schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
 func init() {
-	var driver mysqlDriver
-	internal.RegisterDriver("mysql", &driver)
-	internal.RegisterImporter("mysql", &driver)
+	internal.RegisterDriver("mysql", &mysqlDriver{})
+	internal.RegisterImporter("mysql", &mysqlDriver{})
 }

@@ -81,7 +81,7 @@ func (p *fileDriver) getFileName(table string, id string) string {
 }
 
 func (p *fileDriver) writeEvent(logger logger.Logger, event internal.DBChangeEvent, dryRun bool) error {
-	key := p.getFileName(event.Table, event.ID)
+	key := p.getFileName(event.Table, event.GetPrimaryKey())
 	buf := []byte(util.JSONStringify(event))
 	fp := filepath.Join(p.dir, key)
 	if !dryRun {

@@ -40,8 +40,14 @@ type SchemaRegistry interface {
 	// GetSchema returns the schema for a table at a specific version.
 	GetSchema(table string, version string) (*Schema, error)
 
-	// Save the latest schema to a file.
-	Save(filename string) error
+	// GetTableVersion gets the current version of the schema for a table.
+	GetTableVersion(table string, version string) (bool, string, error)
+
+	// SetTableVersion sets the version of a table to a specific version.
+	SetTableVersion(table string, version string) error
+
+	// Close will shutdown the schema optionally flushing any caches.
+	Close() error
 }
 
 // SchemaValidator is the interface for a schema validator.

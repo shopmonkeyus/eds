@@ -1,9 +1,6 @@
 package registry
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
 	"sort"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -30,18 +27,4 @@ func sortTable(tables internal.SchemaMap) (internal.SchemaMap, tableToObjectName
 		kv[d.Table] = d
 	}
 	return kv, otm
-}
-
-func save(filename string, schema internal.SchemaMap) error {
-	of, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("error creating file %s: %w", filename, err)
-	}
-	defer of.Close()
-	enc := json.NewEncoder(of)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(schema); err != nil {
-		return fmt.Errorf("error encoding schema: %w", err)
-	}
-	return nil
 }

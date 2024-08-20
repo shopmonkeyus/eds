@@ -355,8 +355,25 @@ func (p *snowflakeDriver) Validate(values map[string]any) (string, []internal.Fi
 	return internal.URLFromDatabaseConfiguration("snowflake", -1, values), nil
 }
 
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (p *snowflakeDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := createSQL(schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (p *snowflakeDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := addNewColumnsSQL(columns, schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
 func init() {
-	var driver snowflakeDriver
-	internal.RegisterDriver("snowflake", &driver)
-	internal.RegisterImporter("snowflake", &driver)
+	internal.RegisterDriver("snowflake", &snowflakeDriver{})
+	internal.RegisterImporter("snowflake", &snowflakeDriver{})
 }

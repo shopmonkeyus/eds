@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,6 +85,9 @@ type ConsumerConfig struct {
 	// EmptyBufferPauseTime is the time to wait when the buffer is empty to prevent CPU spinning.
 	EmptyBufferPauseTime time.Duration
 
+	// Registry returns the schema registry to use.
+	Registry internal.SchemaRegistry
+
 	sessionIDCallback func(id string) // only used in testing
 }
 
@@ -114,6 +118,8 @@ type Consumer struct {
 	maxPendingLatency    time.Duration
 	emptyBufferPauseTime time.Duration
 	offset               int64
+	supportsMigration    bool
+	registry             internal.SchemaRegistry
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -244,6 +250,57 @@ func (c *Consumer) Error() <-chan error {
 	return c.subError
 }
 
+func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Logger, event internal.DBChangeEvent) error {
+	found, version, err := c.registry.GetTableVersion(event.Table, event.ModelVersion)
+	if err != nil {
+		return fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+	}
+	if !found || version != event.ModelVersion {
+		newschema, err := c.registry.GetSchema(event.Table, event.ModelVersion)
+		if err != nil {
+			return fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+		}
+		migration := c.driver.(internal.DriverMigration)
+		if !found {
+			logger.Debug("need to migrate new table: %s, model version: %s", event.Table, event.ModelVersion)
+			if err := migration.MigrateNewTable(ctx, logger, newschema); err != nil {
+				return fmt.Errorf("error migrating new table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			}
+			logger.Debug("migrated new table: %s, model version: %s", event.Table, event.ModelVersion)
+			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
+				return fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			}
+			return nil
+		}
+		oldschema, err := c.registry.GetSchema(event.Table, version)
+		if err != nil {
+			return fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
+		}
+		// figure out which columns are new
+		columns := make([]string, 0)
+		for _, col := range newschema.Columns {
+			if !util.SliceContains(oldschema.Columns, col) {
+				columns = append(columns, col)
+			}
+		}
+		// we only care about if there are new columns
+		if len(columns) > 0 {
+			logger.Debug("need to migrate table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
+			if err := migration.MigrateNewColumns(ctx, logger, newschema, columns); err != nil {
+				return fmt.Errorf("error migrating new columns for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			}
+			logger.Debug("migrated table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
+		} else {
+			logger.Debug("new table: %s with different model version: %s but no new columns added", event.Table, event.ModelVersion)
+		}
+		// we want to bring the table up to the new version in all cases
+		if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
+			return fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+		}
+	}
+	return nil
+}
+
 func (c *Consumer) bufferer() {
 	c.logger.Trace("starting bufferer")
 	c.waitGroup.Add(1)
@@ -299,6 +356,15 @@ func (c *Consumer) bufferer() {
 				continue
 			}
 			evt.NatsMsg = msg // in case the driver wants to get specific information from it for logging, etc
+
+			// check to see if we need to perform a migration
+			if c.supportsMigration {
+				if err := c.handlePossibleMigration(c.ctx, log, evt); err != nil {
+					c.handleError(err)
+					return
+				}
+			}
+
 			flush, err := c.driver.Process(log, evt)
 			if err != nil {
 				internal.PendingEvents.Dec()
@@ -555,6 +621,10 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.subError = make(chan error, 10)
 	consumer.sessionID = info.sessionID
 	consumer.validator = config.SchemaValidator
+	consumer.registry = config.Registry
+	if _, ok := config.Driver.(internal.DriverMigration); ok {
+		consumer.supportsMigration = true
+	}
 	consumer.heartbeatInterval = config.HeartbeatInterval
 	if consumer.heartbeatInterval == 0 {
 		consumer.heartbeatInterval = time.Minute
