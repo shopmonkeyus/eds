@@ -411,13 +411,7 @@ var importCmd = &cobra.Command{
 		if err != nil {
 			logger.Fatal("error creating tracker: %s", err)
 		}
-		defer func() {
-			// // remove the tracker table export key since we're starting over
-			// if err := theTracker.DeleteKey(trackerTableExportKey); err != nil {
-			// 	logger.Error("error deleting tracker table export key: %s", err)
-			// }
-			theTracker.Close()
-		}()
+		defer theTracker.Close()
 
 		// check to see if there's a schema validator and if so load it
 		validator, err := loadSchemaValidator(cmd)

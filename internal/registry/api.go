@@ -151,11 +151,6 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 	return &schema, nil
 }
 
-// Save the latest schema to a file.
-func (r *APIRegistry) Save(filename string) error {
-	return nil
-}
-
 type errorResponse struct {
 	Message string `json:"message"`
 }
