@@ -14,7 +14,7 @@ import (
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/stretchr/testify/assert"
-	"github.com/vmihailenco/msgpack"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func runNatsTestServer(fn func(natsurl string, nc *nats.Conn, js jetstream.JetStream)) {
@@ -361,8 +361,14 @@ func TestHeartbeats(t *testing.T) {
 
 		assert.Equal(t, "msgpack", msg.Header.Get("content-encoding"))
 
+		msgpackDecoder := func(buf []byte) *msgpack.Decoder {
+			dec := msgpack.NewDecoder(bytes.NewReader(buf))
+			dec.SetCustomStructTag("json")
+			return dec
+		}
+
 		var payload heartbeat
-		assert.NoError(t, msgpack.NewDecoder(bytes.NewReader(msg.Data)).UseJSONTag(true).Decode(&payload))
+		assert.NoError(t, msgpackDecoder(msg.Data).Decode(&payload))
 
 		assert.NotEmpty(t, payload.SessionId)
 		assert.Equal(t, consumer.sessionID, payload.SessionId)
@@ -397,7 +403,7 @@ func TestHeartbeats(t *testing.T) {
 		msg = received[1]
 		var payload2 heartbeat
 		assert.Equal(t, "msgpack", msg.Header.Get("content-encoding"))
-		assert.NoError(t, msgpack.NewDecoder(bytes.NewReader(msg.Data)).UseJSONTag(true).Decode(&payload2))
+		assert.NoError(t, msgpackDecoder(msg.Data).Decode(&payload2))
 		assert.NotEmpty(t, payload2.SessionId)
 		assert.Equal(t, consumer.sessionID, payload2.SessionId)
 		assert.Equal(t, int64(1), payload2.Offset)

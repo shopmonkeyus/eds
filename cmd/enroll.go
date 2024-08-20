@@ -64,7 +64,7 @@ var enrollCmd = &cobra.Command{
 			logger.Fatal("error creating request: %s", err)
 		}
 
-		retry := util.NewHTTPRetry(req)
+		retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 		resp, err := retry.Do()
 		if err != nil {
 			logger.Fatal("failed to enroll server: %s", err)
