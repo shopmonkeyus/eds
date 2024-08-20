@@ -60,7 +60,7 @@ func (p *postgresqlDriver) Start(config internal.DriverConfig) error {
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[postgresql]")
+	p.logger = config.Logger.WithPrefix("[postgres]")
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
