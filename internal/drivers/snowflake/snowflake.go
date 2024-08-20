@@ -22,7 +22,7 @@ type snowflakeDriver struct {
 	config    internal.DriverConfig
 	logger    logger.Logger
 	db        *sql.DB
-	schema    internal.SchemaMap
+	registry  internal.SchemaRegistry
 	waitGroup sync.WaitGroup
 	once      sync.Once
 	ctx       context.Context
@@ -66,11 +66,7 @@ func (p *snowflakeDriver) Start(config internal.DriverConfig) error {
 	p.config = config
 	p.ctx = config.Context
 	p.logger = config.Logger.WithPrefix("[snowflake]")
-	schema, err := p.config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		return fmt.Errorf("unable to get schema: %w", err)
-	}
-	p.schema = schema
+	p.registry = config.SchemaRegistry
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return fmt.Errorf("unable to create connection: %w", err)
@@ -114,11 +110,6 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	if _, ok := p.schema[event.Table]; !ok {
-		// NOTE: remove this once we have schema evolution reimplemented
-		logger.Warn("skipping event: %s because table was not found in schema: %s", event.String(), event.Table)
-		return false, nil
-	}
 	object, err := event.GetObject()
 	if err != nil {
 		return false, fmt.Errorf("error getting json object: %w", err)
@@ -176,7 +167,11 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 				key = fmt.Sprintf("snowflake:%s:%s", record.Table, record.Id)
 				deletekeys = append(deletekeys, key)
 			}
-			sql, c := toSQL(record, p.schema, force)
+			schema, err := p.registry.GetSchema(record.Table, record.Event.ModelVersion)
+			if err != nil {
+				return fmt.Errorf("unable to get schema for table: %s (%s). %w", record.Table, record.Event.ModelVersion, err)
+			}
+			sql, c := toSQL(record, schema, force)
 			statementCount += c
 			logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i+1, count, strings.TrimRight(sql, "\n"))
 			query.WriteString(sql)
@@ -219,14 +214,15 @@ func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 	}
 	defer db.Close()
 
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		return err
-	}
-
 	logger := config.Logger.WithPrefix("[snowflake]")
+	p.registry = config.SchemaRegistry
 	executeSQL := util.SQLExecuter(config.Context, logger, db, config.DryRun)
 	logger.Info("loading data into database")
+
+	schema, err := p.registry.GetLatestSchema()
+	if err != nil {
+		return fmt.Errorf("unable to get latest schema: %w", err)
+	}
 
 	// create all the tables
 	for _, table := range config.Tables {

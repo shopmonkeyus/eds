@@ -82,8 +82,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	return sql.String()
 }
 
-func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) {
-	model := schema[c.Table]
+func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 	primaryKeys := model.PrimaryKeys
 	if c.Operation == "DELETE" {
 		var sql strings.Builder

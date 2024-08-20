@@ -145,9 +145,8 @@ func nullableValue(c internal.SchemaProperty, wrap bool) string {
 	}
 }
 
-func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string, int) {
+func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, int) {
 	var sql strings.Builder
-	model := schema[record.Table]
 	var count int
 	if exists || record.Operation == "DELETE" {
 		sql.WriteString(toDeleteSQL(record))

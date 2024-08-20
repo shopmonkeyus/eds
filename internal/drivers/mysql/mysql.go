@@ -20,8 +20,8 @@ const maxBytesSizeInsert = 5_000_000
 type mysqlDriver struct {
 	ctx          context.Context
 	logger       logger.Logger
+	registry     internal.SchemaRegistry
 	db           *sql.DB
-	schema       internal.SchemaMap
 	waitGroup    sync.WaitGroup
 	once         sync.Once
 	pending      strings.Builder
@@ -62,12 +62,7 @@ func (p *mysqlDriver) Start(config internal.DriverConfig) error {
 		return err
 	}
 	p.logger = config.Logger.WithPrefix("[mysql]")
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		p.db.Close()
-		return fmt.Errorf("unable to get schema: %w", err)
-	}
-	p.schema = schema
+	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
 	return nil
@@ -102,7 +97,11 @@ func (p *mysqlDriver) Process(logger logger.Logger, event internal.DBChangeEvent
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql, err := toSQL(event, p.schema)
+	schema, err := p.registry.GetSchema(event.Table, event.ModelVersion)
+	if err != nil {
+		return false, fmt.Errorf("unable to get schema for table: %s (%s). %w", event.Table, event.ModelVersion, err)
+	}
+	sql, err := toSQL(event, schema)
 	if err != nil {
 		return false, err
 	}
@@ -197,6 +196,7 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	}
 	defer db.Close()
 
+	p.registry = config.SchemaRegistry
 	p.importConfig = config
 	p.logger = config.Logger.WithPrefix("[mysql]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
