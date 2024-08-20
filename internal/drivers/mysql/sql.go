@@ -30,7 +30,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 	sql.WriteString("REPLACE INTO ")
 	sql.WriteString(quoteIdentifier(table))
 	var columns []string
-	for _, name := range model.Columns {
+	for _, name := range model.Columns() {
 		columns = append(columns, quoteIdentifier(name))
 	}
 	sql.WriteString(" (")
@@ -41,7 +41,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 	jsonb := util.ToMapOfJSONColumns(model)
 	if operation == "UPDATE" {
 		for _, name := range diff {
-			if !util.SliceContains(model.Columns, name) || name == "id" {
+			if !util.SliceContains(model.Columns(), name) || name == "id" {
 				continue
 			}
 			if val, ok := o[name]; ok {
@@ -51,7 +51,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 				updateValues = append(updateValues, "NULL")
 			}
 		}
-		for _, name := range model.Columns {
+		for _, name := range model.Columns() {
 			if val, ok := o[name]; ok {
 				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
 				insertVals = append(insertVals, v)
@@ -60,7 +60,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 			}
 		}
 	} else {
-		for _, name := range model.Columns {
+		for _, name := range model.Columns() {
 			if val, ok := o[name]; ok {
 				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
 				if name != "id" {
@@ -134,7 +134,7 @@ func createSQL(s *internal.Schema) string {
 	sql.WriteString(quoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
 	var columns []string
-	for _, name := range s.Columns {
+	for _, name := range s.Columns() {
 		if util.SliceContains(s.PrimaryKeys, name) {
 			continue
 		}

@@ -1,5 +1,9 @@
 package internal
 
+import (
+	"sort"
+)
+
 type ItemsType struct {
 	Type   string   `json:"type"`
 	Enum   []string `json:"enum,omitempty"`
@@ -25,7 +29,34 @@ type Schema struct {
 	Table        string                    `json:"table"`
 	ModelVersion string                    `json:"modelVersion"`
 
-	Columns []string `json:"-"`
+	columns []string
+}
+
+func sliceContains(slice []string, val string) bool {
+	for _, s := range slice {
+		if s == val {
+			return true
+		}
+	}
+	return false
+}
+
+// Columns returns the columns for a given schema
+func (s *Schema) Columns() []string {
+	if s.columns != nil {
+		return s.columns
+	}
+	var columns []string
+	for name := range s.Properties {
+		if sliceContains(s.PrimaryKeys, name) {
+			continue
+		}
+		columns = append(columns, name)
+	}
+	sort.Strings(columns)
+	columns = append(s.PrimaryKeys, columns...)
+	s.columns = columns
+	return s.columns
 }
 
 // SchemaMap is a map of table names to schemas.

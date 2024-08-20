@@ -155,11 +155,11 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, in
 	if record.Operation != "DELETE" {
 		if record.Operation == "INSERT" {
 			var columns []string
-			for _, name := range model.Columns {
+			for _, name := range model.Columns() {
 				columns = append(columns, util.QuoteIdentifier(name))
 			}
 			var insertVals []string
-			for _, name := range model.Columns {
+			for _, name := range model.Columns() {
 				c := model.Properties[name]
 				if val, ok := record.Object[name]; ok {
 					var fn string
@@ -190,7 +190,7 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, in
 			// update
 			var updateValues []string
 			for _, name := range record.Diff {
-				if !util.SliceContains(model.Columns, name) {
+				if !util.SliceContains(model.Columns(), name) {
 					continue
 				}
 				if val, ok := record.Object[name]; ok {
@@ -271,7 +271,7 @@ func createSQL(s *internal.Schema) string {
 	sql.WriteString(util.QuoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
 	var columns []string
-	for _, name := range s.Columns {
+	for _, name := range s.Columns() {
 		if util.SliceContains(s.PrimaryKeys, name) {
 			continue
 		}

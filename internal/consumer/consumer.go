@@ -278,8 +278,8 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 		}
 		// figure out which columns are new
 		columns := make([]string, 0)
-		for _, col := range newschema.Columns {
-			if !util.SliceContains(oldschema.Columns, col) {
+		for _, col := range newschema.Columns() {
+			if !util.SliceContains(oldschema.Columns(), col) {
 				columns = append(columns, col)
 			}
 		}

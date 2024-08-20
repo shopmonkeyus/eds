@@ -22,7 +22,7 @@ func sortTable(tables internal.SchemaMap) (internal.SchemaMap, tableToObjectName
 		}
 		sort.Strings(columns)
 		columns = append(d.PrimaryKeys, columns...)
-		d.Columns = columns
+		// d.Columns = columns
 		otm[d.Table] = object
 		kv[d.Table] = d
 	}
