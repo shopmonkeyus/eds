@@ -16,7 +16,7 @@ import (
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	cnats "github.com/shopmonkeyus/go-common/nats"
-	"github.com/vmihailenco/msgpack"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 const (
@@ -396,7 +396,8 @@ func (c *Consumer) heartbeat() error {
 	c.offset++
 
 	var buffer bytes.Buffer
-	enc := msgpack.NewEncoder(&buffer).UseJSONTag(true)
+	enc := msgpack.NewEncoder(&buffer)
+	enc.SetCustomStructTag("json")
 	if err := enc.Encode(hb); err != nil {
 		return fmt.Errorf("error encoding heartbeat: %w", err)
 	}

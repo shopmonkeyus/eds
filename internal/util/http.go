@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopmonkeyus/go-common/logger"
 	"golang.org/x/exp/rand"
 )
 
@@ -14,6 +15,7 @@ const maxAttempts = 3
 type HTTPRetry struct {
 	attempts int
 	req      *http.Request
+	logger   logger.Logger
 }
 
 func (r *HTTPRetry) shouldRetry(resp *http.Response, err error) bool {
@@ -39,15 +41,30 @@ func (r *HTTPRetry) Do() (*http.Response, error) {
 	resp, err := http.DefaultClient.Do(r.req)
 	if r.shouldRetry(resp, err) {
 		jitter := time.Duration(time.Millisecond*100 + time.Millisecond*time.Duration(rand.Int63n(int64(500*r.attempts))))
+		if r.logger != nil {
+			r.logger.Trace("request failed (path: %s) (status: %d), retrying request in %v", r.req.URL.String(), resp.StatusCode, jitter)
+		}
 		time.Sleep(jitter)
 		return r.Do()
 	}
 	return resp, err
 }
 
+type HTTPRetryOption func(*HTTPRetry)
+
+func WithLogger(logger logger.Logger) HTTPRetryOption {
+	return func(r *HTTPRetry) {
+		r.logger = logger
+	}
+}
+
 // NewHTTPRetry creates a new utility for retrying HTTP requests.
-func NewHTTPRetry(req *http.Request) *HTTPRetry {
-	return &HTTPRetry{
+func NewHTTPRetry(req *http.Request, opts ...HTTPRetryOption) *HTTPRetry {
+	retry := HTTPRetry{
 		req: req,
 	}
+	for _, opt := range opts {
+		opt(&retry)
+	}
+	return &retry
 }

@@ -7,7 +7,7 @@ import (
 
 	nats "github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
-	"github.com/vmihailenco/msgpack"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestDecodeNatsMessage(t *testing.T) {
