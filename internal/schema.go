@@ -72,7 +72,7 @@ type SchemaRegistry interface {
 	GetSchema(table string, version string) (*Schema, error)
 
 	// GetTableVersion gets the current version of the schema for a table.
-	GetTableVersion(table string, version string) (bool, string, error)
+	GetTableVersion(table string) (bool, string, error)
 
 	// SetTableVersion sets the version of a table to a specific version.
 	SetTableVersion(table string, version string) error

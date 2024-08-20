@@ -51,7 +51,7 @@ func (r *APIRegistry) GetLatestSchema() (internal.SchemaMap, error) {
 }
 
 // GetTableVersion gets the current version of the schema for a table.
-func (r *APIRegistry) GetTableVersion(table string, version string) (bool, string, error) {
+func (r *APIRegistry) GetTableVersion(table string) (bool, string, error) {
 	key := r.getVersionCacheKey(table)
 	found, val, err := r.cache.Get(key)
 	if err != nil {

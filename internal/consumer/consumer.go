@@ -251,7 +251,7 @@ func (c *Consumer) Error() <-chan error {
 }
 
 func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Logger, event internal.DBChangeEvent) error {
-	found, version, err := c.registry.GetTableVersion(event.Table, event.ModelVersion)
+	found, version, err := c.registry.GetTableVersion(event.Table)
 	if err != nil {
 		return fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 	}
@@ -277,7 +277,7 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 			return fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
 		}
 		// figure out which columns are new
-		columns := make([]string, 0)
+		var columns []string
 		for _, col := range newschema.Columns() {
 			if !util.SliceContains(oldschema.Columns(), col) {
 				columns = append(columns, col)

@@ -753,7 +753,7 @@ func (m *mockDriverWithMigration) MigrateNewColumns(ctx context.Context, logger 
 type mockRegistry struct {
 	latestSchema    internal.SchemaMap
 	getSchema       func(table string, version string) (*internal.Schema, error)
-	getTableVersion func(table string, version string) (bool, string, error)
+	getTableVersion func(table string) (bool, string, error)
 	setTableVersion func(table string, version string) error
 }
 
@@ -771,9 +771,9 @@ func (r *mockRegistry) GetSchema(table string, version string) (*internal.Schema
 }
 
 // GetTableVersion gets the current version of the schema for a table.
-func (r *mockRegistry) GetTableVersion(table string, version string) (bool, string, error) {
+func (r *mockRegistry) GetTableVersion(table string) (bool, string, error) {
 	if r.getTableVersion != nil {
-		return r.getTableVersion(table, version)
+		return r.getTableVersion(table)
 	}
 	return false, "", nil
 }
@@ -811,7 +811,7 @@ func TestTableSchemaMigrationNewTable(t *testing.T) {
 			getSchema: func(table string, version string) (*internal.Schema, error) {
 				return &internal.Schema{}, nil
 			},
-			getTableVersion: func(table string, version string) (bool, string, error) {
+			getTableVersion: func(table string) (bool, string, error) {
 				return false, "", nil
 			},
 		}
@@ -886,7 +886,7 @@ func TestTableSchemaMigrationNewColumns(t *testing.T) {
 					Properties: props2,
 				}, nil
 			},
-			getTableVersion: func(table string, version string) (bool, string, error) {
+			getTableVersion: func(table string) (bool, string, error) {
 				return true, "1", nil
 			},
 		}
@@ -969,7 +969,7 @@ func TestTableSchemaMigrationNoNewColumns(t *testing.T) {
 					Properties: props2,
 				}, nil
 			},
-			getTableVersion: func(table string, version string) (bool, string, error) {
+			getTableVersion: func(table string) (bool, string, error) {
 				return true, "1", nil
 			},
 		}
