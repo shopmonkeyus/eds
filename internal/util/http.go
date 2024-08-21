@@ -42,7 +42,11 @@ func (r *HTTPRetry) Do() (*http.Response, error) {
 	if r.shouldRetry(resp, err) {
 		jitter := time.Duration(time.Millisecond*100 + time.Millisecond*time.Duration(rand.Int63n(int64(500*r.attempts))))
 		if r.logger != nil {
-			r.logger.Trace("request failed (path: %s) (status: %d), retrying request in %v", r.req.URL.String(), resp.StatusCode, jitter)
+			var code int
+			if resp != nil {
+				code = resp.StatusCode
+			}
+			r.logger.Trace("request failed (path: %s) (status: %d), retrying request in %v", r.req.URL.String(), code, jitter)
 		}
 		time.Sleep(jitter)
 		return r.Do()
