@@ -617,28 +617,31 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		pause := func() {
+		pause := func() error {
 			if configured {
 				logger.Info("server pause requested")
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/pause", port))
 				if err != nil {
 					logger.Error("pause failed: %s", err)
-				} else {
-					logger.Debug("pause response: %d", resp.StatusCode)
+					return err
 				}
+				logger.Debug("pause response: %d", resp.StatusCode)
 			}
+			return nil
 		}
 
-		unpause := func() {
+		unpause := func() error {
 			if configured {
 				logger.Info("server unpause requested")
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/unpause", port))
 				if err != nil {
 					logger.Error("unpause failed: %s", err)
+					return err
 				} else {
 					logger.Debug("unpause response: %d", resp.StatusCode)
 				}
 			}
+			return nil
 		}
 
 		upgrade := func(version string) notification.UpgradeResponse {
