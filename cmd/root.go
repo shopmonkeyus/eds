@@ -283,7 +283,7 @@ func getCommandExample(command string, args ...string) string {
 		}
 		cmd = fmt.Sprintf("%s %s %s", exc, command, strings.Join(args, " "))
 	}
-	return "`" + strings.TrimRight(cmd, " ") + "`"
+	return "`" + strings.TrimSpace(cmd) + "`"
 }
 
 func init() {
