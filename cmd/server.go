@@ -453,10 +453,10 @@ func runWrapperLoop(logger logger.Logger) {
 			defer util.RecoverPanic(logger)
 			defer waitGroup.Done()
 			if err := cmd.Wait(); err != nil {
-				logger.Debug("wrapper process exited: %s", err)
+				logger.Debug("wrapped process exited: %s", err)
 			}
 			exitCode = cmd.ProcessState.ExitCode()
-			logger.Trace("wrapper process exited with exit code: %d", exitCode)
+			logger.Trace("wrapped process exited with exit code: %d", exitCode)
 			if !completed {
 				exited <- true
 			}
@@ -465,6 +465,9 @@ func runWrapperLoop(logger logger.Logger) {
 		case <-restart:
 			logger.Trace("restarting process")
 			cmd.Process.Signal(syscall.SIGINT)
+			if err := cmd.Wait(); err != nil {
+				logger.Error("failed to wait for process: %s", err)
+			}
 		case <-sys.CreateShutdownChannel():
 			logger.Trace("SIGINT received")
 			cmd.Process.Signal(syscall.SIGINT)
