@@ -27,6 +27,8 @@ const (
 	traceLogNatsProcessDetail   = true                  // turn on trace logging for nats processing
 )
 
+var ErrConsumerAlreadyRunning = errors.New("consumer already running")
+
 // Driver is a local interface which slims down the driver to only the methods we need to make it easier to test.
 type Driver interface {
 	Flush(logger logger.Logger) error
@@ -120,6 +122,7 @@ type Consumer struct {
 	offset               int64
 	supportsMigration    bool
 	registry             internal.SchemaRegistry
+	sequence             uint64
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -324,6 +327,7 @@ func (c *Consumer) bufferer() {
 			}
 			m, err := msg.Metadata()
 			if err != nil {
+				internal.PendingEvents.Dec()
 				c.handleError(err)
 				return
 			}
@@ -335,6 +339,14 @@ func (c *Consumer) bufferer() {
 			})
 			log.Trace("msg received - deliveries=%d,pending=%d", m.NumDelivered, len(c.pending))
 			c.pending = append(c.pending, msg)
+
+			// check the expected sequence number
+			if m.Sequence.Consumer != c.sequence+1 {
+				internal.PendingEvents.Dec()
+				c.handleError(fmt.Errorf("out of order sequence: %d, expected: %d", m.Sequence.Consumer, c.sequence+1))
+				return
+			}
+			c.sequence = m.Sequence.Consumer
 			buf := msg.Data()
 			md, _ := msg.Metadata()
 			var evt internal.DBChangeEvent
@@ -771,6 +783,18 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	}
 	cancelConfig()
 
+	ci, err := c.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting consumer info: %w", err)
+	}
+
+	if ci.NumWaiting > 0 {
+		return nil, ErrConsumerAlreadyRunning
+	}
+
+	consumer.logger.Debug("number of waiting consumers: %d, number of messages pending: %d, consumer ack floor: %d, consumer seq: %d", ci.NumWaiting, ci.NumPending, ci.AckFloor.Consumer, ci.Delivered.Consumer)
+
+	consumer.sequence = ci.Delivered.Consumer
 	consumer.jsconn = c
 
 	return &consumer, nil
