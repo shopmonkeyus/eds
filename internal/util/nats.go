@@ -5,7 +5,7 @@ import (
 
 	nats "github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/go-common/compress"
-	"github.com/vmihailenco/msgpack"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // DecodeNatsMsg will decode the nats message into the provided interface.

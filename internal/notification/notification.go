@@ -10,6 +10,7 @@ import (
 	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // NotificationHandler is an interface that is used to handle notification callbacks.
@@ -25,10 +26,10 @@ type NotificationHandler struct {
 	Shutdown func(message string)
 
 	// Pause action is called to pause the driver from processing.
-	Pause func()
+	Pause func() error
 
 	// Unpause action is called to unpause the driver from processing.
-	Unpause func()
+	Unpause func() error
 
 	// Upgrade action is called to upgrade the server version.
 	Upgrade func(version string) UpgradeResponse
@@ -63,6 +64,13 @@ type ImportResponse struct {
 	Message   *string `json:"message,omitempty" msgpack:"message,omitempty"`
 	SessionID string  `json:"sessionId" msgpack:"sessionId"`
 	LogPath   *string `json:"-" msgpack:"-"`
+}
+
+type genericResponse struct {
+	Success   bool    `json:"success" msgpack:"success"`
+	Message   *string `json:"message,omitempty" msgpack:"message,omitempty"`
+	SessionID string  `json:"sessionId" msgpack:"sessionId"`
+	Action    string  `json:"action" msgpack:"action"`
 }
 
 type UpgradeResponse struct {
@@ -112,12 +120,13 @@ func (n *Notification) String() string {
 }
 
 type NotificationConsumer struct {
-	nc      *nats.Conn
-	sub     *nats.Subscription
-	logger  logger.Logger
-	natsurl string
-	handler NotificationHandler
-	wg      sync.WaitGroup
+	nc        *nats.Conn
+	sub       *nats.Subscription
+	logger    logger.Logger
+	natsurl   string
+	handler   NotificationHandler
+	wg        sync.WaitGroup
+	sessionID string
 }
 
 // New will create a new NotificationConsumer.
@@ -142,6 +151,7 @@ func (c *NotificationConsumer) Start(sessionId string, credsFile string) error {
 		return fmt.Errorf("failed to subscribe to eds.notify: %w", err)
 	}
 	c.logger.Debug("subscribed to: %s", subject)
+	c.sessionID = sessionId
 	return nil
 }
 
@@ -166,10 +176,23 @@ func (c *NotificationConsumer) Restart(sessionId string, credsFile string) error
 	return c.Start(sessionId, credsFile)
 }
 
-func (c *NotificationConsumer) publishResponse(sessionId string, action string, data []byte) error {
-	msg := nats.NewMsg(fmt.Sprintf("eds.client.%s.%s-response", sessionId, action))
+func (c *NotificationConsumer) publishResponse(sessionId string, action string, v any) error {
+	return c.publish(sessionId, action, "response", v)
+}
+
+func (c *NotificationConsumer) publishStatus(sessionId string, action string, v any) error {
+	return c.publish(sessionId, action, "status", v)
+}
+
+func (c *NotificationConsumer) publish(sessionId string, action string, actionMod string, v any) error {
+	data, err := msgpack.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("error marshaling response: %w", err)
+	}
+	msg := nats.NewMsg(fmt.Sprintf("eds.client.%s.%s-%s", sessionId, action, actionMod))
 	msg.Data = data
 	msg.Header.Add(nats.MsgIdHdr, uuid.NewString())
+	msg.Header.Add("content-encoding", "msgpack")
 	c.logger.Trace("sending response: %s", msg.Subject)
 	if err := c.nc.PublishMsg(msg); err != nil {
 		return fmt.Errorf("error sending response: %w", err)
@@ -177,8 +200,19 @@ func (c *NotificationConsumer) publishResponse(sessionId string, action string, 
 	return nil
 }
 
+func (c *NotificationConsumer) publishSimpleStatus(action string, errMsg string) {
+	if err := c.publishStatus(c.sessionID, action, genericResponse{
+		Success:   errMsg == "",
+		Message:   &errMsg,
+		SessionID: c.sessionID,
+		Action:    action,
+	}); err != nil {
+		c.logger.Error("failed to send %s status: %s", action, err)
+	}
+}
+
 func (c *NotificationConsumer) PublishSendLogsResponse(response *SendLogsResponse) error {
-	return c.publishResponse(response.SessionID, "sendlogs", []byte(util.JSONStringify(response)))
+	return c.publishResponse(response.SessionID, "sendlogs", response)
 }
 
 func (c *NotificationConsumer) CallSendLogs() {
@@ -194,7 +228,7 @@ func (c *NotificationConsumer) CallSendLogs() {
 
 func (c *NotificationConsumer) configure(config ConfigureRequest) {
 	response := c.handler.Configure(&config)
-	if err := c.publishResponse(response.SessionID, "configure", []byte(util.JSONStringify(response))); err != nil {
+	if err := c.publishResponse(response.SessionID, "configure", response); err != nil {
 		c.logger.Error("failed to send configure response: %s", err)
 	} else if response.LogPath != nil {
 		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
@@ -205,7 +239,7 @@ func (c *NotificationConsumer) configure(config ConfigureRequest) {
 
 func (c *NotificationConsumer) upgrade(version string) {
 	response := c.handler.Upgrade(version)
-	if err := c.publishResponse(response.SessionID, "upgrade", []byte(util.JSONStringify(response))); err != nil {
+	if err := c.publishResponse(response.SessionID, "upgrade", response); err != nil {
 		c.logger.Error("failed to send upgrade response: %s", err)
 	} else if response.LogPath != nil {
 		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
@@ -221,7 +255,7 @@ func (c *NotificationConsumer) importaction(req *ImportRequest) {
 	go func() {
 		defer c.wg.Done()
 		response := c.handler.Import(req)
-		if err := c.publishResponse(response.SessionID, "import", []byte(util.JSONStringify(response))); err != nil {
+		if err := c.publishResponse(response.SessionID, "import", response); err != nil {
 			c.logger.Error("failed to send import response: %s", err)
 		} else if response.LogPath != nil {
 			if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
@@ -264,9 +298,29 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		return
 	}
 	c.logger.Trace("received message: %s", notification.String())
+
+	respondGenerically := func(err error) {
+		var errmsg *string
+		if err != nil {
+			c.logger.Error("failed to %s: %s", notification.Action, err)
+			e := err.Error()
+			errmsg = &e
+		}
+		if err := c.publishResponse(c.sessionID, notification.Action, genericResponse{
+			Success:   errmsg == nil,
+			Message:   errmsg,
+			SessionID: c.sessionID,
+			Action:    notification.Action,
+		}); err != nil {
+			c.logger.Error("failed to send pause response: %s", err)
+		}
+	}
+
 	switch notification.Action {
 	case "restart":
+		c.publishSimpleStatus("restart", "")
 		c.handler.Restart()
+		respondGenerically(nil)
 	case "renew":
 		c.handler.Renew()
 	case "ping":
@@ -285,17 +339,20 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 			c.logger.Warn("invalid shutdown notification. missing message for: %s", notification.String())
 		}
 	case "pause":
-		c.handler.Pause()
+		respondGenerically(c.handler.Pause())
 	case "unpause":
-		c.handler.Unpause()
+		respondGenerically(c.handler.Unpause())
 	case "upgrade":
 		var version string
 		if v, ok := notification.Data["version"].(string); ok {
 			version = v
 		} else {
-			c.logger.Warn("invalid upgrade notification. missing version for: %s", notification.String())
+			msg := fmt.Sprintf("invalid upgrade notification. missing version for: %s", notification.String())
+			c.logger.Warn(msg)
+			c.publishSimpleStatus("upgrade", msg)
 			return
 		}
+		c.publishSimpleStatus("upgrade", "")
 		c.upgrade(version)
 	case "sendlogs":
 		c.CallSendLogs()
@@ -309,6 +366,7 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 	case "import":
 		var req ImportRequest
 		req.Backfill = getBool(notification.Data["backfill"])
+		c.publishSimpleStatus("import", "")
 		c.importaction(&req)
 	case "driverconfig":
 		c.driverconfig(m)

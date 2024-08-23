@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -298,12 +299,20 @@ func getExecutable() string {
 
 func getCommandExample(command string, args ...string) string {
 	ex := getExecutable()
+	var cmd string
 	if strings.Contains(ex, "go-build") {
 		// If we are running in a go build environment, we need to tell the user how to start the server
-		return fmt.Sprintf("`go run . %s %s`", command, strings.Join(args, " "))
+		cmd = fmt.Sprintf("go run . %s %s", command, strings.Join(args, " "))
 	} else {
-		return fmt.Sprintf("`%s %s %s`", ex, command, strings.Join(args, " "))
+		// if in the current directory, we should add a period for *nix systems otherwise show the full path
+		cwd, _ := os.Getwd()
+		exc := ex
+		if strings.HasPrefix(ex, cwd) && runtime.GOOS != "windows" {
+			exc = "./" + strings.TrimPrefix(ex, cwd+"/")
+		}
+		cmd = fmt.Sprintf("%s %s %s", exc, command, strings.Join(args, " "))
 	}
+	return "`" + strings.TrimSpace(cmd) + "`"
 }
 
 func init() {
