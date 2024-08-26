@@ -574,8 +574,6 @@ var importCmd = &cobra.Command{
 					logger.Fatal("error downloading files: %s", err)
 				}
 
-				fmt.Println(tableData)
-
 				if isCancelled(ctx) {
 					return
 				}
