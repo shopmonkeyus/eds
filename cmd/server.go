@@ -784,7 +784,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool) (bool, bool, *string, *string) {
-			importargs := []string{"--url", url, "--api-key", apikey, "--no-confirm"}
+			importargs := []string{"--url", url, "--api-key", apikey, "--no-confirm", "--data-dir", dataDir}
 			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
 			}

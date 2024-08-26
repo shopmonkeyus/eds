@@ -253,6 +253,7 @@ func (p *mysqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger,
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql := createSQL(schema)
+	logger.Trace("migrate new table: %s", sql)
 	_, err := p.db.ExecContext(ctx, sql)
 	return err
 }
@@ -262,6 +263,7 @@ func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logge
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql := addNewColumnsSQL(columns, schema)
+	logger.Trace("migrate new columns: %s", sql)
 	_, err := p.db.ExecContext(ctx, sql)
 	return err
 }

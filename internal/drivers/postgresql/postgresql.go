@@ -258,6 +258,7 @@ func (p *postgresqlDriver) MigrateNewTable(ctx context.Context, logger logger.Lo
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql := createSQL(schema)
+	logger.Trace("migrate new table: %s", sql)
 	_, err := p.db.ExecContext(ctx, sql)
 	return err
 }
@@ -268,6 +269,7 @@ func (p *postgresqlDriver) MigrateNewColumns(ctx context.Context, logger logger.
 	defer p.waitGroup.Done()
 	sql := addNewColumnsSQL(columns, schema)
 	_, err := p.db.ExecContext(ctx, sql)
+	logger.Trace("migrate new columns: %s", sql)
 	return err
 }
 

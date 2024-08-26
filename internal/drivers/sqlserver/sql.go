@@ -209,9 +209,10 @@ func addNewColumnsSQL(columns []string, s *internal.Schema) string {
 	var sql strings.Builder
 	for _, column := range columns {
 		prop := s.Properties[column]
+		var sql strings.Builder
 		sql.WriteString("ALTER TABLE ")
 		sql.WriteString(quoteIdentifier((s.Table)))
-		sql.WriteString(" ADD COLUMN ")
+		sql.WriteString(" ADD ")
 		sql.WriteString(quoteIdentifier(column))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop, false))
@@ -228,7 +229,10 @@ func parseURLToDSN(urlstr string) (string, error) {
 		return "", fmt.Errorf("error parsing url: %w", err)
 	}
 	vals := u.Query()
-	vals.Set("multiStatements", "true")
+
+	if vals.Get("app name") == "" {
+		vals.Set("app name", "eds")
+	}
 
 	// Start building the DSN string
 	var dsn strings.Builder
@@ -243,7 +247,8 @@ func parseURLToDSN(urlstr string) (string, error) {
 	dsn.WriteString(u.Host)
 
 	if u.Path != "" {
-		dsn.WriteString(u.Path)
+		vals.Set("database", u.Path[1:])
+		u.Path = ""
 	}
 
 	if encoded := vals.Encode(); encoded != "" {

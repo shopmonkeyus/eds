@@ -356,6 +356,7 @@ func (p *snowflakeDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql := createSQL(schema)
+	logger.Trace("migrate new table: %s", sql)
 	_, err := p.db.ExecContext(ctx, sql)
 	return err
 }
@@ -365,6 +366,7 @@ func (p *snowflakeDriver) MigrateNewColumns(ctx context.Context, logger logger.L
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql := addNewColumnsSQL(columns, schema)
+	logger.Trace("migrate new columns: %s", sql)
 	_, err := p.db.ExecContext(ctx, sql)
 	return err
 }
