@@ -236,7 +236,7 @@ var forkCmd = &cobra.Command{
 					case syscall.SIGHUP:
 						logger.Debug("restarting consumer")
 						completed = true
-						exitCode = 4 // this is a special code to indicate an intentional restart
+						exitCode = exitCodeRestart // this is a special code to indicate an intentional restart
 					case syscall.SIGTERM:
 						logger.Debug("shutting down")
 						completed = true
