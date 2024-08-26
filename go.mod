@@ -1,6 +1,6 @@
 module github.com/shopmonkeyus/eds
 
-go 1.22
+go 1.23
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.2.2
