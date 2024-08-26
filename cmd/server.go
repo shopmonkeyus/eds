@@ -1029,7 +1029,7 @@ var serverCmd = &cobra.Command{
 				failures++
 			} else {
 				ec := result.ProcessState.ExitCode()
-				if ec != 3 {
+				if ec != exitCodeIncorrectUsage {
 					logFile, err := getRemainingLog(sessionLogsDir)
 					if err != nil {
 						logger.Error("failed to get remaining log: %s", err)
@@ -1053,12 +1053,16 @@ var serverCmd = &cobra.Command{
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
-				if ec == 3 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
+				if ec == exitCodeIncorrectUsage || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
 					notificationConsumer.Stop()
 					os.Exit(ec)
 				}
-				failures++
-				logger.Error("server exited with code %d", ec)
+				if ec == exitCodeRestart {
+					logger.Info("server shut down as part of restart (code = %d)", ec)
+				} else {
+					failures++
+					logger.Error("server exited with code %d", ec)
+				}
 			}
 			notificationConsumer.Stop()
 		}
