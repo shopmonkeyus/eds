@@ -56,7 +56,7 @@ func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB,
 	row := db.QueryRowContext(ctx, "SELECT 1")
 	if err := row.Err(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("unable to ping db: %w", err)
+		return nil, err
 	}
 	return db, nil
 }

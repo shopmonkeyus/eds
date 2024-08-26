@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -110,6 +111,7 @@ type exportJobTableData struct {
 	Error  string   `json:"error"`
 	Status string   `json:"status"`
 	URLs   []string `json:"urls"`
+	Cursor string   `json:"cursor"`
 }
 
 type exportJobResponse struct {
@@ -250,7 +252,15 @@ func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir
 	var tables []TableExportInfo
 	for table, tableData := range data {
 		if len(tableData.URLs) == 0 {
-			log.Debug("no data for table %s", table)
+			log.Debug("no data for table %s, setting timestamp: %v", table, tableData.Cursor)
+			tv, err := strconv.ParseInt(tableData.Cursor, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing timestamp value: %s. %w", tableData.Cursor, err)
+			}
+			tables = append(tables, TableExportInfo{
+				Table:     table,
+				Timestamp: time.UnixMicro(tv / 1000),
+			})
 			continue
 		}
 		var finalTimestamp time.Time
@@ -563,6 +573,8 @@ var importCmd = &cobra.Command{
 				if err != nil {
 					logger.Fatal("error downloading files: %s", err)
 				}
+
+				fmt.Println(tableData)
 
 				if isCancelled(ctx) {
 					return

@@ -236,7 +236,7 @@ func parseURLToDSN(urlstr string) (string, error) {
 	dsn.WriteString("://")
 
 	if u.User != nil {
-		dsn.WriteString(u.User.String())
+		dsn.WriteString(util.ToUserPass(u))
 		dsn.WriteString("@")
 	}
 

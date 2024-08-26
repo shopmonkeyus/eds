@@ -49,7 +49,7 @@ func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("unable to ping db: %w", err)
+		return nil, err
 	}
 	return db, nil
 }

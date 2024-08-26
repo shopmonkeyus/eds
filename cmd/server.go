@@ -784,12 +784,14 @@ var serverCmd = &cobra.Command{
 		}
 
 		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool) (bool, bool, *string, *string) {
-			importargs := []string{"--url", url, "--api-key", apikey, fmt.Sprintf("--verbose=%v", verbose), "--no-confirm"}
+			importargs := []string{"--url", url, "--api-key", apikey, "--no-confirm"}
 			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
 			}
 			if validateOnly {
-				importargs = append(importargs, "--validate-only")
+				importargs = append(importargs, "--validate-only", "--silent")
+			} else {
+				importargs = append(importargs, fmt.Sprintf("--verbose=%v", verbose))
 			}
 			if validateOnly {
 				logger.Info("configuring the driver, one moment please...")
@@ -804,7 +806,7 @@ var serverCmd = &cobra.Command{
 				LogFilenameLabel: "import",
 				SaveLogs:         true,
 				ForwardInterrupt: true,
-				WriteToStd:       true,
+				WriteToStd:       false,
 				Dir:              sessionDir,
 			})
 			if err != nil && result == nil {
@@ -817,8 +819,8 @@ var serverCmd = &cobra.Command{
 				case 0:
 					return true, true, nil, nil
 				case 3:
-					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
 					var msg string
+					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
 					if len(tok) > 1 {
 						msg = tok[len(tok)-1]
 					} else {

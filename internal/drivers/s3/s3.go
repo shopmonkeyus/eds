@@ -359,7 +359,7 @@ func (p *s3Driver) process(_ context.Context, logger logger.Logger, event intern
 	if event.SchemaValidatedPath != nil {
 		key = *event.SchemaValidatedPath
 	} else {
-		key = fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.ID)
+		key = fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.GetPrimaryKey())
 	}
 	if dryRun {
 		logger.Trace("would store %s:%s", p.bucket, key)

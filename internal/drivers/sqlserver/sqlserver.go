@@ -50,7 +50,7 @@ func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("unable to ping db: %w", err)
+		return nil, err
 	}
 	return db, nil
 }

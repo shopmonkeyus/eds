@@ -192,7 +192,7 @@ func parseURLToDSN(urlstr string) (string, error) {
 	vals.Set("multiStatements", "true")
 	var dsn strings.Builder
 	if u.User != nil {
-		dsn.WriteString(u.User.String())
+		dsn.WriteString(util.ToUserPass(u))
 		dsn.WriteString("@")
 	}
 	dsn.WriteString("tcp(")
