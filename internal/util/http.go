@@ -10,10 +10,14 @@ import (
 	"golang.org/x/exp/rand"
 )
 
-const maxAttempts = 3
+const (
+	defaultTimeout = time.Second * 30
+)
 
 type HTTPRetry struct {
 	attempts int
+	started  *time.Time
+	timeout  time.Duration
 	req      *http.Request
 	logger   logger.Logger
 }
@@ -22,7 +26,7 @@ func (r *HTTPRetry) shouldRetry(resp *http.Response, err error) bool {
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "connection reset") || strings.Contains(msg, "connection refused") {
-			return r.attempts <= maxAttempts
+			return r.started.Add(r.timeout).After(time.Now())
 		}
 	}
 	if resp != nil {
@@ -37,6 +41,10 @@ func (r *HTTPRetry) shouldRetry(resp *http.Response, err error) bool {
 }
 
 func (r *HTTPRetry) Do() (*http.Response, error) {
+	if r.started == nil {
+		tv := time.Now()
+		r.started = &tv
+	}
 	r.attempts++
 	resp, err := http.DefaultClient.Do(r.req)
 	if r.shouldRetry(resp, err) {
@@ -56,16 +64,25 @@ func (r *HTTPRetry) Do() (*http.Response, error) {
 
 type HTTPRetryOption func(*HTTPRetry)
 
+// WithLogger sets the logger for the HTTP retry utility.
 func WithLogger(logger logger.Logger) HTTPRetryOption {
 	return func(r *HTTPRetry) {
 		r.logger = logger
 	}
 }
 
+// WithTimeout sets the timeout for the HTTP request.
+func WithTimeout(dur time.Duration) HTTPRetryOption {
+	return func(r *HTTPRetry) {
+		r.timeout = dur
+	}
+}
+
 // NewHTTPRetry creates a new utility for retrying HTTP requests.
 func NewHTTPRetry(req *http.Request, opts ...HTTPRetryOption) *HTTPRetry {
 	retry := HTTPRetry{
-		req: req,
+		req:     req,
+		timeout: defaultTimeout,
 	}
 	for _, opt := range opts {
 		opt(&retry)

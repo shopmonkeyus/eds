@@ -80,14 +80,6 @@ type sessionEndResponse struct {
 	Data    sessionEndURLs `json:"data"`
 }
 
-type sessionRenewResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
-		Credential *string `json:"credential"`
-	} `json:"data"`
-}
-
 func writeCredsToFile(data string, filename string) error {
 	buf, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
@@ -150,7 +142,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
@@ -178,7 +170,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session end: %w", err)
@@ -198,32 +190,6 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 	return &s.Data, nil
 }
 
-func sendRenew(logger logger.Logger, apiURL string, apiKey string, sessionId string) (*string, error) {
-	req, err := http.NewRequest("POST", apiURL+"/v3/eds/internal/renew/"+sessionId, strings.NewReader("{}"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
-	resp, err := retry.Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to send renew end: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, handleAPIError(resp, "session renew")
-	}
-	var s sessionRenewResponse
-	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-	if !s.Success {
-		return nil, fmt.Errorf("failed to renew session: %s", s.Message)
-	}
-	logger.Trace("session %s renew successfully", sessionId)
-	return s.Data.Credential, nil
-}
-
 func uploadFile(logger logger.Logger, url string, logFileBundle string) error {
 	of, err := os.Open(logFileBundle)
 	if err != nil {
@@ -236,7 +202,7 @@ func uploadFile(logger logger.Logger, url string, logFileBundle string) error {
 	}
 	setHTTPHeader(req, "")
 	req.Header.Set("Content-Type", "application/x-tgz")
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return fmt.Errorf("failed to upload logs: %w", err)
@@ -319,7 +285,7 @@ func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, session
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return "", fmt.Errorf("failed to get log upload url: %w", err)
@@ -453,10 +419,10 @@ func runWrapperLoop(logger logger.Logger) {
 			defer util.RecoverPanic(logger)
 			defer waitGroup.Done()
 			if err := cmd.Wait(); err != nil {
-				logger.Debug("wrapper process exited: %s", err)
+				logger.Debug("wrapped process exited: %s", err)
 			}
 			exitCode = cmd.ProcessState.ExitCode()
-			logger.Trace("wrapper process exited with exit code: %d", exitCode)
+			logger.Trace("wrapped process exited with exit code: %d", exitCode)
 			if !completed {
 				exited <- true
 			}
@@ -465,6 +431,9 @@ func runWrapperLoop(logger logger.Logger) {
 		case <-restart:
 			logger.Trace("restarting process")
 			cmd.Process.Signal(syscall.SIGINT)
+			if err := cmd.Wait(); err != nil {
+				logger.Error("failed to wait for process: %s", err)
+			}
 		case <-sys.CreateShutdownChannel():
 			logger.Trace("SIGINT received")
 			cmd.Process.Signal(syscall.SIGINT)
@@ -599,21 +568,6 @@ var serverCmd = &cobra.Command{
 				} else {
 					logger.Debug("shutdown response: %d", resp.StatusCode)
 				}
-			}
-		}
-
-		renew := func() {
-			creds, err := sendRenew(logger, apiurl, apikey, sessionId)
-			if err != nil {
-				logger.Fatal("failed to renew session: %s", err)
-			}
-			if creds != nil {
-				if err := writeCredsToFile(*creds, credsFile); err != nil {
-					logger.Fatal("failed to write creds to file: %s", err)
-				}
-				restart()
-			} else {
-				logger.Trace("no new credentials to renew")
 			}
 		}
 
@@ -931,7 +885,6 @@ var serverCmd = &cobra.Command{
 		// create a notification consumer that will listen for notification actions and handle them here
 		notificationConsumer := notification.New(logger, natsurl, notification.NotificationHandler{
 			Restart:      restart,
-			Renew:        renew,
 			Shutdown:     shutdown,
 			Pause:        pause,
 			Unpause:      unpause,
@@ -958,7 +911,7 @@ var serverCmd = &cobra.Command{
 					// ask the notification consumer to send the logs so it can report the success/failure
 					notificationConsumer.CallSendLogs()
 				case <-renewTicker.C:
-					renew()
+					restart()
 				}
 			}
 		}()
@@ -979,17 +932,13 @@ var serverCmd = &cobra.Command{
 			if err := os.MkdirAll(sessionDir, 0700); err != nil {
 				logger.Fatal("failed to create session directory: %s", err)
 			}
-			if credsFile == "" && session.Credential != nil {
-				// write credential to file
-				credsFile = filepath.Join(sessionDir, "nats.creds")
-				if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
-					logger.Fatal("failed to write creds to file: %s", err)
-				}
-				logger.Trace("creds written to %s", credsFile)
-			} else {
-				logger.Trace("using creds file: %s", credsFile)
+			// write credential to file
+			credsFile = filepath.Join(sessionDir, "nats.creds")
+			if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
+				logger.Fatal("failed to write creds to file: %s", err)
 			}
-			if err := notificationConsumer.Start(sessionId, credsFile); err != nil {
+			logger.Trace("creds written to %s", credsFile)
+			if err := notificationConsumer.Start(credsFile); err != nil {
 				logger.Fatal("failed to start notification consumer: %s", err)
 			}
 			if !configured {
@@ -1028,13 +977,13 @@ var serverCmd = &cobra.Command{
 				failures++
 			} else {
 				ec := result.ProcessState.ExitCode()
-				if ec != 3 {
+				if ec != exitCodeIncorrectUsage {
 					logFile, err := getRemainingLog(sessionLogsDir)
 					if err != nil {
 						logger.Error("failed to get remaining log: %s", err)
 					}
 					logsLock.Lock()
-					logPath, err := sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0, logFile, filepath.Join(sessionDir, "server_stderr.txt"))
+					logPath, err := sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0 && ec != exitCodeRestart, logFile, filepath.Join(sessionDir, "server_stderr.txt"))
 					logsLock.Unlock()
 					if err != nil {
 						logger.Error("failed to send end and upload logs: %s", err)
@@ -1052,12 +1001,16 @@ var serverCmd = &cobra.Command{
 					break
 				}
 				// if a "normal" exit code, just exit and remove the logs
-				if ec == 3 || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
+				if ec == exitCodeIncorrectUsage || ec == 1 && (strings.Contains(result.LastErrorLines, "error: required flag") || strings.Contains(result.LastErrorLines, "Global Flags")) {
 					notificationConsumer.Stop()
 					os.Exit(ec)
 				}
-				failures++
-				logger.Error("server exited with code %d", ec)
+				if ec == exitCodeRestart {
+					logger.Info("server shut down as part of restart (code = %d)", ec)
+				} else {
+					failures++
+					logger.Error("server exited with code %d", ec)
+				}
 			}
 			notificationConsumer.Stop()
 		}

@@ -80,7 +80,7 @@ func handleAPIError(resp *http.Response, context string) error {
 	return errResponse.Parse(buf, resp.StatusCode, context, getRequestID(resp))
 }
 
-func createExportJob(ctx context.Context, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
+func createExportJob(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
 	// encode the request
 	body, err := json.Marshal(filters)
 	if err != nil {
@@ -91,7 +91,7 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 		return "", fmt.Errorf("error creating request: %s", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return "", fmt.Errorf("error creating bulk export job: %s", err)
@@ -152,7 +152,7 @@ func (e *exportJobResponse) String() string {
 	return fmt.Sprintf("%d/%d (%.2f%%)", completed, len(e.Tables), percent)
 }
 
-func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {
+func checkExportJob(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL+"/v3/export/bulk/"+jobID, nil)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -161,7 +161,7 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("error fetching bulk export status: %s", err)
@@ -190,7 +190,7 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 			lastPrinted = time.Now()
 			showProgress = true
 		}
-		job, err := checkExportJob(ctx, apiURL, apiKey, jobID)
+		job, err := checkExportJob(ctx, logger, apiURL, apiKey, jobID)
 		if err != nil {
 			return exportJobResponse{}, err
 		}
@@ -430,7 +430,7 @@ var importCmd = &cobra.Command{
 		}
 
 		// load the schema from the api fresh
-		registry, err := registry.NewAPIRegistry(ctx, apiURL, theTracker)
+		registry, err := registry.NewAPIRegistry(ctx, logger, apiURL, theTracker)
 		if err != nil {
 			logger.Fatal("error creating registry: %s", err)
 		}
@@ -540,7 +540,7 @@ var importCmd = &cobra.Command{
 			if !schemaOnly {
 				if jobID == "" {
 					logger.Info("Requesting Export...")
-					jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
+					jobID, err = createExportJob(ctx, logger, apiURL, apiKey, exportJobCreateRequest{
 						Tables:      only,
 						CompanyIDs:  companyIds,
 						LocationIDs: locationIds,

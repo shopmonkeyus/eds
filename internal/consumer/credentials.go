@@ -68,8 +68,8 @@ func getNatsCreds(creds string) (nats.Option, *CredentialInfo, error) {
 		return nil, nil, errors.New("missing server id in credential")
 	}
 	return natsCredentials, &CredentialInfo{
-		companyIDs: companyIDs,
-		serverID:   serverID,
-		sessionID:  sessionID,
+		CompanyIDs: companyIDs,
+		ServerID:   serverID,
+		SessionID:  sessionID,
 	}, nil
 }

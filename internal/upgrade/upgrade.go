@@ -53,7 +53,7 @@ func Upgrade(config UpgradeConfig) error {
 	if err != nil {
 		return fmt.Errorf("error creating HTTP request: %w", err)
 	}
-	resp, err := util.NewHTTPRetry(req.WithContext(config.Context)).Do()
+	resp, err := util.NewHTTPRetry(req.WithContext(config.Context), util.WithLogger(config.Logger)).Do()
 	if err != nil {
 		return fmt.Errorf("error downloading binary from %s: %w", config.BinaryURL, err)
 	}
@@ -69,7 +69,7 @@ func Upgrade(config UpgradeConfig) error {
 	if err != nil {
 		return fmt.Errorf("error creating HTTP request: %w", err)
 	}
-	sresp, err := util.NewHTTPRetry(sreq.WithContext(config.Context)).Do()
+	sresp, err := util.NewHTTPRetry(sreq.WithContext(config.Context), util.WithLogger(config.Logger)).Do()
 	if err != nil {
 		return fmt.Errorf("error downloading signature from %s: %w", config.SignatureURL, err)
 	}

@@ -19,9 +19,6 @@ type NotificationHandler struct {
 	// Restart action is called to restart the child process.
 	Restart func()
 
-	// Renew action is called to renew session credentials.
-	Renew func()
-
 	// Shutdown action is called to shutdown the server.
 	Shutdown func(message string)
 
@@ -139,19 +136,21 @@ func New(logger logger.Logger, natsurl string, handler NotificationHandler) *Not
 }
 
 // Start will start the consumer.
-func (c *NotificationConsumer) Start(sessionId string, credsFile string) error {
+func (c *NotificationConsumer) Start(credsFile string) error {
 	var err error
-	c.nc, _, err = consumer.NewNatsConnection(c.logger, c.natsurl, credsFile)
+	var info *consumer.CredentialInfo
+	c.nc, info, err = consumer.NewNatsConnection(c.logger, c.natsurl, credsFile)
 	if err != nil {
 		return fmt.Errorf("failed to create nats connection: %w", err)
 	}
-	subject := fmt.Sprintf("eds.notify.%s.>", sessionId)
+	c.logger.Debug("connected to nats: %s", info.SessionID)
+	subject := fmt.Sprintf("eds.notify.%s.>", info.SessionID)
 	c.sub, err = c.nc.Subscribe(subject, c.callback)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to eds.notify: %w", err)
 	}
 	c.logger.Debug("subscribed to: %s", subject)
-	c.sessionID = sessionId
+	c.sessionID = info.SessionID
 	return nil
 }
 
@@ -168,12 +167,13 @@ func (c *NotificationConsumer) Stop() {
 		c.nc = nil
 	}
 	c.wg.Wait()
+	c.logger.Debug("stopped")
 }
 
 // Restart will stop the consumer and start it again.
-func (c *NotificationConsumer) Restart(sessionId string, credsFile string) error {
+func (c *NotificationConsumer) Restart(credsFile string) error {
 	c.Stop()
-	return c.Start(sessionId, credsFile)
+	return c.Start(credsFile)
 }
 
 func (c *NotificationConsumer) publishResponse(sessionId string, action string, v any) error {
@@ -321,8 +321,6 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 		c.publishSimpleStatus("restart", "")
 		c.handler.Restart()
 		respondGenerically(nil)
-	case "renew":
-		c.handler.Renew()
 	case "ping":
 		if subject, ok := notification.Data["subject"].(string); ok {
 			c.logger.Trace("received ping notification, replying to: %s", subject)

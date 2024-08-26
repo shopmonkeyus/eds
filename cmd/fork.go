@@ -26,6 +26,9 @@ import (
 const (
 	defaultMaxAckPending    = 25_000 // this is currently our system max
 	defaultMaxPendingBuffer = 4_096  // maximum number of messages to pull from nats to buffer
+
+	exitCodeIncorrectUsage = 3
+	exitCodeRestart        = 4
 )
 
 func runHealthCheckServerFork(logger logger.Logger, port int) {
@@ -57,7 +60,7 @@ var forkCmd = &cobra.Command{
 		sink, err := newLogFileSink(logDir)
 		if err != nil {
 			logger.Error("error creating log file sink: %s", err)
-			os.Exit(3)
+			os.Exit(exitCodeIncorrectUsage)
 		}
 		defer sink.Close()
 		logger.Trace("using log file sink: %s", logDir)
@@ -86,21 +89,21 @@ var forkCmd = &cobra.Command{
 		})
 		if err != nil {
 			logger.Error("error creating tracker db: %s", err)
-			os.Exit(3)
+			os.Exit(exitCodeIncorrectUsage)
 		}
 		defer tracker.Close()
 
 		apiUrl := mustFlagString(cmd, "api-url", true)
-		schemaRegistry, err := registry.NewAPIRegistry(ctx, apiUrl, tracker)
+		schemaRegistry, err := registry.NewAPIRegistry(ctx, logger, apiUrl, tracker)
 		if err != nil {
 			logger.Error("error creating registry: %s", err)
-			os.Exit(3)
+			os.Exit(exitCodeIncorrectUsage)
 		}
 
 		tableData, err := loadTableExportInfo(logger, datadir, tracker)
 		if err != nil {
 			logger.Error("error loading table export data: %s", err)
-			os.Exit(3)
+			os.Exit(exitCodeIncorrectUsage)
 		}
 
 		exportTableTimestamps := make(map[string]*time.Time)
@@ -111,7 +114,7 @@ var forkCmd = &cobra.Command{
 		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker, datadir)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
-			os.Exit(3)
+			os.Exit(exitCodeIncorrectUsage)
 		}
 
 		defer driver.Stop()
@@ -186,7 +189,7 @@ var forkCmd = &cobra.Command{
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)
-						os.Exit(3)
+						os.Exit(exitCodeIncorrectUsage)
 					}
 				}
 				select {
@@ -211,7 +214,8 @@ var forkCmd = &cobra.Command{
 					switch sig {
 					case syscall.SIGHUP:
 						logger.Debug("restarting consumer")
-						paused = false
+						completed = true
+						exitCode = exitCodeRestart // this is a special code to indicate an intentional restart
 					case syscall.SIGTERM:
 						logger.Debug("shutting down")
 						completed = true

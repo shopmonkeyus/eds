@@ -12,6 +12,7 @@ import (
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/tracker"
 	"github.com/shopmonkeyus/eds/internal/util"
+	"github.com/shopmonkeyus/go-common/logger"
 )
 
 const (
@@ -20,6 +21,7 @@ const (
 )
 
 type APIRegistry struct {
+	logger  logger.Logger
 	apiURL  string
 	schema  internal.SchemaMap
 	objects tableToObjectNameMap
@@ -31,9 +33,13 @@ type APIRegistry struct {
 var _ internal.SchemaRegistry = (*APIRegistry)(nil)
 
 func (r *APIRegistry) Close() error {
+	r.logger.Trace("closing")
 	r.once.Do(func() {
-		r.cache.Close()
+		if err := r.cache.Close(); err != nil {
+			r.logger.Error("error closing cache: %s", err)
+		}
 	})
+	r.logger.Trace("closed")
 	return nil
 }
 
@@ -66,6 +72,9 @@ func (r *APIRegistry) GetTableVersion(table string) (bool, string, error) {
 			return false, "", fmt.Errorf("error fetching version from tracker: %s", err)
 		}
 		if found {
+			if err := r.cache.Set(key, val, defaultCacheDuration); err != nil {
+				return false, "", fmt.Errorf("error setting key %s in cache: %s", key, err)
+			}
 			return true, val, nil
 		}
 	}
@@ -75,7 +84,7 @@ func (r *APIRegistry) GetTableVersion(table string) (bool, string, error) {
 // SetTableVersion sets the version of a table to a specific version.
 func (r *APIRegistry) SetTableVersion(table string, version string) error {
 	key := r.getVersionCacheKey(table)
-	if err := r.cache.Set(key, version, 0); err != nil {
+	if err := r.cache.Set(key, version, defaultCacheDuration); err != nil {
 		return fmt.Errorf("error setting key %s in cache: %s", key, err)
 	}
 	if r.tracker != nil {
@@ -83,6 +92,7 @@ func (r *APIRegistry) SetTableVersion(table string, version string) error {
 			return fmt.Errorf("error setting key %s in tracker: %s", key, err)
 		}
 	}
+	r.logger.Trace("set table: %s version: %s", table, version)
 	return nil
 }
 
@@ -147,6 +157,7 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 			return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
 		}
 	}
+	r.logger.Trace("get schema returned")
 
 	return &schema, nil
 }
@@ -156,13 +167,13 @@ type errorResponse struct {
 }
 
 // NewAPIRegistry creates a new schema registry from the API. This implementation doesn't support versioning.
-func NewAPIRegistry(ctx context.Context, apiURL string, tracker *tracker.Tracker) (internal.SchemaRegistry, error) {
+func NewAPIRegistry(ctx context.Context, logger logger.Logger, apiURL string, tracker *tracker.Tracker) (internal.SchemaRegistry, error) {
 	var registry APIRegistry
 	req, err := http.NewRequest("GET", apiURL+"/v3/schema", nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("error fetching schema: %s", err)
@@ -177,6 +188,7 @@ func NewAPIRegistry(ctx context.Context, apiURL string, tracker *tracker.Tracker
 		}
 		return nil, fmt.Errorf("error fetching schema: %d: %s", resp.StatusCode, string(buf))
 	}
+	registry.logger = logger.WithPrefix("[tracker]")
 	registry.cache = util.NewCache(ctx, time.Hour)
 	registry.tracker = tracker
 	registry.apiURL = apiURL

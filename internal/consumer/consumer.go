@@ -259,6 +259,7 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 		return fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 	}
 	if !found || version != event.ModelVersion {
+		logger.Trace("found: %v, version: %v, model version: %v", found, version, event.ModelVersion)
 		newschema, err := c.registry.GetSchema(event.Table, event.ModelVersion)
 		if err != nil {
 			return fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
@@ -524,20 +525,20 @@ func (c *Consumer) Name() string {
 }
 
 type CredentialInfo struct {
-	companyIDs []string
-	serverID   string
-	sessionID  string
+	CompanyIDs []string
+	ServerID   string
+	SessionID  string
 }
 
 func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Conn, *CredentialInfo, error) {
 	var natsCredentials nats.Option
 	var info *CredentialInfo
 
-	if util.IsLocalhost(url) || creds == "" {
+	if creds == "" {
 		info = &CredentialInfo{
-			companyIDs: []string{"*"},
-			serverID:   "dev",
-			sessionID:  uuid.NewString(),
+			CompanyIDs: []string{"*"},
+			ServerID:   "dev",
+			SessionID:  uuid.NewString(),
 		}
 		logger.Debug("using localhost nats server")
 	} else {
@@ -549,7 +550,7 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	}
 
 	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-"+info.serverID, url, natsCredentials)
+	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
 	}
@@ -616,7 +617,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	// for unit testing only
 	if config.sessionIDCallback != nil {
-		config.sessionIDCallback(info.sessionID)
+		config.sessionIDCallback(info.SessionID)
 	}
 
 	ctx, cancel := context.WithCancel(config.Context)
@@ -637,7 +638,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	consumer.buffer = make(chan jetstream.Msg, config.MaxAckPending)
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
-	consumer.sessionID = info.sessionID
+	consumer.sessionID = info.SessionID
 	consumer.validator = config.SchemaValidator
 	consumer.registry = config.Registry
 	if _, ok := config.Driver.(internal.DriverMigration); ok {
@@ -675,7 +676,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	if len(config.CompanyIDs) > 0 {
 		var newCompanyIDs []string
 		for _, companyID := range config.CompanyIDs {
-			if !util.SliceContains(info.companyIDs, companyID) {
+			if !util.SliceContains(info.CompanyIDs, companyID) {
 				return nil, fmt.Errorf("provided company ID %s not in credentials", companyID)
 			}
 			newCompanyIDs = append(newCompanyIDs, companyID)
@@ -683,7 +684,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		if len(newCompanyIDs) == 0 {
 			return nil, fmt.Errorf("no valid company IDs provided")
 		}
-		info.companyIDs = newCompanyIDs
+		info.CompanyIDs = newCompanyIDs
 		consumer.logger.Debug("using override company IDs: %v", newCompanyIDs)
 	}
 
@@ -713,15 +714,15 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("error creating jetstream connection: %w", err)
 	}
 
-	consumer.logger.Info("using info from credentials, server: %s companies: %s, session: %s", info.serverID, info.companyIDs, info.sessionID)
+	consumer.logger.Info("using info from credentials, server: %s companies: %s, session: %s", info.ServerID, info.CompanyIDs, info.SessionID)
 
 	var suffix string
 	if config.Suffix != "" {
 		suffix = "-" + config.Suffix
 	}
-	name := fmt.Sprintf("eds-%s%s", info.serverID, suffix)
+	name := fmt.Sprintf("eds-%s%s", info.ServerID, suffix)
 	var subjects []string
-	for _, companyID := range info.companyIDs {
+	for _, companyID := range info.CompanyIDs {
 		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
 		subjects = append(subjects, subject)
 	}
