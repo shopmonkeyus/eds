@@ -30,7 +30,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 	sql.WriteString("REPLACE INTO ")
 	sql.WriteString(quoteIdentifier(table))
 	var columns []string
-	for _, name := range model.Columns {
+	for _, name := range model.Columns() {
 		columns = append(columns, quoteIdentifier(name))
 	}
 	sql.WriteString(" (")
@@ -41,7 +41,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 	jsonb := util.ToMapOfJSONColumns(model)
 	if operation == "UPDATE" {
 		for _, name := range diff {
-			if !util.SliceContains(model.Columns, name) || name == "id" {
+			if !util.SliceContains(model.Columns(), name) || name == "id" {
 				continue
 			}
 			if val, ok := o[name]; ok {
@@ -51,7 +51,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 				updateValues = append(updateValues, "NULL")
 			}
 		}
-		for _, name := range model.Columns {
+		for _, name := range model.Columns() {
 			if val, ok := o[name]; ok {
 				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
 				insertVals = append(insertVals, v)
@@ -60,7 +60,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 			}
 		}
 	} else {
-		for _, name := range model.Columns {
+		for _, name := range model.Columns() {
 			if val, ok := o[name]; ok {
 				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
 				if name != "id" {
@@ -78,8 +78,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 	return sql.String(), nil
 }
 
-func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) {
-	model := schema[c.Table]
+func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 	primaryKeys := model.PrimaryKeys
 	if c.Operation == "DELETE" {
 		var sql strings.Builder
@@ -135,7 +134,7 @@ func createSQL(s *internal.Schema) string {
 	sql.WriteString(quoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
 	var columns []string
-	for _, name := range s.Columns {
+	for _, name := range s.Columns() {
 		if util.SliceContains(s.PrimaryKeys, name) {
 			continue
 		}
@@ -168,6 +167,21 @@ func createSQL(s *internal.Schema) string {
 	return sql.String()
 }
 
+func addNewColumnsSQL(columns []string, s *internal.Schema) string {
+	var sql strings.Builder
+	for _, column := range columns {
+		prop := s.Properties[column]
+		sql.WriteString("ALTER TABLE ")
+		sql.WriteString(quoteIdentifier((s.Table)))
+		sql.WriteString(" ADD COLUMN ")
+		sql.WriteString(quoteIdentifier(column))
+		sql.WriteString(" ")
+		sql.WriteString(propTypeToSQLType(prop, false))
+		sql.WriteString(";\n")
+	}
+	return sql.String()
+}
+
 func parseURLToDSN(urlstr string) (string, error) {
 	//username:password@protocol(address)/dbname?param=value
 	u, err := url.Parse(urlstr)
@@ -178,7 +192,7 @@ func parseURLToDSN(urlstr string) (string, error) {
 	vals.Set("multiStatements", "true")
 	var dsn strings.Builder
 	if u.User != nil {
-		dsn.WriteString(u.User.String())
+		dsn.WriteString(util.ToUserPass(u))
 		dsn.WriteString("@")
 	}
 	dsn.WriteString("tcp(")

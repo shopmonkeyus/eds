@@ -120,12 +120,20 @@ type DriverHelp interface {
 }
 
 type DriverMetadata struct {
-	Scheme         string `json:"scheme"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	ExampleURL     string `json:"exampleURL"`
-	Help           string `json:"help"`
-	SupportsImport bool   `json:"supportsImport"`
+	Scheme            string `json:"scheme"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	ExampleURL        string `json:"exampleURL"`
+	Help              string `json:"help"`
+	SupportsImport    bool   `json:"supportsImport"`
+	SupportsMigration bool   `json:"supportsMigration"`
+}
+
+func driverSupportsMigration(driver Driver) bool {
+	if _, ok := driver.(DriverMigration); ok {
+		return true
+	}
+	return false
 }
 
 var driverRegistry = map[string]Driver{}
@@ -137,12 +145,13 @@ func GetDriverMetadata() []DriverMetadata {
 	for scheme, driver := range driverRegistry {
 		if help, ok := driver.(DriverHelp); ok {
 			res = append(res, DriverMetadata{
-				Scheme:         scheme,
-				Name:           help.Name(),
-				Description:    help.Description(),
-				ExampleURL:     help.ExampleURL(),
-				Help:           help.Help(),
-				SupportsImport: importerRegistry[scheme] != nil,
+				Scheme:            scheme,
+				Name:              help.Name(),
+				Description:       help.Description(),
+				ExampleURL:        help.ExampleURL(),
+				Help:              help.Help(),
+				SupportsImport:    importerRegistry[scheme] != nil,
+				SupportsMigration: driverSupportsMigration(driver),
 			})
 		}
 	}
@@ -168,6 +177,7 @@ func GetDriverConfigurations() map[string]DriverConfigurator {
 			metadata.ExampleURL = help.ExampleURL()
 			metadata.Help = ansi.Strip(help.Help())
 			metadata.SupportsImport = importerRegistry[scheme] != nil
+			metadata.SupportsMigration = driverSupportsMigration(driver)
 		}
 		res[scheme] = DriverConfigurator{
 			Metadata: metadata,
@@ -188,12 +198,13 @@ func GetDriverMetadataForURL(urlString string) (*DriverMetadata, error) {
 		if scheme == proto || driverAliasRegistry[proto] == scheme {
 			if help, ok := driver.(DriverHelp); ok {
 				return &DriverMetadata{
-					Scheme:         scheme,
-					Name:           help.Name(),
-					Description:    help.Description(),
-					ExampleURL:     help.ExampleURL(),
-					Help:           help.Help(),
-					SupportsImport: importerRegistry[scheme] != nil,
+					Scheme:            scheme,
+					Name:              help.Name(),
+					Description:       help.Description(),
+					ExampleURL:        help.ExampleURL(),
+					Help:              help.Help(),
+					SupportsImport:    importerRegistry[scheme] != nil,
+					SupportsMigration: driverSupportsMigration(driver),
 				}, nil
 			} else {
 				return &DriverMetadata{

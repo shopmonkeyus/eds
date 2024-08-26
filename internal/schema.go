@@ -1,5 +1,9 @@
 package internal
 
+import (
+	"sort"
+)
+
 type ItemsType struct {
 	Type   string   `json:"type"`
 	Enum   []string `json:"enum,omitempty"`
@@ -25,7 +29,34 @@ type Schema struct {
 	Table        string                    `json:"table"`
 	ModelVersion string                    `json:"modelVersion"`
 
-	Columns []string `json:"-"`
+	columns []string
+}
+
+func sliceContains(slice []string, val string) bool {
+	for _, s := range slice {
+		if s == val {
+			return true
+		}
+	}
+	return false
+}
+
+// Columns returns the columns for a given schema
+func (s *Schema) Columns() []string {
+	if s.columns != nil {
+		return s.columns
+	}
+	var columns []string
+	for name := range s.Properties {
+		if sliceContains(s.PrimaryKeys, name) {
+			continue
+		}
+		columns = append(columns, name)
+	}
+	sort.Strings(columns)
+	columns = append(s.PrimaryKeys, columns...)
+	s.columns = columns
+	return s.columns
 }
 
 // SchemaMap is a map of table names to schemas.
@@ -40,8 +71,14 @@ type SchemaRegistry interface {
 	// GetSchema returns the schema for a table at a specific version.
 	GetSchema(table string, version string) (*Schema, error)
 
-	// Save the latest schema to a file.
-	Save(filename string) error
+	// GetTableVersion gets the current version of the schema for a table.
+	GetTableVersion(table string) (bool, string, error)
+
+	// SetTableVersion sets the version of a table to a specific version.
+	SetTableVersion(table string, version string) error
+
+	// Close will shutdown the schema optionally flushing any caches.
+	Close() error
 }
 
 // SchemaValidator is the interface for a schema validator.

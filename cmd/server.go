@@ -142,7 +142,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session start: %w", err)
@@ -170,7 +170,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to send session end: %w", err)
@@ -202,7 +202,7 @@ func uploadFile(logger logger.Logger, url string, logFileBundle string) error {
 	}
 	setHTTPHeader(req, "")
 	req.Header.Set("Content-Type", "application/x-tgz")
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return fmt.Errorf("failed to upload logs: %w", err)
@@ -285,7 +285,7 @@ func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, session
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return "", fmt.Errorf("failed to get log upload url: %w", err)
@@ -738,12 +738,14 @@ var serverCmd = &cobra.Command{
 		}
 
 		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool) (bool, bool, *string, *string) {
-			importargs := []string{"--url", url, "--api-key", apikey, fmt.Sprintf("--verbose=%v", verbose), "--no-confirm"}
+			importargs := []string{"--url", url, "--api-key", apikey, "--no-confirm", "--data-dir", dataDir}
 			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
 			}
 			if validateOnly {
-				importargs = append(importargs, "--validate-only")
+				importargs = append(importargs, "--validate-only", "--silent")
+			} else {
+				importargs = append(importargs, fmt.Sprintf("--verbose=%v", verbose))
 			}
 			if validateOnly {
 				logger.Info("configuring the driver, one moment please...")
@@ -758,7 +760,7 @@ var serverCmd = &cobra.Command{
 				LogFilenameLabel: "import",
 				SaveLogs:         true,
 				ForwardInterrupt: true,
-				WriteToStd:       true,
+				WriteToStd:       false,
 				Dir:              sessionDir,
 			})
 			if err != nil && result == nil {
@@ -771,8 +773,8 @@ var serverCmd = &cobra.Command{
 				case 0:
 					return true, true, nil, nil
 				case 3:
-					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
 					var msg string
+					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
 					if len(tok) > 1 {
 						msg = tok[len(tok)-1]
 					} else {
@@ -1099,10 +1101,6 @@ func init() {
 	serverCmd.Flags().MarkDeprecated("health-port", "use --port instead")
 
 	// internal use only
-	serverCmd.Flags().String("schema", "schema.json", "the shopmonkey schema file")
-	serverCmd.Flags().MarkHidden("schema")
-	serverCmd.Flags().String("tables", "tables.json", "the shopmonkey tables file")
-	serverCmd.Flags().MarkHidden("tables")
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().MarkHidden("api-url")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")

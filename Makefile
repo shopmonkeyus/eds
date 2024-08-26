@@ -1,4 +1,4 @@
-.PHONY: all build lint release test
+.PHONY: all build lint release test vet tidy
 
 all: build
 
@@ -11,5 +11,11 @@ release:
 lint:
 	@go fmt ./...
 
-test:
-	@go test -v ./...
+vet:
+	@go vet ./...
+
+tidy:
+	@go mod tidy
+
+test: tidy build lint vet
+	@go test -v -count=1 ./...

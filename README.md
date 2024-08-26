@@ -257,7 +257,7 @@ Note that the Safe Harbor applies only to legal claims under the control of the 
 
 ## Requirements
 
-You will need [Golang](https://go.dev/dl/) version 1.22 or later to use this package.
+You will need [Golang](https://go.dev/dl/) version 1.23 or later to use this package.
 
 ## Creating a manual release locally
 

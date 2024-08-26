@@ -21,7 +21,7 @@ type sqlserverDriver struct {
 	ctx          context.Context
 	logger       logger.Logger
 	db           *sql.DB
-	schema       internal.SchemaMap
+	registry     internal.SchemaRegistry
 	waitGroup    sync.WaitGroup
 	once         sync.Once
 	pending      strings.Builder
@@ -50,7 +50,7 @@ func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("unable to ping db: %w", err)
+		return nil, err
 	}
 	return db, nil
 }
@@ -62,12 +62,7 @@ func (p *sqlserverDriver) Start(config internal.DriverConfig) error {
 		return err
 	}
 	p.logger = config.Logger.WithPrefix("[sqlserver]")
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		p.db.Close()
-		return fmt.Errorf("unable to get schema: %w", err)
-	}
-	p.schema = schema
+	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
 	return nil
@@ -102,7 +97,11 @@ func (p *sqlserverDriver) Process(logger logger.Logger, event internal.DBChangeE
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql, err := toSQL(event, p.schema)
+	schema, err := p.registry.GetSchema(event.Table, event.ModelVersion)
+	if err != nil {
+		return false, fmt.Errorf("unable to get schema for table: %s (%s). %w", event.Table, event.ModelVersion, err)
+	}
+	sql, err := toSQL(event, schema)
 	if err != nil {
 		return false, err
 	}
@@ -199,6 +198,7 @@ func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
 	defer db.Close()
 
 	p.importConfig = config
+	p.registry = config.SchemaRegistry
 	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
 	p.pending = strings.Builder{}
@@ -229,6 +229,10 @@ func (p *sqlserverDriver) Help() string {
 	return help.String()
 }
 
+func (p *sqlserverDriver) Aliases() []string {
+	return []string{"mssql"}
+}
+
 // Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 func (p *sqlserverDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
 	db, err := p.connectToDB(ctx, url)
@@ -248,8 +252,27 @@ func (p *sqlserverDriver) Validate(values map[string]any) (string, []internal.Fi
 	return internal.URLFromDatabaseConfiguration("sqlserver", 1433, values), nil
 }
 
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := createSQL(schema)
+	logger.Trace("migrate new table: %s", sql)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (p *sqlserverDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := addNewColumnsSQL(columns, schema)
+	logger.Trace("migrate new columns: %s", sql)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
 func init() {
-	var driver sqlserverDriver
-	internal.RegisterDriver("sqlserver", &driver)
-	internal.RegisterImporter("sqlserver", &driver)
+	internal.RegisterDriver("sqlserver", &sqlserverDriver{})
+	internal.RegisterImporter("sqlserver", &sqlserverDriver{})
 }

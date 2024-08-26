@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -79,7 +80,7 @@ func handleAPIError(resp *http.Response, context string) error {
 	return errResponse.Parse(buf, resp.StatusCode, context, getRequestID(resp))
 }
 
-func createExportJob(ctx context.Context, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
+func createExportJob(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, filters exportJobCreateRequest) (string, error) {
 	// encode the request
 	body, err := json.Marshal(filters)
 	if err != nil {
@@ -90,7 +91,7 @@ func createExportJob(ctx context.Context, apiURL string, apiKey string, filters 
 		return "", fmt.Errorf("error creating request: %s", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return "", fmt.Errorf("error creating bulk export job: %s", err)
@@ -110,6 +111,7 @@ type exportJobTableData struct {
 	Error  string   `json:"error"`
 	Status string   `json:"status"`
 	URLs   []string `json:"urls"`
+	Cursor string   `json:"cursor"`
 }
 
 type exportJobResponse struct {
@@ -150,7 +152,7 @@ func (e *exportJobResponse) String() string {
 	return fmt.Sprintf("%d/%d (%.2f%%)", completed, len(e.Tables), percent)
 }
 
-func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {
+func checkExportJob(ctx context.Context, logger logger.Logger, apiURL string, apiKey string, jobID string) (*exportJobResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL+"/v3/export/bulk/"+jobID, nil)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -159,7 +161,7 @@ func checkExportJob(ctx context.Context, apiURL string, apiKey string, jobID str
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
 	setHTTPHeader(req, apiKey)
-	retry := util.NewHTTPRetry(req)
+	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {
 		return nil, fmt.Errorf("error fetching bulk export status: %s", err)
@@ -188,7 +190,7 @@ func pollUntilComplete(ctx context.Context, logger logger.Logger, apiURL string,
 			lastPrinted = time.Now()
 			showProgress = true
 		}
-		job, err := checkExportJob(ctx, apiURL, apiKey, jobID)
+		job, err := checkExportJob(ctx, logger, apiURL, apiKey, jobID)
 		if err != nil {
 			return exportJobResponse{}, err
 		}
@@ -242,13 +244,23 @@ type TableExportInfo struct {
 	Timestamp time.Time
 }
 
+const trackerTableExportKey = "table-export"
+
 func bulkDownloadData(log logger.Logger, data map[string]exportJobTableData, dir string) ([]TableExportInfo, error) {
 	var downloads []*url.URL
 	started := time.Now()
 	var tables []TableExportInfo
 	for table, tableData := range data {
 		if len(tableData.URLs) == 0 {
-			log.Debug("no data for table %s", table)
+			log.Debug("no data for table %s, setting timestamp: %v", table, tableData.Cursor)
+			tv, err := strconv.ParseInt(tableData.Cursor, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing timestamp value: %s. %w", tableData.Cursor, err)
+			}
+			tables = append(tables, TableExportInfo{
+				Table:     table,
+				Timestamp: time.UnixMicro(tv / 1000),
+			})
 			continue
 		}
 		var finalTimestamp time.Time
@@ -343,19 +355,6 @@ func tableNames(tableData []TableExportInfo) []string {
 	return tables
 }
 
-func loadTablesJSON(fp string) ([]TableExportInfo, error) {
-	to, err := os.Open(fp)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't open temp tables file at %s: %w", fp, err)
-	}
-	dec := json.NewDecoder(to)
-	tables := make([]TableExportInfo, 0)
-	if err := dec.Decode(&tables); err != nil {
-		return nil, fmt.Errorf("error decoding tables: %w", err)
-	}
-	return tables, nil
-}
-
 var importCmd = &cobra.Command{
 	Use:   "import",
 	Short: "Import data from your Shopmonkey instance to your system",
@@ -378,7 +377,6 @@ var importCmd = &cobra.Command{
 		defer util.RecoverPanic(logger)
 
 		dataDir := getDataDir(cmd, logger)
-		schemaFile, _ := getSchemaAndTableFiles(dataDir)
 
 		if dryRun {
 			logger.Info("🚨 Dry run enabled")
@@ -415,6 +413,16 @@ var importCmd = &cobra.Command{
 
 		var err error
 
+		theTracker, err := tracker.NewTracker(tracker.TrackerConfig{
+			Context: ctx,
+			Logger:  logger,
+			Dir:     dataDir,
+		})
+		if err != nil {
+			logger.Fatal("error creating tracker: %s", err)
+		}
+		defer theTracker.Close()
+
 		// check to see if there's a schema validator and if so load it
 		validator, err := loadSchemaValidator(cmd)
 		if err != nil {
@@ -422,13 +430,15 @@ var importCmd = &cobra.Command{
 		}
 
 		// load the schema from the api fresh
-		registry, err := registry.NewAPIRegistry(apiURL)
+		registry, err := registry.NewAPIRegistry(ctx, logger, apiURL, theTracker)
 		if err != nil {
 			logger.Fatal("error creating registry: %s", err)
 		}
 
+		defer registry.Close()
+
 		// create the driver for testing the connection
-		driver, err := internal.NewDriverForImport(ctx, logger, driverUrl, registry, nil, dataDir)
+		driver, err := internal.NewDriverForImport(ctx, logger, driverUrl, registry, theTracker, dataDir)
 		if err != nil {
 			fmt.Println(err.Error())
 			os.Exit(3) // this means the test failed
@@ -445,14 +455,6 @@ var importCmd = &cobra.Command{
 		if validateOnly {
 			os.Exit(0)
 		}
-
-		// save the new schema file
-		if err := registry.Save(schemaFile); err != nil {
-			logger.Fatal("error saving schema: %s", err)
-		}
-
-		// remove the tracker database since we're starting over
-		os.Remove(tracker.TrackerFilenameFromDir(dataDir))
 
 		// create a new importer for loading the data using the provider
 		importer, err := internal.NewImporter(ctx, logger, driverUrl, registry)
@@ -510,19 +512,19 @@ var importCmd = &cobra.Command{
 		}
 
 		var success bool
+		var tableExportInfo []TableExportInfo
+
 		defer func() {
 			defer util.RecoverPanic(logger)
 			logger.Trace("exit success: %v", success)
 			var filesRemoved bool
 			if success {
-				if _, err := sys.CopyFile(filepath.Join(dir, "tables.json"), filepath.Join(dataDir, "tables.json")); err != nil {
-					logger.Error("error copying tables.json: %s", err)
-				} else {
-					logger.Info("tables.json saved")
-				}
 				if !noCleanup {
 					os.RemoveAll(dir)
 					filesRemoved = true
+				}
+				if err := theTracker.SetKey(trackerTableExportKey, util.JSONStringify(tableExportInfo), 0); err != nil {
+					logger.Error("error saving table export data to tracker: %s", err)
 				}
 			}
 			if !filesRemoved && dir != "" {
@@ -538,7 +540,7 @@ var importCmd = &cobra.Command{
 			if !schemaOnly {
 				if jobID == "" {
 					logger.Info("Requesting Export...")
-					jobID, err = createExportJob(ctx, apiURL, apiKey, exportJobCreateRequest{
+					jobID, err = createExportJob(ctx, logger, apiURL, apiKey, exportJobCreateRequest{
 						Tables:      only,
 						CompanyIDs:  companyIds,
 						LocationIDs: locationIds,
@@ -575,16 +577,7 @@ var importCmd = &cobra.Command{
 				if isCancelled(ctx) {
 					return
 				}
-
-				to, err := os.Create(filepath.Join(dir, "tables.json"))
-				if err != nil {
-					logger.Fatal("couldn't open temp tables file: %s", err)
-				}
-				enc := json.NewEncoder(to)
-				if err := enc.Encode(tableData); err != nil {
-					logger.Fatal("error encoding tables: %s", err)
-				}
-				to.Close()
+				tableExportInfo = tableData
 				tables = tableNames(tableData)
 			} else {
 				logger.Debug("schema only, skipping download")
@@ -592,11 +585,6 @@ var importCmd = &cobra.Command{
 				schema, err := registry.GetLatestSchema()
 				if err != nil {
 					logger.Fatal("error getting latest schema: %s", err)
-				}
-				to, err := os.Create(filepath.Join(dir, "tables.json"))
-				if err != nil {
-					logger.Fatal("couldn't open temp tables file: %s", err)
-					return
 				}
 				time := time.Now()
 				var tableData []TableExportInfo
@@ -606,20 +594,15 @@ var importCmd = &cobra.Command{
 						Timestamp: time,
 					})
 				}
-				enc := json.NewEncoder(to)
-				if err := enc.Encode(tableData); err != nil {
-					logger.Fatal("error encoding tables: %s", err)
-				}
-				to.Close()
 				tables = tableNames(tableData)
+				tableExportInfo = tableData
 			}
 		} else {
-			fp := filepath.Join(dir, "tables.json")
-			tableData, err := loadTablesJSON(fp)
+			tableData, err := loadTableExportInfo(logger, dataDir, theTracker)
 			if err != nil {
-				logger.Error("error loading tables: %s", err)
-				return
+				logger.Fatal("%s", err)
 			}
+			tableExportInfo = tableData
 			tables = tableNames(tableData)
 			logger.Debug("reloading tables (%s) from %s", strings.Join(tables, ","), dir)
 		}
@@ -633,6 +616,7 @@ var importCmd = &cobra.Command{
 			}
 			tables = filtered
 		}
+
 		logger.Info("Importing data to tables %s", strings.Join(tables, ", "))
 		if err := importer.Import(internal.ImporterConfig{
 			Context:         ctx,
@@ -651,6 +635,29 @@ var importCmd = &cobra.Command{
 			logger.Error("error running import: %s", err)
 			return
 		}
+
+		// if the driver supports migration, set the table versions that we just upgraded
+		if _, ok := driver.(internal.DriverMigration); ok {
+			latest, err := registry.GetLatestSchema()
+			if err != nil {
+				logger.Error("error getting latest schema: %s", err)
+				return
+			}
+
+			for _, info := range tableExportInfo {
+				if util.SliceContains(tables, info.Table) {
+					data := latest[info.Table]
+					if err := registry.SetTableVersion(info.Table, data.ModelVersion); err != nil {
+						logger.Error("error setting table %s version: %s. %s", info.Table, data.ModelVersion, err)
+						return
+					}
+					logger.Trace("set table %s version to %s", info.Table, data.ModelVersion)
+				}
+			}
+		} else {
+			logger.Trace("driver does not support migration, skipping setting table versions")
+		}
+
 		success = true
 		logger.Info("👋 Loaded %d tables in %v", len(tables), time.Since(started))
 	},

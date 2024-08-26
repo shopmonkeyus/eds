@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/importer"
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -16,20 +17,24 @@ import (
 const maxBytesSizeInsert = 5_000_000
 
 type postgresqlDriver struct {
-	ctx       context.Context
-	logger    logger.Logger
-	db        *sql.DB
-	schema    internal.SchemaMap
-	waitGroup sync.WaitGroup
-	once      sync.Once
-	pending   strings.Builder
-	count     int
+	ctx          context.Context
+	logger       logger.Logger
+	db           *sql.DB
+	registry     internal.SchemaRegistry
+	waitGroup    sync.WaitGroup
+	once         sync.Once
+	pending      strings.Builder
+	count        int
+	executor     func(string) error
+	importConfig internal.ImporterConfig
+	size         int
 }
 
 var _ internal.Driver = (*postgresqlDriver)(nil)
 var _ internal.DriverLifecycle = (*postgresqlDriver)(nil)
 var _ internal.Importer = (*postgresqlDriver)(nil)
 var _ internal.DriverHelp = (*postgresqlDriver)(nil)
+var _ internal.DriverMigration = (*postgresqlDriver)(nil)
 
 func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
 	urlstr, err := getConnectionStringFromURL(url)
@@ -44,7 +49,7 @@ func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("unable to ping db: %w", err)
+		return nil, err
 	}
 	return db, nil
 }
@@ -55,13 +60,8 @@ func (p *postgresqlDriver) Start(config internal.DriverConfig) error {
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[postgresql]")
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		p.db.Close()
-		return fmt.Errorf("unable to get schema: %w", err)
-	}
-	p.schema = schema
+	p.logger = config.Logger.WithPrefix("[postgres]")
+	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
 	return nil
@@ -96,7 +96,11 @@ func (p *postgresqlDriver) Process(logger logger.Logger, event internal.DBChange
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql, err := toSQL(event, p.schema)
+	schema, err := p.registry.GetSchema(event.Table, event.ModelVersion)
+	if err != nil {
+		return false, fmt.Errorf("unable to get schema for table: %s (%s). %w", event.Table, event.ModelVersion, err)
+	}
+	sql, err := toSQL(event, schema)
 	if err != nil {
 		return false, err
 	}
@@ -139,6 +143,52 @@ func (p *postgresqlDriver) Flush(logger logger.Logger) error {
 	return nil
 }
 
+// CreateDatasource allows the handler to create the datasource before importing data.
+func (p *postgresqlDriver) CreateDatasource(schema internal.SchemaMap) error {
+	// create all the tables
+	for _, table := range p.importConfig.Tables {
+		data := schema[table]
+		p.logger.Debug("creating table %s", table)
+		if err := p.executor(createSQL(data)); err != nil {
+			return fmt.Errorf("error creating table: %s. %w", table, err)
+		}
+		p.logger.Debug("created table %s", table)
+	}
+	return nil
+}
+
+// ImportEvent allows the handler to process the event.
+func (p *postgresqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.Schema) error {
+	object, err := event.GetObject()
+	if err != nil {
+		return err
+	}
+	sql := toSQLFromObject("INSERT", data, event.Table, object, nil)
+	p.pending.WriteString(sql)
+	p.count++
+	p.size += len(sql)
+	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
+		if err := p.executor(p.pending.String()); err != nil {
+			p.logger.Trace("offending sql: %s", p.pending.String())
+			return fmt.Errorf("unable to execute sql: %w", err)
+		}
+		p.pending.Reset()
+		p.size = 0
+	}
+	return nil
+}
+
+// ImportCompleted is called when all events have been processed.
+func (p *postgresqlDriver) ImportCompleted() error {
+	if p.size > 0 {
+		if err := p.executor(p.pending.String()); err != nil {
+			p.logger.Trace("offending sql: %s", p.pending.String())
+			return fmt.Errorf("unable to execute sql: %w", err)
+		}
+	}
+	return nil
+}
+
 // Import is called to import data from the source.
 func (p *postgresqlDriver) Import(config internal.ImporterConfig) error {
 	db, err := p.connectToDB(config.Context, config.URL)
@@ -147,93 +197,15 @@ func (p *postgresqlDriver) Import(config internal.ImporterConfig) error {
 	}
 	defer db.Close()
 
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		return err
-	}
+	p.registry = config.SchemaRegistry
+	p.importConfig = config
+	p.logger = config.Logger.WithPrefix("[postgres]")
+	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
+	p.pending = strings.Builder{}
+	p.count = 0
+	p.size = 0
 
-	logger := config.Logger.WithPrefix("[postgres]")
-	started := time.Now()
-	executeSQL := util.SQLExecuter(config.Context, logger, db, config.DryRun)
-
-	// create all the tables
-	for _, table := range config.Tables {
-		data := schema[table]
-		logger.Debug("creating table %s", table)
-		if err := executeSQL(createSQL(data)); err != nil {
-			return fmt.Errorf("error creating table: %s. %w", table, err)
-		}
-		logger.Debug("created table %s", table)
-	}
-
-	if config.SchemaOnly {
-		return nil
-	}
-
-	files, err := util.ListDir(config.DataDir)
-	if err != nil {
-		return fmt.Errorf("unable to list dir: %w", err)
-	}
-
-	var total int
-
-	// NOTE: these files should automatically be sorted by the filesystem
-	// so we need to do them in order and not in parallel
-	for _, file := range files {
-		table, _, ok := util.ParseCRDBExportFile(file)
-		if !ok {
-			logger.Debug("skipping file: %s", file)
-			continue
-		}
-		if !util.SliceContains(config.Tables, table) {
-			continue
-		}
-		data := schema[table]
-		if data == nil {
-			return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, file)
-		}
-		logger.Debug("processing file: %s, table: %s", file, table)
-		dec, err := util.NewNDJSONDecoder(file)
-		if err != nil {
-			return fmt.Errorf("unable to create JSON decoder for %s: %w", file, err)
-		}
-		defer dec.Close()
-		var count int
-		var size int
-		var pending strings.Builder
-		tstarted := time.Now()
-		for dec.More() {
-			var obj map[string]interface{}
-			if err := dec.Decode(&obj); err != nil {
-				return fmt.Errorf("unable to decode JSON: %w", err)
-			}
-			sql := toSQLFromObject("INSERT", data, table, obj, nil)
-			pending.WriteString(sql)
-			count++
-			size += len(sql)
-			if size >= maxBytesSizeInsert || config.Single {
-				if err := executeSQL(pending.String()); err != nil {
-					logger.Trace("offending sql: %s", pending.String())
-					return fmt.Errorf("unable to execute %s sql: %w", table, err)
-				}
-				pending.Reset()
-				size = 0
-			}
-		}
-		if size > 0 {
-			if err := executeSQL(pending.String()); err != nil {
-				logger.Trace("offending sql: %s", pending.String())
-				return fmt.Errorf("unable to execute %s sql: %w", table, err)
-			}
-		}
-		dec.Close()
-		total += count
-		logger.Debug("imported %d %s records in %s", count, table, time.Since(tstarted))
-	}
-
-	logger.Info("imported %d records from %d files in %s", total, len(files), time.Since(started))
-
-	return nil
+	return importer.Run(p.logger, config, p)
 }
 
 // Name is a unique name for the driver.
@@ -281,8 +253,27 @@ func (p *postgresqlDriver) Validate(values map[string]any) (string, []internal.F
 	return internal.URLFromDatabaseConfiguration("postgres", 5432, values), nil
 }
 
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (p *postgresqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := createSQL(schema)
+	logger.Trace("migrate new table: %s", sql)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (p *postgresqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := addNewColumnsSQL(columns, schema)
+	_, err := p.db.ExecContext(ctx, sql)
+	logger.Trace("migrate new columns: %s", sql)
+	return err
+}
+
 func init() {
-	var driver postgresqlDriver
-	internal.RegisterDriver("postgres", &driver)
-	internal.RegisterImporter("postgres", &driver)
+	internal.RegisterDriver("postgres", &postgresqlDriver{})
+	internal.RegisterImporter("postgres", &postgresqlDriver{})
 }

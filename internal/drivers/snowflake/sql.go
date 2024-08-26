@@ -145,9 +145,8 @@ func nullableValue(c internal.SchemaProperty, wrap bool) string {
 	}
 }
 
-func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string, int) {
+func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, int) {
 	var sql strings.Builder
-	model := schema[record.Table]
 	var count int
 	if exists || record.Operation == "DELETE" {
 		sql.WriteString(toDeleteSQL(record))
@@ -156,11 +155,11 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 	if record.Operation != "DELETE" {
 		if record.Operation == "INSERT" {
 			var columns []string
-			for _, name := range model.Columns {
+			for _, name := range model.Columns() {
 				columns = append(columns, util.QuoteIdentifier(name))
 			}
 			var insertVals []string
-			for _, name := range model.Columns {
+			for _, name := range model.Columns() {
 				c := model.Properties[name]
 				if val, ok := record.Object[name]; ok {
 					var fn string
@@ -191,7 +190,7 @@ func toSQL(record *util.Record, schema internal.SchemaMap, exists bool) (string,
 			// update
 			var updateValues []string
 			for _, name := range record.Diff {
-				if !util.SliceContains(model.Columns, name) {
+				if !util.SliceContains(model.Columns(), name) {
 					continue
 				}
 				if val, ok := record.Object[name]; ok {
@@ -272,7 +271,7 @@ func createSQL(s *internal.Schema) string {
 	sql.WriteString(util.QuoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
 	var columns []string
-	for _, name := range s.Columns {
+	for _, name := range s.Columns() {
 		if util.SliceContains(s.PrimaryKeys, name) {
 			continue
 		}
@@ -302,5 +301,20 @@ func createSQL(s *internal.Schema) string {
 		sql.WriteString(")")
 	}
 	sql.WriteString("\n);\n")
+	return sql.String()
+}
+
+func addNewColumnsSQL(columns []string, s *internal.Schema) string {
+	var sql strings.Builder
+	for _, column := range columns {
+		prop := s.Properties[column]
+		sql.WriteString("ALTER TABLE ")
+		sql.WriteString(util.QuoteIdentifier(s.Table))
+		sql.WriteString(" ADD COLUMN ")
+		sql.WriteString(util.QuoteIdentifier(column))
+		sql.WriteString(" ")
+		sql.WriteString(propTypeToSQLType(prop))
+		sql.WriteString(";\n")
+	}
 	return sql.String()
 }

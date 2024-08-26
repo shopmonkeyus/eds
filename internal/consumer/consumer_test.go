@@ -714,3 +714,301 @@ func TestTableSchemaValidator(t *testing.T) {
 		assert.NoError(t, consumer.Stop())
 	})
 }
+
+type mockDriverWithMigration struct {
+	maxBatchSize   int
+	flush          func(logger logger.Logger) error
+	process        func(logger logger.Logger, event internal.DBChangeEvent) (bool, error)
+	migrateTable   func(ctx context.Context, logger logger.Logger, schema *internal.Schema) error
+	migrateColumns func(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error
+}
+
+func (m *mockDriverWithMigration) Flush(logger logger.Logger) error {
+	if m.flush != nil {
+		return m.flush(logger)
+	}
+	return nil
+}
+func (m *mockDriverWithMigration) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+	if m.process != nil {
+		return m.process(logger, event)
+	}
+	return false, nil
+}
+
+func (m *mockDriverWithMigration) MaxBatchSize() int {
+	return m.maxBatchSize
+}
+
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (m *mockDriverWithMigration) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	if m.migrateTable != nil {
+		return m.migrateTable(ctx, logger, schema)
+	}
+	return nil
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (m *mockDriverWithMigration) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	if m.migrateColumns != nil {
+		return m.migrateColumns(ctx, logger, schema, columns)
+	}
+	return nil
+}
+
+type mockRegistry struct {
+	latestSchema    internal.SchemaMap
+	getSchema       func(table string, version string) (*internal.Schema, error)
+	getTableVersion func(table string) (bool, string, error)
+	setTableVersion func(table string, version string) error
+}
+
+// GetLatestSchema returns the latest schema for all tables.
+func (r *mockRegistry) GetLatestSchema() (internal.SchemaMap, error) {
+	return r.latestSchema, nil
+}
+
+// GetSchema returns the schema for a table at a specific version.
+func (r *mockRegistry) GetSchema(table string, version string) (*internal.Schema, error) {
+	if r.getSchema != nil {
+		return r.getSchema(table, version)
+	}
+	return nil, nil
+}
+
+// GetTableVersion gets the current version of the schema for a table.
+func (r *mockRegistry) GetTableVersion(table string) (bool, string, error) {
+	if r.getTableVersion != nil {
+		return r.getTableVersion(table)
+	}
+	return false, "", nil
+}
+
+// SetTableVersion sets the version of a table to a specific version.
+func (r *mockRegistry) SetTableVersion(table string, version string) error {
+	if r.setTableVersion != nil {
+		return r.setTableVersion(table, version)
+	}
+	return nil
+}
+
+// Close will shutdown the schema optionally flushing any caches.
+func (r *mockRegistry) Close() error {
+	return nil
+}
+
+func TestTableSchemaMigrationNewTable(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+		var testEvent *internal.DBChangeEvent
+		var migrateTable *internal.Schema
+
+		mockDriver := &mockDriverWithMigration{
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvent = &event
+				return false, nil
+			},
+			migrateTable: func(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+				migrateTable = schema
+				return nil
+			},
+		}
+
+		mockRegistry := &mockRegistry{
+			getSchema: func(table string, version string) (*internal.Schema, error) {
+				return &internal.Schema{}, nil
+			},
+			getTableVersion: func(table string) (bool, string, error) {
+				return false, "", nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:  context.Background(),
+			Logger:   logger.NewTestLogger(),
+			Driver:   mockDriver,
+			URL:      natsurl,
+			Registry: mockRegistry,
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.ModelVersion = "1"
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.NotNil(t, testEvent)
+		assert.NotNil(t, migrateTable)
+
+		assert.NoError(t, consumer.Stop())
+	})
+}
+
+func TestTableSchemaMigrationNewColumns(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+		var testEvent *internal.DBChangeEvent
+		var migrateTable *internal.Schema
+		var columns []string
+
+		mockDriver := &mockDriverWithMigration{
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvent = &event
+				return false, nil
+			},
+			migrateTable: func(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+				migrateTable = schema
+				return nil
+			},
+			migrateColumns: func(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns_ []string) error {
+				columns = columns_
+				return nil
+			},
+		}
+
+		props1 := make(map[string]internal.SchemaProperty)
+		props1["id"] = internal.SchemaProperty{
+			Type: "string",
+		}
+		props2 := make(map[string]internal.SchemaProperty)
+		props2["foo"] = internal.SchemaProperty{
+			Type: "string",
+		}
+
+		mockRegistry := &mockRegistry{
+			getSchema: func(table string, version string) (*internal.Schema, error) {
+				if version == "1" {
+					return &internal.Schema{
+						Properties: props1,
+					}, nil
+				}
+				return &internal.Schema{
+					Properties: props2,
+				}, nil
+			},
+			getTableVersion: func(table string) (bool, string, error) {
+				return true, "1", nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:  context.Background(),
+			Logger:   logger.NewTestLogger(),
+			Driver:   mockDriver,
+			URL:      natsurl,
+			Registry: mockRegistry,
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.ModelVersion = "2"
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.NotNil(t, testEvent)
+		assert.Nil(t, migrateTable)
+		assert.NotEmpty(t, columns)
+		assert.Contains(t, columns, "foo")
+
+		assert.NoError(t, consumer.Stop())
+	})
+}
+
+func TestTableSchemaMigrationNoNewColumns(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+		var testEvent *internal.DBChangeEvent
+		var migrateTable *internal.Schema
+		var columns []string
+		var called bool
+
+		mockDriver := &mockDriverWithMigration{
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				testEvent = &event
+				return false, nil
+			},
+			migrateTable: func(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+				migrateTable = schema
+				return nil
+			},
+			migrateColumns: func(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns_ []string) error {
+				columns = columns_
+				called = true
+				return nil
+			},
+		}
+
+		props1 := make(map[string]internal.SchemaProperty)
+		props1["id"] = internal.SchemaProperty{
+			Type: "string",
+		}
+		props2 := make(map[string]internal.SchemaProperty)
+		props2["id"] = internal.SchemaProperty{
+			Type: "string",
+		}
+
+		var getSchema1Called, getSchema2Called bool
+
+		mockRegistry := &mockRegistry{
+			getSchema: func(table string, version string) (*internal.Schema, error) {
+				if version == "1" {
+					getSchema1Called = true
+					return &internal.Schema{
+						Properties: props1,
+					}, nil
+				}
+				getSchema2Called = true
+				return &internal.Schema{
+					Properties: props2,
+				}, nil
+			},
+			getTableVersion: func(table string) (bool, string, error) {
+				return true, "1", nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:  context.Background(),
+			Logger:   logger.NewTestLogger(),
+			Driver:   mockDriver,
+			URL:      natsurl,
+			Registry: mockRegistry,
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.ModelVersion = "2"
+
+		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 100)
+
+		assert.NotNil(t, testEvent)
+		assert.Nil(t, migrateTable)
+		assert.Empty(t, columns)
+		assert.False(t, called)
+		assert.True(t, getSchema1Called)
+		assert.True(t, getSchema2Called)
+
+		assert.NoError(t, consumer.Stop())
+	})
+}

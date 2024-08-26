@@ -20,8 +20,8 @@ const maxBytesSizeInsert = 5_000_000
 type mysqlDriver struct {
 	ctx          context.Context
 	logger       logger.Logger
+	registry     internal.SchemaRegistry
 	db           *sql.DB
-	schema       internal.SchemaMap
 	waitGroup    sync.WaitGroup
 	once         sync.Once
 	pending      strings.Builder
@@ -50,7 +50,7 @@ func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, 
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("unable to ping db: %w", err)
+		return nil, err
 	}
 	return db, nil
 }
@@ -62,12 +62,7 @@ func (p *mysqlDriver) Start(config internal.DriverConfig) error {
 		return err
 	}
 	p.logger = config.Logger.WithPrefix("[mysql]")
-	schema, err := config.SchemaRegistry.GetLatestSchema()
-	if err != nil {
-		p.db.Close()
-		return fmt.Errorf("unable to get schema: %w", err)
-	}
-	p.schema = schema
+	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
 	return nil
@@ -102,7 +97,11 @@ func (p *mysqlDriver) Process(logger logger.Logger, event internal.DBChangeEvent
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql, err := toSQL(event, p.schema)
+	schema, err := p.registry.GetSchema(event.Table, event.ModelVersion)
+	if err != nil {
+		return false, fmt.Errorf("unable to get schema for table: %s (%s). %w", event.Table, event.ModelVersion, err)
+	}
+	sql, err := toSQL(event, schema)
 	if err != nil {
 		return false, err
 	}
@@ -197,6 +196,7 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 	}
 	defer db.Close()
 
+	p.registry = config.SchemaRegistry
 	p.importConfig = config
 	p.logger = config.Logger.WithPrefix("[mysql]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
@@ -248,8 +248,27 @@ func (p *mysqlDriver) Validate(values map[string]any) (string, []internal.FieldE
 	return internal.URLFromDatabaseConfiguration("mysql", 3306, values), nil
 }
 
+// MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.
+func (p *mysqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := createSQL(schema)
+	logger.Trace("migrate new table: %s", sql)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
+// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
+func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
+	p.waitGroup.Add(1)
+	defer p.waitGroup.Done()
+	sql := addNewColumnsSQL(columns, schema)
+	logger.Trace("migrate new columns: %s", sql)
+	_, err := p.db.ExecContext(ctx, sql)
+	return err
+}
+
 func init() {
-	var driver mysqlDriver
-	internal.RegisterDriver("mysql", &driver)
-	internal.RegisterImporter("mysql", &driver)
+	internal.RegisterDriver("mysql", &mysqlDriver{})
+	internal.RegisterImporter("mysql", &mysqlDriver{})
 }

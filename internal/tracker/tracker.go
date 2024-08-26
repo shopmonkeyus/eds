@@ -29,8 +29,9 @@ type Tracker struct {
 func (t *Tracker) Close() error {
 	t.logger.Debug("closing")
 	t.once.Do(func() {
-		t.db.Shrink()
-		t.db.Close()
+		if err := t.db.Close(); err != nil {
+			t.logger.Error("failed to close db: %s", err)
+		}
 	})
 	t.logger.Debug("closed")
 	return nil

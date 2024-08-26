@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"database/sql"
+	"net/url"
 	"strings"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -49,11 +50,24 @@ func ToJSONStringVal(name string, val string, jsonb map[string]bool) string {
 // ToMapOfJSONColumns returns a map of column names that are of type 'object'
 func ToMapOfJSONColumns(model *internal.Schema) map[string]bool {
 	jsonb := make(map[string]bool)
-	for _, name := range model.Columns {
+	for _, name := range model.Columns() {
 		property := model.Properties[name]
 		if property.Type == "object" {
 			jsonb[name] = true
 		}
 	}
 	return jsonb
+}
+
+// ToUserPass returns a user:pass string from a URL
+func ToUserPass(u *url.URL) string {
+	var dsn strings.Builder
+	user := u.User.Username()
+	pass, ok := u.User.Password()
+	dsn.WriteString(user)
+	if ok {
+		dsn.WriteString(":")
+		dsn.WriteString(pass)
+	}
+	return dsn.String()
 }

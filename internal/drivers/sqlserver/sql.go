@@ -33,7 +33,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		sql.WriteString(quoteIdentifier(table))
 		sql.WriteString(" SET ")
 		for _, name := range diff {
-			if !util.SliceContains(model.Columns, name) || name == "id" {
+			if !util.SliceContains(model.Columns(), name) || name == "id" {
 				continue
 			}
 			if val, ok := o[name]; ok {
@@ -53,13 +53,13 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 
 		sql.WriteString(quoteIdentifier(table))
 		var columns []string
-		for _, name := range model.Columns {
+		for _, name := range model.Columns() {
 			columns = append(columns, quoteIdentifier(name))
 		}
 		sql.WriteString(" (")
 		sql.WriteString(strings.Join(columns, ","))
 		sql.WriteString(") VALUES (")
-		for _, name := range model.Columns {
+		for _, name := range model.Columns() {
 
 			if val, ok := o[name]; ok {
 				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
@@ -82,8 +82,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	return sql.String()
 }
 
-func toSQL(c internal.DBChangeEvent, schema internal.SchemaMap) (string, error) {
-	model := schema[c.Table]
+func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 	primaryKeys := model.PrimaryKeys
 	if c.Operation == "DELETE" {
 		var sql strings.Builder
@@ -172,7 +171,7 @@ func createSQL(s *internal.Schema) string {
 	sql.WriteString(quoteIdentifier((s.Table)))
 	sql.WriteString(" (\n")
 	var columns []string
-	for _, name := range s.Columns {
+	for _, name := range s.Columns() {
 		if util.SliceContains(s.PrimaryKeys, name) {
 			continue
 		}
@@ -206,6 +205,21 @@ func createSQL(s *internal.Schema) string {
 	return sql.String()
 }
 
+func addNewColumnsSQL(columns []string, s *internal.Schema) string {
+	var sql strings.Builder
+	for _, column := range columns {
+		prop := s.Properties[column]
+		sql.WriteString("ALTER TABLE ")
+		sql.WriteString(quoteIdentifier((s.Table)))
+		sql.WriteString(" ADD ")
+		sql.WriteString(quoteIdentifier(column))
+		sql.WriteString(" ")
+		sql.WriteString(propTypeToSQLType(prop, false))
+		sql.WriteString(";\n")
+	}
+	return sql.String()
+}
+
 func parseURLToDSN(urlstr string) (string, error) {
 	// Example input: "sqlserver://sa:eds@localhost:11433/eds"
 	// Desired output: "sqlserver://sa:eds@localhost:11433/database=eds?multiStatements=true"
@@ -214,7 +228,10 @@ func parseURLToDSN(urlstr string) (string, error) {
 		return "", fmt.Errorf("error parsing url: %w", err)
 	}
 	vals := u.Query()
-	vals.Set("multiStatements", "true")
+
+	if vals.Get("app name") == "" {
+		vals.Set("app name", "eds")
+	}
 
 	// Start building the DSN string
 	var dsn strings.Builder
@@ -222,14 +239,15 @@ func parseURLToDSN(urlstr string) (string, error) {
 	dsn.WriteString("://")
 
 	if u.User != nil {
-		dsn.WriteString(u.User.String())
+		dsn.WriteString(util.ToUserPass(u))
 		dsn.WriteString("@")
 	}
 
 	dsn.WriteString(u.Host)
 
 	if u.Path != "" {
-		dsn.WriteString(u.Path)
+		vals.Set("database", u.Path[1:])
+		u.Path = ""
 	}
 
 	if encoded := vals.Encode(); encoded != "" {
