@@ -936,7 +936,7 @@ var serverCmd = &cobra.Command{
 				logger.Fatal("failed to write creds to file: %s", err)
 			}
 			logger.Trace("creds written to %s", credsFile)
-			if err := notificationConsumer.Start(sessionId, credsFile); err != nil {
+			if err := notificationConsumer.Start(credsFile); err != nil {
 				logger.Fatal("failed to start notification consumer: %s", err)
 			}
 			if !configured {
