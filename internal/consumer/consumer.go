@@ -123,11 +123,11 @@ type Consumer struct {
 	supportsMigration    bool
 	registry             internal.SchemaRegistry
 	sequence             uint64
-	disconnected         chan struct{}
+	disconnected         chan bool
 }
 
 // Disconnected returns a channel that will be closed when the consumer is disconnected from the NATS server.
-func (c *Consumer) Disconnected() <-chan struct{} {
+func (c *Consumer) Disconnected() <-chan bool {
 	return c.disconnected
 }
 
@@ -781,10 +781,14 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
 		}
 	} else {
+		preUpdateInfo, err := c.Info(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error getting consumer info: %w", err)
+		}
 
-		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
-		jsConfig.OptStartTime = c.CachedInfo().Config.OptStartTime
-		jsConfig.MaxWaiting = c.CachedInfo().Config.MaxWaiting
+		jsConfig.DeliverPolicy = preUpdateInfo.Config.DeliverPolicy
+		jsConfig.OptStartTime = preUpdateInfo.Config.OptStartTime
+		jsConfig.MaxWaiting = preUpdateInfo.Config.MaxWaiting
 		consumer.logger.Debug("consumer found, setting delivery policy to %v and start time to %v", jsConfig.DeliverPolicy, jsConfig.OptStartTime)
 
 		// consumer found, update it
@@ -810,7 +814,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	consumer.sequence = ci.Delivered.Consumer
 	consumer.jsconn = c
-	consumer.disconnected = make(chan struct{}, 1)
+	consumer.disconnected = make(chan bool, 1)
 
 	connectedURL := nc.ConnectedUrlRedacted()
 
@@ -818,7 +822,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		if !consumer.isStopping() {
 			consumer.logger.Info("nats closed: %s", connectedURL)
 			select {
-			case consumer.disconnected <- struct{}{}:
+			case consumer.disconnected <- true:
 			default:
 			}
 			consumer.Stop()
@@ -837,7 +841,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 				consumer.logger.Error("nats disconnected: %s", connectedURL)
 			}
 			select {
-			case consumer.disconnected <- struct{}{}:
+			case consumer.disconnected <- true:
 			default:
 			}
 			consumer.Stop()

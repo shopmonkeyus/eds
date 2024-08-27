@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,6 +92,8 @@ func writeCredsToFile(data string, filename string) error {
 	return nil
 }
 
+var errAlreadyRunning = errors.New("already running")
+
 func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
@@ -149,6 +152,9 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusConflict {
+			return nil, errAlreadyRunning
+		}
 		return nil, handleAPIError(resp, "session start")
 	}
 	var sessionResp sessionStartResponse
@@ -924,6 +930,11 @@ var serverCmd = &cobra.Command{
 			}
 			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
 			if err != nil {
+				if errors.Is(err, errAlreadyRunning) {
+					logger.Info("another eds server is already running for this server (id: %s). Retrying in 5 seconds", edsServerId)
+					time.Sleep(time.Second * 5)
+					continue
+				}
 				logger.Fatal("failed to send session start: %s", err)
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
