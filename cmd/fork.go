@@ -27,8 +27,9 @@ const (
 	defaultMaxAckPending    = 25_000 // this is currently our system max
 	defaultMaxPendingBuffer = 4_096  // maximum number of messages to pull from nats to buffer
 
-	exitCodeIncorrectUsage = 3
-	exitCodeRestart        = 4
+	exitCodeIncorrectUsage   = 3
+	exitCodeRestart          = 4
+	exitCodeNatsDisconnected = 5
 )
 
 func runHealthCheckServerFork(logger logger.Logger, port int) {
@@ -190,6 +191,17 @@ var forkCmd = &cobra.Command{
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)
 						os.Exit(exitCodeIncorrectUsage)
+					}
+					if localConsumer != nil {
+						go func() {
+							select {
+							case <-localConsumer.Disconnected():
+								logger.Warn("nats server disconnected")
+								os.Exit(exitCodeNatsDisconnected)
+							case <-ctx.Done():
+								return
+							}
+						}()
 					}
 				}
 				select {

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats-server/v2/server"
 	natsserver "github.com/nats-io/nats-server/v2/test"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -17,7 +19,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-func runNatsTestServer(fn func(natsurl string, nc *nats.Conn, js jetstream.JetStream)) {
+func runNatsTestServer(fn func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server)) {
 	port, err := util.GetFreePort()
 	if err != nil {
 		panic(err)
@@ -46,7 +48,7 @@ func runNatsTestServer(fn func(natsurl string, nc *nats.Conn, js jetstream.JetSt
 	}); err != nil {
 		panic(err)
 	}
-	fn(url, nc, js)
+	fn(url, nc, js, srv)
 }
 
 type mockDriver struct {
@@ -73,7 +75,7 @@ func (m *mockDriver) MaxBatchSize() int {
 }
 
 func TestStartStop(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		mockDriver := &mockDriver{}
 		consumer, err := NewConsumer(ConsumerConfig{
 			Context: context.Background(),
@@ -87,7 +89,7 @@ func TestStartStop(t *testing.T) {
 }
 
 func TestSingleMessage(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		var testEvent *internal.DBChangeEvent
 		var flushed bool
 
@@ -134,7 +136,7 @@ func TestSingleMessage(t *testing.T) {
 }
 
 func TestSingleMessageWithFlush(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 
 		var testEvent *internal.DBChangeEvent
 		var flushed bool
@@ -183,7 +185,7 @@ func TestSingleMessageWithFlush(t *testing.T) {
 }
 
 func TestMultipleMessagesWithFlushAndMaxBatchSize(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 
 		var testEvents []internal.DBChangeEvent
 		var flushed int
@@ -231,7 +233,7 @@ func TestMultipleMessagesWithFlushAndMaxBatchSize(t *testing.T) {
 }
 
 func TestMultipleMessagesWithFlushUsingProcess(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 
 		var testEvents []internal.DBChangeEvent
 		var flushed int
@@ -279,7 +281,7 @@ func TestMultipleMessagesWithFlushUsingProcess(t *testing.T) {
 }
 
 func TestMultipleMessagesWithMaxAckPending(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 
 		var testEvents []internal.DBChangeEvent
 		var flushed int
@@ -329,7 +331,7 @@ func TestMultipleMessagesWithMaxAckPending(t *testing.T) {
 }
 
 func TestHeartbeats(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 
 		internal.MetricsReset() // force a collection to reset
 
@@ -417,7 +419,7 @@ func TestHeartbeats(t *testing.T) {
 }
 
 func TestMultipleMessagesWithMultipleBatches(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 
 		var testEvents []internal.DBChangeEvent
 		var flushed int
@@ -467,7 +469,7 @@ func TestMultipleMessagesWithMultipleBatches(t *testing.T) {
 }
 
 func TestMultipleMessagesWithIdleDelayFlush(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 
 		var testEvents []internal.DBChangeEvent
 		var flushed int
@@ -522,7 +524,7 @@ func TestMultipleMessagesWithIdleDelayFlush(t *testing.T) {
 }
 
 func TestPause(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		var testEvent *internal.DBChangeEvent
 		var flushed bool
 
@@ -578,7 +580,7 @@ func TestPause(t *testing.T) {
 }
 
 func TestTableSkipOldEvents(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		var testEvent *internal.DBChangeEvent
 		var flushed bool
 
@@ -661,7 +663,7 @@ func (v *mockValidator) Validate(event internal.DBChangeEvent) (bool, bool, stri
 }
 
 func TestTableSchemaValidator(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		var testEvent *internal.DBChangeEvent
 
 		mockDriver := &mockDriver{
@@ -798,7 +800,7 @@ func (r *mockRegistry) Close() error {
 }
 
 func TestTableSchemaMigrationNewTable(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		var testEvent *internal.DBChangeEvent
 		var migrateTable *internal.Schema
 
@@ -852,7 +854,7 @@ func TestTableSchemaMigrationNewTable(t *testing.T) {
 }
 
 func TestTableSchemaMigrationNewColumns(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		var testEvent *internal.DBChangeEvent
 		var migrateTable *internal.Schema
 		var columns []string
@@ -929,7 +931,7 @@ func TestTableSchemaMigrationNewColumns(t *testing.T) {
 }
 
 func TestTableSchemaMigrationNoNewColumns(t *testing.T) {
-	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
 		var testEvent *internal.DBChangeEvent
 		var migrateTable *internal.Schema
 		var columns []string
@@ -1010,5 +1012,38 @@ func TestTableSchemaMigrationNoNewColumns(t *testing.T) {
 		assert.True(t, getSchema2Called)
 
 		assert.NoError(t, consumer.Stop())
+	})
+}
+
+func TestDisconnectedHandler(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
+		mockDriver := &mockDriverWithMigration{}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context: context.Background(),
+			Logger:  logger.NewConsoleLogger(),
+			Driver:  mockDriver,
+			URL:     natsurl,
+		})
+
+		assert.NoError(t, err)
+		var closed bool
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-consumer.Disconnected():
+				closed = true
+			case <-time.After(5 * time.Second):
+			}
+		}()
+
+		srv.Shutdown()
+		wg.Wait()
+
+		assert.NoError(t, consumer.Stop())
+		assert.True(t, closed)
 	})
 }

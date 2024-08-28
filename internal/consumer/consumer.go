@@ -123,6 +123,19 @@ type Consumer struct {
 	supportsMigration    bool
 	registry             internal.SchemaRegistry
 	sequence             uint64
+	disconnected         chan bool
+}
+
+// Disconnected returns a channel that will be closed when the consumer is disconnected from the NATS server.
+func (c *Consumer) Disconnected() <-chan bool {
+	return c.disconnected
+}
+
+func (c *Consumer) isStopping() bool {
+	c.lock.Lock()
+	val := c.stopping
+	c.lock.Unlock()
+	return val
 }
 
 // Stop the consumer and close the connection to the NATS server.
@@ -629,6 +642,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	var startAt *time.Time
 	var consumer Consumer
 	started := time.Now()
+	consumer.logger = config.Logger.WithPrefix("[consumer]")
 	consumer.started = &started
 	consumer.max = config.MaxAckPending
 	consumer.ctx = ctx
@@ -661,7 +675,6 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		consumer.emptyBufferPauseTime = defaultEmptyBufferPauseTime
 	}
 
-	consumer.logger = config.Logger.WithPrefix("[consumer]")
 	if config.ExportTableTimestamps != nil {
 		consumer.tableTimestamps = config.ExportTableTimestamps
 		// get the earliest timestamp
@@ -768,10 +781,14 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
 		}
 	} else {
+		preUpdateInfo, err := c.Info(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error getting consumer info: %w", err)
+		}
 
-		jsConfig.DeliverPolicy = c.CachedInfo().Config.DeliverPolicy
-		jsConfig.OptStartTime = c.CachedInfo().Config.OptStartTime
-		jsConfig.MaxWaiting = c.CachedInfo().Config.MaxWaiting
+		jsConfig.DeliverPolicy = preUpdateInfo.Config.DeliverPolicy
+		jsConfig.OptStartTime = preUpdateInfo.Config.OptStartTime
+		jsConfig.MaxWaiting = preUpdateInfo.Config.MaxWaiting
 		consumer.logger.Debug("consumer found, setting delivery policy to %v and start time to %v", jsConfig.DeliverPolicy, jsConfig.OptStartTime)
 
 		// consumer found, update it
@@ -797,6 +814,41 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	consumer.sequence = ci.Delivered.Consumer
 	consumer.jsconn = c
+	consumer.disconnected = make(chan bool, 1)
+
+	connectedURL := nc.ConnectedUrlRedacted()
+
+	nc.SetClosedHandler(func(nc *nats.Conn) {
+		if !consumer.isStopping() {
+			consumer.logger.Info("nats closed: %s", connectedURL)
+			select {
+			case consumer.disconnected <- true:
+			default:
+			}
+			consumer.Stop()
+		}
+	})
+
+	nc.SetReconnectHandler(func(nc *nats.Conn) {
+		consumer.logger.Info("nats reconnect: %s", connectedURL)
+	})
+
+	nc.SetDisconnectErrHandler(func(nc *nats.Conn, err error) {
+		if !consumer.isStopping() {
+			if err != nil {
+				consumer.logger.Error("nats disconnected: %s %s", connectedURL, err)
+			} else {
+				consumer.logger.Error("nats disconnected: %s", connectedURL)
+			}
+			select {
+			case consumer.disconnected <- true:
+			default:
+			}
+			consumer.Stop()
+		}
+	})
+
+	consumer.logger.Info("nats connected: %s", connectedURL)
 
 	return &consumer, nil
 }

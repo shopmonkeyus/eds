@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,6 +92,8 @@ func writeCredsToFile(data string, filename string) error {
 	return nil
 }
 
+var errAlreadyRunning = errors.New("already running")
+
 func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*edsSession, error) {
 	var body sessionStart
 	ipaddress, err := util.GetLocalIP()
@@ -149,6 +152,9 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusConflict {
+			return nil, errAlreadyRunning
+		}
 		return nil, handleAPIError(resp, "session start")
 	}
 	var sessionResp sessionStartResponse
@@ -772,7 +778,7 @@ var serverCmd = &cobra.Command{
 				switch ec {
 				case 0:
 					return true, true, nil, nil
-				case 3:
+				case exitCodeIncorrectUsage:
 					var msg string
 					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
 					if len(tok) > 1 {
@@ -924,6 +930,11 @@ var serverCmd = &cobra.Command{
 			}
 			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
 			if err != nil {
+				if errors.Is(err, errAlreadyRunning) {
+					logger.Info("another eds server is already running for this server (id: %s). Retrying in 5 seconds", edsServerId)
+					time.Sleep(time.Second * 5)
+					continue
+				}
 				logger.Fatal("failed to send session start: %s", err)
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
@@ -932,6 +943,9 @@ var serverCmd = &cobra.Command{
 			if err := os.MkdirAll(sessionDir, 0700); err != nil {
 				logger.Fatal("failed to create session directory: %s", err)
 			}
+			if session.Credential == nil {
+				logger.Fatal("no credential found in session")
+			}
 			// write credential to file
 			credsFile = filepath.Join(sessionDir, "nats.creds")
 			if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
@@ -939,7 +953,11 @@ var serverCmd = &cobra.Command{
 			}
 			logger.Trace("creds written to %s", credsFile)
 			if err := notificationConsumer.Start(credsFile); err != nil {
-				logger.Fatal("failed to start notification consumer: %s", err)
+				if strings.Contains(err.Error(), "error connecting to NATS") {
+					logger.Trace("nats not available, retrying in 5 seconds")
+					time.Sleep(time.Second * 5)
+					continue
+				}
 			}
 			if !configured {
 				logger.Info("waiting for driver configuration... add your driver in the Shopmonkey EDS UI or pass in the --url flag")
@@ -992,6 +1010,11 @@ var serverCmd = &cobra.Command{
 							logger.Error("failed to publish send logs response: %s", err)
 						}
 					}
+				}
+				if ec == exitCodeNatsDisconnected {
+					logger.Info("nats disconnected, retrying in 5 seconds")
+					time.Sleep(time.Second * 5)
+					continue
 				}
 				if ec == 0 {
 					// on success, remove the logs
