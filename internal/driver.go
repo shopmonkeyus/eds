@@ -394,9 +394,8 @@ func GetOptionalStringValue(name string, def string, values map[string]any) stri
 }
 
 func GetOptionalIntValue(name string, def int, values map[string]any) int {
-	fmt.Printf("Type of values[%s]: %T\n", name, values[name]) // Added line to print type
-	 val, ok := values[name].(int); 
-	 if ok {
+	  
+	if val, ok := values[name].(int); ok {
 		return val
 	}
 	if val, ok := values[name].(int64); ok {
