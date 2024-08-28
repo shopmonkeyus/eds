@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/shopmonkeyus/eds/internal/tracker"
@@ -393,11 +394,17 @@ func GetOptionalStringValue(name string, def string, values map[string]any) stri
 }
 
 func GetOptionalIntValue(name string, def int, values map[string]any) int {
+	  
 	if val, ok := values[name].(int); ok {
 		return val
 	}
 	if val, ok := values[name].(int64); ok {
 		return int(val)
+	}
+	if val, ok := values[name].(string); ok { // Check if the value is a string
+		if intVal, err := strconv.Atoi(val); err == nil { // Convert string to int
+			return intVal
+		}
 	}
 	return def
 }
@@ -406,10 +413,9 @@ func URLFromDatabaseConfiguration(schema string, defport int, values map[string]
 	hostname := GetRequiredStringValue("Hostname", values)
 	username := GetOptionalStringValue("Username", "", values)
 	password := GetOptionalStringValue("Password", "", values)
-	var port int
-	if defport > 0 {
-		port = GetOptionalIntValue("Port", defport, values)
-	}
+	port := GetOptionalIntValue("Port", defport, values)
+	
+
 	database := GetRequiredStringValue("Database", values)
 	var u url.URL
 	u.Scheme = schema
@@ -422,7 +428,9 @@ func URLFromDatabaseConfiguration(schema string, defport int, values map[string]
 		u.Host = hostname
 	}
 	u.Path = database
-	return u.String()
+	urlString := u.String()
+	unescapedUrl, _ := url.QueryUnescape(urlString)
+	return unescapedUrl
 }
 
 func NewDatabaseConfiguration(defport int) []DriverField {
