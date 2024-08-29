@@ -80,10 +80,6 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 
 	consumerPrefix := opts.ConsumerPrefix
 	startTime := time.Now().Add(-opts.ConsumerLookbackDuration)
-	if opts.ConsumerLookbackDuration != 0 {
-		consumerPrefix = fmt.Sprintf("%s-%d", opts.ConsumerPrefix, startTime.UnixMilli())
-	}
-
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
 		logger:                  opts.Logger.WithPrefix("[nats]"),
