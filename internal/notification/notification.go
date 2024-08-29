@@ -226,10 +226,10 @@ func (c *NotificationConsumer) CallSendLogs() {
 	}
 }
 
-func (c *NotificationConsumer) configure(config ConfigureRequest) {
+func (c *NotificationConsumer) configure(config ConfigureRequest, m *nats.Msg) {
 	response := c.handler.Configure(&config)
-	if err := c.publishResponse(response.SessionID, "configure", response); err != nil {
-		c.logger.Error("failed to send configure response: %s", err)
+	if err := m.Respond([]byte(util.JSONStringify(response))); err != nil {
+		c.logger.Error("failed to send driverconfig response: %s", err)
 	} else if response.LogPath != nil {
 		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
 			c.logger.Error("failed to publish send logs response during configure: %s", err)
@@ -360,7 +360,7 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 			req.URL = v
 		}
 		req.Backfill = getBool(notification.Data["backfill"])
-		c.configure(req)
+		c.configure(req, m)
 	case "import":
 		var req ImportRequest
 		req.Backfill = getBool(notification.Data["backfill"])
