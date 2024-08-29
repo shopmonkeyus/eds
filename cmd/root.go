@@ -19,16 +19,6 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	// Register all drivers
-	_ "github.com/shopmonkeyus/eds/internal/drivers/eventhub"
-	_ "github.com/shopmonkeyus/eds/internal/drivers/file"
-	_ "github.com/shopmonkeyus/eds/internal/drivers/kafka"
-	_ "github.com/shopmonkeyus/eds/internal/drivers/mysql"
-	_ "github.com/shopmonkeyus/eds/internal/drivers/postgresql"
-	_ "github.com/shopmonkeyus/eds/internal/drivers/s3"
-	_ "github.com/shopmonkeyus/eds/internal/drivers/snowflake"
-	_ "github.com/shopmonkeyus/eds/internal/drivers/sqlserver"
 )
 
 var dataDir string

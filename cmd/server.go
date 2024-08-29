@@ -1047,7 +1047,7 @@ var serverHelpCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
 		cyan := color.New(color.FgCyan).SprintFunc()
-		black := color.New(color.FgBlack).SprintFunc()
+		black := color.New(color.FgBlack, color.Bold).SprintFunc()
 		whiteBold := color.New(color.FgWhite, color.Bold).SprintFunc()
 		white := color.New(color.FgWhite).SprintFunc()
 		green := color.New(color.FgGreen).SprintFunc()
@@ -1060,13 +1060,19 @@ var serverHelpCmd = &cobra.Command{
 		if len(args) == 0 {
 			fmt.Println("This server version supports the following integrations:")
 			fmt.Println()
+			if len(driverMetadata) == 0 {
+				fmt.Println("No integrations found.")
+				fmt.Println()
+				os.Exit(1)
+			}
 			for _, metadata := range driverMetadata {
-				fmt.Printf("%-25s%s\n", yellow(metadata.Name), whiteBold(metadata.Description))
-				fmt.Printf("%14s%s: %s\n", "", black("Example url"), cyan(metadata.ExampleURL))
+				fmt.Printf("%s\n", yellow(metadata.Name))
+				fmt.Printf("%s\n", whiteBold(metadata.Description))
+				fmt.Printf("%s: %s\n", black("Example url"), cyan(metadata.ExampleURL))
 				fmt.Println()
 			}
 			fmt.Println()
-			fmt.Println("Example usage:")
+			fmt.Println(whiteBold("Example usage:"))
 			fmt.Println()
 			c := filepath.Base(os.Args[0])
 			if Version == "dev" {
