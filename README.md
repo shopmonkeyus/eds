@@ -38,6 +38,7 @@ The target driver is configured using the `--url` option. The driver that is sel
 - **s3** - used to stream data into a S3 compatible cloud storage (AWS, Google Cloud, Minio, etc)
 - **kafka** - used to stream data into a Kafka topic
 - **eventhub** - used to stream data to Microsoft Azure [EventHub](https://azure.microsoft.com/en-us/products/event-hubs)
+- **file** - used to stream data into a folder on the local machine. This is useful for bulk export or testing locally.
 
 You can get a list of drivers with example URL patterns by running the following:
 
@@ -138,7 +139,7 @@ The server will automatically detect crashes, report them to Shopmonkey and rest
 
 ## Auto Update
 
-Coming soon.
+The server can be automatically updated from Shopmonkey HQ. This remote update capability is disabled when running inside Docker.
 
 # Deployment
 
@@ -168,6 +169,19 @@ You should use the arguments without the name of the binary such as:
 
 > [!IMPORTANT]
 > You should enroll the server outside of Docker initially and mount the generated `config.toml` file after setup into your container at runtime. This file should be treated as a secret and should not be committed to your Docker image.
+
+## Building a smaller binary
+
+You can build a binary with only the driver that is required by using the following build tags:
+
+- `use_custom_driver` - required
+- `use_[driver]` - such as `use_mysql`
+
+You build with the following go command:
+
+```
+go build -tags use_custom_driver,use_mysql
+```
 
 # Security
 
