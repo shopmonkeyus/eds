@@ -15,7 +15,6 @@ builds:
     ldflags:
       - -s
       - -w
-      - -extldflags="-static"
     hooks:
       post:
         - cmd: |
