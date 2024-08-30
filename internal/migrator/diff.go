@@ -58,7 +58,7 @@ func diffModels(columns []Column, model *dm.Model, dialect util.Dialect) (bool, 
 		switch dialect {
 		case util.Sqlserver:
 			if field != nil && field.Type == "DateTime" {
-				convertedDataType = "nvarchar(100)"
+				convertedDataType = "nvarchar(500)"
 			} else {
 				convertedDataType = column.ConvertPostgresDataTypeToSqlserver(column.Name)
 			}
