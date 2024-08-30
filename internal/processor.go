@@ -80,9 +80,6 @@ func NewMessageProcessor(opts MessageProcessorOpts) (*MessageProcessor, error) {
 
 	consumerPrefix := opts.ConsumerPrefix
 	startTime := time.Now().Add(-opts.ConsumerLookbackDuration)
-	if opts.ConsumerLookbackDuration != 0 {
-		consumerPrefix = fmt.Sprintf("%s-%d", opts.ConsumerPrefix, startTime.UnixMilli())
-	}
 
 	context, cancel := context.WithCancel(context.Background())
 	processor := &MessageProcessor{
@@ -248,6 +245,11 @@ func (p *MessageProcessor) Start() error {
 				snats.WithExactlyOnceReplicas(1), // TODO: make configurable for testing
 				snats.WithExactlyOnceByStartTimePolicy(p.consumerStartTime),
 			)
+			if len(p.companyID) > 5 {
+				//Add some delay to allow the consumer to start up
+				//Just a band-aid fix but this seems to allow start-up of around 30+ companies
+				time.Sleep(15 * time.Second)
+			}
 			if err != nil {
 				return err
 			}
