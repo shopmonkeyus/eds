@@ -166,9 +166,29 @@ func (p *MessageProcessor) callback(ctx context.Context, payload []byte, msg *na
 		if foundSchema.Success {
 			p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 			(*p.schemaModelVersionCache)[modelVersionId] = schema
-		} else {
-			return fmt.Errorf("no schema found for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
 		}
+		// Grab the latest schema if we can't find the requested one
+		if !foundSchema.Success {
+			p.logger.Trace("no schema found for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+			entry, err := p.mainNATSConn.Request(fmt.Sprintf("schema.%s.latest", model), emptyJSON, modelRequestTimeout)
+			if err != nil {
+				p.logger.Trace("error getting schema for: %s for msgid: %s", modelVersionId, msgid)
+				return err
+			}
+			var foundSchema datatypes.SchemaResponse
+			err = json.Unmarshal(entry.Data, &foundSchema)
+			if err != nil {
+				return fmt.Errorf("error unmarshalling change event schema: %s. %s", string(entry.Data), err)
+			}
+			schema = foundSchema.Data
+			if foundSchema.Success {
+				p.logger.Trace("got schema for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+				(*p.schemaModelVersionCache)[modelVersionId] = schema
+			} else {
+				return fmt.Errorf("no schema found for: %s %v for msgid: %s", modelVersionId, foundSchema.Data, msgid)
+			}
+		}
+
 	}
 	var wg sync.WaitGroup
 	var wgErrorChan = make(chan error, len(p.providers))
