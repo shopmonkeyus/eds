@@ -10,7 +10,22 @@ builds:
       - linux
       - windows
       - darwin
-
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -extldflags="-static"
+    hooks:
+      post:
+        - cmd: |
+            {{- if eq .Os "darwin" -}}
+            quill sign-and-notarize "{{ .Path }}" --dry-run={{ .IsSnapshot }} --ad-hoc={{ .IsSnapshot }} -vv
+            {{- else -}}
+            true
+            {{- end -}}
+          env:
+            - QUILL_LOG_FILE=./quill-{{ .Target }}.log
 archives:
   - format: tar.gz
     # this name template makes the OS and Arch compatible with the results of uname.
@@ -46,6 +61,8 @@ signs:
         "--detach-sign",
         "${artifact}",
       ]
+release:
+  prerelease: auto
 # The lines beneath this are called `modelines`. See `:help modeline`
 # Feel free to remove those if you don't want/use them.
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json

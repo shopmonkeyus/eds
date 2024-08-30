@@ -394,7 +394,7 @@ func GetOptionalStringValue(name string, def string, values map[string]any) stri
 }
 
 func GetOptionalIntValue(name string, def int, values map[string]any) int {
-	  
+
 	if val, ok := values[name].(int); ok {
 		return val
 	}
@@ -414,7 +414,6 @@ func URLFromDatabaseConfiguration(schema string, defport int, values map[string]
 	username := GetOptionalStringValue("Username", "", values)
 	password := GetOptionalStringValue("Password", "", values)
 	port := GetOptionalIntValue("Port", defport, values)
-	
 
 	database := GetRequiredStringValue("Database", values)
 	var u url.URL
