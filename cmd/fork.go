@@ -190,7 +190,7 @@ var forkCmd = &cobra.Command{
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)
-						os.Exit(exitCodeIncorrectUsage)
+						os.Exit(1)
 					}
 					if localConsumer != nil {
 						go func() {
