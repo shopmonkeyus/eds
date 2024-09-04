@@ -479,6 +479,7 @@ var serverCmd = &cobra.Command{
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[server]")
 		defer util.RecoverPanic(logger)
+		apiurl := mustFlagString(cmd, "api-url", false)
 
 		// NOTE: do these before bothering with the wrapper since they are required to run
 		edsServerId := viper.GetString("server_id")
@@ -500,7 +501,11 @@ var serverCmd = &cobra.Command{
 				if code == "" {
 					os.Exit(1)
 				}
-				cmd := exec.Command(getExecutable(), "enroll", code, "--silent")
+				args := []string{"enroll", code, "--silent"}
+				if apiurl != "" {
+					args = append(args, "--api-url", apiurl)
+				}
+				cmd := exec.Command(getExecutable(), args...)
 				cmd.Stderr = os.Stderr
 				cmd.Stdout = os.Stdout
 				cmd.Run()
@@ -513,7 +518,6 @@ var serverCmd = &cobra.Command{
 			}
 		}
 		dataDir := getDataDir(cmd, logger)
-		apiurl := mustFlagString(cmd, "api-url", false)
 		driverURL := viper.GetString("url")
 		server := mustFlagString(cmd, "server", false)
 		apikey := viper.GetString("token")
@@ -589,20 +593,28 @@ var serverCmd = &cobra.Command{
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", port))
 				if err != nil {
 					logger.Error("restart failed: %s", err)
-				} else {
-					logger.Debug("restart response: %d", resp.StatusCode)
+					return
 				}
+				logger.Debug("restart response: %d", resp.StatusCode)
 			}
 		}
 
-		shutdown := func(msg string) {
+		shutdown := func(msg string, deleted bool) {
 			if configured {
 				logger.Info("shutdown requested: %s", msg)
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", port))
 				if err != nil {
 					logger.Fatal("shutdown failed: %s", err)
-				} else {
-					logger.Debug("shutdown response: %d", resp.StatusCode)
+					return
+				}
+				logger.Debug("shutdown response: %d", resp.StatusCode)
+				if deleted {
+					logger.Info("shutdown successful")
+					viper.Set("server_id", "")
+					if err := viper.WriteConfig(); err != nil {
+						logger.Error("failed to write config: %s", err)
+					}
+					logger.Debug("server id removed from config")
 				}
 			}
 		}
@@ -616,6 +628,11 @@ var serverCmd = &cobra.Command{
 					return err
 				}
 				logger.Debug("pause response: %d", resp.StatusCode)
+				if resp.StatusCode == http.StatusOK {
+					logger.Info("server paused")
+				} else {
+					logger.Error("pause failed %d", resp.StatusCode)
+				}
 			}
 			return nil
 		}
@@ -627,8 +644,12 @@ var serverCmd = &cobra.Command{
 				if err != nil {
 					logger.Error("unpause failed: %s", err)
 					return err
+				}
+				logger.Debug("unpause response: %d", resp.StatusCode)
+				if resp.StatusCode == http.StatusOK {
+					logger.Info("server unpaused")
 				} else {
-					logger.Debug("unpause response: %d", resp.StatusCode)
+					logger.Error("unpause failed %s", resp.StatusCode)
 				}
 			}
 			return nil
