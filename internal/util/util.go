@@ -37,8 +37,13 @@ func SliceContains(slice []string, val string) bool {
 	return false
 }
 
+var isWindowsDriveLetter = regexp.MustCompile(`^[a-zA-Z]:[/\\]`)
+
 // ToFileURI converts a directory and file to a file URI in a cross-platform way.
 func ToFileURI(dir string, file string) string {
+	if !filepath.IsAbs(dir) && !isWindowsDriveLetter.MatchString(dir) {
+		dir, _ = filepath.Abs(dir)
+	}
 	absDir := filepath.Clean(dir)
 	if os.PathSeparator == '\\' {
 		// if windows replace the backslashes

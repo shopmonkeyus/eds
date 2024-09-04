@@ -129,7 +129,7 @@ func (p *postgresqlDriver) Flush(logger logger.Logger) error {
 			}
 		}()
 		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
-			logger.Trace("offending sql: %s", p.pending.String())
+			logger.Error("offending sql: %s", p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -169,7 +169,7 @@ func (p *postgresqlDriver) ImportEvent(event internal.DBChangeEvent, data *inter
 	p.size += len(sql)
 	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Trace("offending sql: %s", p.pending.String())
+			p.logger.Error("offending sql: %s", p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		p.pending.Reset()
@@ -182,7 +182,7 @@ func (p *postgresqlDriver) ImportEvent(event internal.DBChangeEvent, data *inter
 func (p *postgresqlDriver) ImportCompleted() error {
 	if p.size > 0 {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Trace("offending sql: %s", p.pending.String())
+			p.logger.Error("offending sql: %s", p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 	}

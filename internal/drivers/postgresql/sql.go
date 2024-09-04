@@ -141,7 +141,6 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	sql.WriteString("INSERT INTO ")
 	sql.WriteString(quoteIdentifier(table))
 	var columns []string
-	jsonb := util.ToMapOfJSONColumns(model)
 	for _, name := range model.Columns() {
 		columns = append(columns, quoteIdentifier(name))
 	}
@@ -155,32 +154,38 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 			if !util.SliceContains(model.Columns(), name) || name == "id" {
 				continue
 			}
+			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
-				updateValues = append(updateValues, "NULL")
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
+				updateValues = append(updateValues, v)
 			}
 		}
 		for _, name := range model.Columns() {
+			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				insertVals = append(insertVals, v)
 			} else {
-				insertVals = append(insertVals, "NULL")
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
+				insertVals = append(insertVals, v)
 			}
 		}
 	} else {
 		for _, name := range model.Columns() {
+			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				if name != "id" {
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 				}
 				insertVals = append(insertVals, v)
 			} else {
-				updateValues = append(updateValues, "NULL")
-				insertVals = append(insertVals, "NULL")
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
+				updateValues = append(updateValues, v)
+				insertVals = append(insertVals, v)
 			}
 		}
 	}
@@ -310,9 +315,17 @@ func getConnectionStringFromURL(urlstr string) (string, error) {
 	if u.Port() == "" {
 		u.Host = u.Host + ":5432"
 	}
+	var reencode bool
+	q := u.Query()
 	if !u.Query().Has("application_name") {
-		q := u.Query()
 		q.Set("application_name", "eds")
+		reencode = true
+	}
+	if util.IsLocalhost(u.Host) && !u.Query().Has("sslmode") {
+		q.Set("sslmode", "disable")
+		reencode = true
+	}
+	if reencode {
 		u.RawQuery = q.Encode()
 	}
 	return u.String(), nil

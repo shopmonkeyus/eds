@@ -27,7 +27,6 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 
 	var insertVals []string
 	var updateValues []string
-	jsonb := util.ToMapOfJSONColumns(model)
 	if operation == "UPDATE" {
 		sql.WriteString("UPDATE ")
 		sql.WriteString(quoteIdentifier(table))
@@ -37,7 +36,8 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 				continue
 			}
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				prop := model.Properties[name]
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
 				updateValues = append(updateValues, "NULL")
@@ -60,11 +60,10 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		sql.WriteString(strings.Join(columns, ","))
 		sql.WriteString(") VALUES (")
 		for _, name := range model.Columns() {
-
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				prop := model.Properties[name]
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				if name != "id" {
-
 					v = handleSchemaProperty(model.Properties[name], v)
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 				}
@@ -228,6 +227,10 @@ func parseURLToDSN(urlstr string) (string, error) {
 		return "", fmt.Errorf("error parsing url: %w", err)
 	}
 	vals := u.Query()
+
+	if util.IsLocalhost(u.Host) && vals.Get("encrypt") == "" {
+		vals.Set("encrypt", "disable")
+	}
 
 	if vals.Get("app name") == "" {
 		vals.Set("app name", "eds")

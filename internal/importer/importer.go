@@ -24,15 +24,11 @@ type Handler interface {
 
 // Run will import data from the importer configuration and call the handler to handle the event.
 func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) error {
-	files, err := util.ListDir(config.DataDir)
-	if err != nil {
-		return fmt.Errorf("unable to list files in directory: %w", err)
-	}
+	started := time.Now()
 	schema, err := config.SchemaRegistry.GetLatestSchema()
 	if err != nil {
 		return fmt.Errorf("unable to get schema: %w", err)
 	}
-	started := time.Now()
 	if err := handler.CreateDatasource(schema); err != nil {
 		return err
 	}
@@ -40,6 +36,10 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 		return nil
 	}
 	var total int
+	files, err := util.ListDir(config.DataDir)
+	if err != nil {
+		return fmt.Errorf("unable to list files in directory: %w", err)
+	}
 	for _, file := range files {
 		table, tv, ok := util.ParseCRDBExportFile(file)
 		if !ok {

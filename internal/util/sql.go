@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -39,24 +40,35 @@ func SQLExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool
 	}
 }
 
+func isEmptyVal(val string) bool {
+	return val == "''" || val == "" || val == "NULL" || val == "null"
+}
+
 // ToJSONStringVal returns a JSON string value checking for empty string and converting it to '{}'
-func ToJSONStringVal(name string, val string, jsonb map[string]bool) string {
-	if jsonb[name] && (val == "''" || val == "") {
-		return "'{}'"
+func ToJSONStringVal(name string, val string, prop internal.SchemaProperty, quoteScalar bool) string {
+	if prop.IsArrayOrJSON() && prop.IsNotNull() && isEmptyVal(val) {
+		switch prop.Type {
+		case "array":
+			return "'[]'"
+		case "object":
+			return "'{}'"
+		}
+	}
+	if quoteScalar {
+		return quoteJSONScalar(val, prop)
 	}
 	return val
 }
 
-// ToMapOfJSONColumns returns a map of column names that are of type 'object'
-func ToMapOfJSONColumns(model *internal.Schema) map[string]bool {
-	jsonb := make(map[string]bool)
-	for _, name := range model.Columns() {
-		property := model.Properties[name]
-		if property.Type == "object" {
-			jsonb[name] = true
-		}
+// numbers and booleans must be quoted for JSON fields in certain databases
+var scalarValue = regexp.MustCompile(`^([+-]?([0-9]*[.])?[0-9]+)|(true|false)$`)
+
+// quoteJSONScalar will attempt to quote a JSON scalar value if it is a number or boolean
+func quoteJSONScalar(val string, prop internal.SchemaProperty) string {
+	if prop.Type == "object" && scalarValue.MatchString(val) {
+		return "'" + val + "'"
 	}
-	return jsonb
+	return val
 }
 
 // ToUserPass returns a user:pass string from a URL

@@ -483,7 +483,34 @@ var serverCmd = &cobra.Command{
 		// NOTE: do these before bothering with the wrapper since they are required to run
 		edsServerId := viper.GetString("server_id")
 		if edsServerId == "" {
-			logger.Fatal("Server ID not found. Make sure you run %s before continuing.", getCommandExample("enroll", "[CODE]"))
+			yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
+			fmt.Println(yellow("Welcome to Shopmonkey EDS!\n"))
+			whiteBold := color.New(color.FgWhite, color.Bold).SprintFunc()
+			for {
+				fmt.Print(whiteBold("Enter one-time enrollment code: "))
+				var code string
+				if _, err := fmt.Scanln(&code); err != nil {
+					if err.Error() == "unexpected newline" {
+						os.Exit(1)
+					}
+					logger.Fatal("failed to read enrollment code: %s", err)
+					return
+				}
+				code = strings.TrimSpace(code)
+				if code == "" {
+					os.Exit(1)
+				}
+				cmd := exec.Command(getExecutable(), "enroll", code, "--silent")
+				cmd.Stderr = os.Stderr
+				cmd.Stdout = os.Stdout
+				cmd.Run()
+				if cmd.ProcessState.ExitCode() == 0 {
+					initConfig()
+					edsServerId = viper.GetString("server_id")
+					break
+				}
+				fmt.Println()
+			}
 		}
 		dataDir := getDataDir(cmd, logger)
 		apiurl := mustFlagString(cmd, "api-url", false)
@@ -963,7 +990,7 @@ var serverCmd = &cobra.Command{
 				}
 			}
 			if !configured {
-				logger.Info("waiting for driver configuration... add your driver in the Shopmonkey EDS UI or pass in the --url flag")
+				logger.Info("Return to HQ and continue with configuring your server.")
 				select {
 				case <-configureChannel:
 					configured = true
