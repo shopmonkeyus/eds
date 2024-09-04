@@ -490,6 +490,9 @@ var serverCmd = &cobra.Command{
 		driverURL := viper.GetString("url")
 		server := mustFlagString(cmd, "server", false)
 		apikey := viper.GetString("token")
+		if apikey == "" {
+			logger.Fatal("API key not found. Make sure you run %s before continuing.", getCommandExample("enroll", "[CODE]"))
+		}
 		keepLogs := viper.GetBool("keep_logs")
 		verbose := mustFlagBool(cmd, "verbose", false)
 
