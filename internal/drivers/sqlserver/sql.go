@@ -228,6 +228,10 @@ func parseURLToDSN(urlstr string) (string, error) {
 	}
 	vals := u.Query()
 
+	if util.IsLocalhost(u.Host) && vals.Get("encrypt") == "" {
+		vals.Set("encrypt", "disable")
+	}
+
 	if vals.Get("app name") == "" {
 		vals.Set("app name", "eds")
 	}
