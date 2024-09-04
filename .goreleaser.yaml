@@ -12,9 +12,6 @@ builds:
       - darwin
     flags:
       - -trimpath
-    ldflags:
-      - -s
-      - -w
     hooks:
       post:
         - cmd: |
