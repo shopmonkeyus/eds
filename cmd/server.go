@@ -589,9 +589,9 @@ var serverCmd = &cobra.Command{
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/restart", port))
 				if err != nil {
 					logger.Error("restart failed: %s", err)
-				} else {
-					logger.Debug("restart response: %d", resp.StatusCode)
+					return
 				}
+				logger.Debug("restart response: %d", resp.StatusCode)
 			}
 		}
 
@@ -601,9 +601,9 @@ var serverCmd = &cobra.Command{
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", port))
 				if err != nil {
 					logger.Fatal("shutdown failed: %s", err)
-				} else {
-					logger.Debug("shutdown response: %d", resp.StatusCode)
+					return
 				}
+				logger.Debug("shutdown response: %d", resp.StatusCode)
 			}
 		}
 
@@ -616,6 +616,11 @@ var serverCmd = &cobra.Command{
 					return err
 				}
 				logger.Debug("pause response: %d", resp.StatusCode)
+				if resp.StatusCode == http.StatusOK {
+					logger.Info("server paused")
+				} else {
+					logger.Error("pause failed", resp.StatusCode)
+				}
 			}
 			return nil
 		}
@@ -627,8 +632,12 @@ var serverCmd = &cobra.Command{
 				if err != nil {
 					logger.Error("unpause failed: %s", err)
 					return err
+				}
+				logger.Debug("unpause response: %d", resp.StatusCode)
+				if resp.StatusCode == http.StatusOK {
+					logger.Info("server unpaused")
 				} else {
-					logger.Debug("unpause response: %d", resp.StatusCode)
+					logger.Error("unpause failed", resp.StatusCode)
 				}
 			}
 			return nil
