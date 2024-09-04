@@ -21,6 +21,14 @@ type SchemaProperty struct {
 	Deprecated           *bool      `json:"deprecated,omitempty"`
 }
 
+func (p SchemaProperty) IsNotNull() bool {
+	return !p.Nullable || p.Type == "array"
+}
+
+func (p SchemaProperty) IsArrayOrJSON() bool {
+	return p.Type == "object" || p.Type == "array"
+}
+
 // Schema is the schema metadata for a table.
 type Schema struct {
 	Properties   map[string]SchemaProperty `json:"properties"`

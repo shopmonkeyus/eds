@@ -39,24 +39,21 @@ func SQLExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool
 	}
 }
 
-// ToJSONStringVal returns a JSON string value checking for empty string and converting it to '{}'
-func ToJSONStringVal(name string, val string, jsonb map[string]bool) string {
-	if jsonb[name] && (val == "''" || val == "") {
-		return "'{}'"
-	}
-	return val
+func isEmptyVal(val string) bool {
+	return val == "''" || val == "" || val == "NULL"
 }
 
-// ToMapOfJSONColumns returns a map of column names that are of type 'object'
-func ToMapOfJSONColumns(model *internal.Schema) map[string]bool {
-	jsonb := make(map[string]bool)
-	for _, name := range model.Columns() {
-		property := model.Properties[name]
-		if property.Type == "object" {
-			jsonb[name] = true
+// ToJSONStringVal returns a JSON string value checking for empty string and converting it to '{}'
+func ToJSONStringVal(name string, val string, prop internal.SchemaProperty) string {
+	if prop.IsArrayOrJSON() && prop.IsNotNull() && isEmptyVal(val) {
+		switch prop.Type {
+		case "array":
+			return "'[]'"
+		case "object":
+			return "'{}'"
 		}
 	}
-	return jsonb
+	return val
 }
 
 // ToUserPass returns a user:pass string from a URL

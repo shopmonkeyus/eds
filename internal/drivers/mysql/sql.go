@@ -38,38 +38,43 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 	sql.WriteString(") VALUES (")
 	var insertVals []string
 	var updateValues []string
-	jsonb := util.ToMapOfJSONColumns(model)
 	if operation == "UPDATE" {
 		for _, name := range diff {
 			if !util.SliceContains(model.Columns(), name) || name == "id" {
 				continue
 			}
+			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
-				updateValues = append(updateValues, "NULL")
+				v := util.ToJSONStringVal(name, "NULL", prop)
+				updateValues = append(updateValues, v)
 			}
 		}
 		for _, name := range model.Columns() {
+			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop)
 				insertVals = append(insertVals, v)
 			} else {
-				insertVals = append(insertVals, "NULL")
+				v := util.ToJSONStringVal(name, "NULL", prop)
+				insertVals = append(insertVals, v)
 			}
 		}
 	} else {
 		for _, name := range model.Columns() {
+			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), jsonb)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop)
 				if name != "id" {
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 				}
 				insertVals = append(insertVals, v)
 			} else {
-				updateValues = append(updateValues, "NULL")
-				insertVals = append(insertVals, "NULL")
+				v := util.ToJSONStringVal(name, "NULL", prop)
+				updateValues = append(updateValues, v)
+				insertVals = append(insertVals, v)
 			}
 		}
 	}

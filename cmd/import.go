@@ -526,6 +526,8 @@ var importCmd = &cobra.Command{
 				if err := theTracker.SetKey(trackerTableExportKey, util.JSONStringify(tableExportInfo), 0); err != nil {
 					logger.Error("error saving table export data to tracker: %s", err)
 				}
+				theTracker.Close()
+				logger.Trace("tracker closed")
 			}
 			if !filesRemoved && dir != "" {
 				logger.Info("downloaded files saved to: %s", dir)
@@ -655,7 +657,7 @@ var importCmd = &cobra.Command{
 				}
 			}
 		} else {
-			logger.Trace("driver does not support migration, skipping setting table versions")
+			logger.Trace("driver does not support migration, skip setting table versions")
 		}
 
 		success = true
