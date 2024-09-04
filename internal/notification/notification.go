@@ -20,7 +20,7 @@ type NotificationHandler struct {
 	Restart func()
 
 	// Shutdown action is called to shutdown the server.
-	Shutdown func(message string)
+	Shutdown func(message string, deleted bool)
 
 	// Pause action is called to pause the driver from processing.
 	Pause func() error
@@ -331,8 +331,9 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 			c.logger.Warn("invalid ping notification. missing subject for: %s", notification.String())
 		}
 	case "shutdown":
+		deleted := getBool(notification.Data["deleted"])
 		if message, ok := notification.Data["message"].(string); ok {
-			c.handler.Shutdown(message)
+			c.handler.Shutdown(message, deleted)
 		} else {
 			c.logger.Warn("invalid shutdown notification. missing message for: %s", notification.String())
 		}

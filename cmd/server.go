@@ -595,13 +595,21 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		shutdown := func(msg string) {
+		shutdown := func(msg string, deleted bool) {
 			if configured {
 				logger.Info("shutdown requested: %s", msg)
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/shutdown", port))
 				if err != nil {
 					logger.Fatal("shutdown failed: %s", err)
 					return
+				}
+				if deleted {
+					logger.Info("shutdown successful, server was deleted")
+					viper.Set("server_id", "")
+					if err := viper.WriteConfig(); err != nil {
+						logger.Error("failed to write config: %s", err)
+					}
+					logger.Info("server id removed from config")
 				}
 				logger.Debug("shutdown response: %d", resp.StatusCode)
 			}
