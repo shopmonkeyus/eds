@@ -607,15 +607,15 @@ var serverCmd = &cobra.Command{
 					logger.Fatal("shutdown failed: %s", err)
 					return
 				}
+				logger.Debug("shutdown response: %d", resp.StatusCode)
 				if deleted {
-					logger.Info("shutdown successful, server was deleted")
+					logger.Info("shutdown successful")
 					viper.Set("server_id", "")
 					if err := viper.WriteConfig(); err != nil {
 						logger.Error("failed to write config: %s", err)
 					}
-					logger.Info("server id removed from config")
+					logger.Debug("server id removed from config")
 				}
-				logger.Debug("shutdown response: %d", resp.StatusCode)
 			}
 		}
 
