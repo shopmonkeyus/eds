@@ -487,7 +487,7 @@ var serverCmd = &cobra.Command{
 			fmt.Println(yellow("Welcome to Shopmonkey EDS!\n"))
 			whiteBold := color.New(color.FgWhite, color.Bold).SprintFunc()
 			for {
-				fmt.Print(whiteBold("Please enter the enrollment code: "))
+				fmt.Print(whiteBold("Enter one-time enrollment code: "))
 				var code string
 				if _, err := fmt.Scanln(&code); err != nil {
 					if err.Error() == "unexpected newline" {
