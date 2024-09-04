@@ -57,7 +57,13 @@ func TestDBChanges(t *testing.T) {
 func TestParseDSN(t *testing.T) {
 	dsn, err := parseURLToDSN("sqlserver://root:password@localhost:3306/eds")
 	assert.NoError(t, err)
-	assert.Equal(t, "sqlserver://root:password@localhost:3306?app+name=eds&database=eds", dsn)
+	assert.Equal(t, "sqlserver://root:password@localhost:3306?app+name=eds&database=eds&encrypt=disable", dsn)
+	dsn, err = parseURLToDSN("sqlserver://root:password@localhost:3306/eds?encrypt=enable")
+	assert.NoError(t, err)
+	assert.Equal(t, "sqlserver://root:password@localhost:3306?app+name=eds&database=eds&encrypt=enable", dsn)
+	dsn, err = parseURLToDSN("sqlserver://root:password@foo.microsoft.com:3306/eds")
+	assert.NoError(t, err)
+	assert.Equal(t, "sqlserver://root:password@foo.microsoft.com:3306?app+name=eds&database=eds", dsn)
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
