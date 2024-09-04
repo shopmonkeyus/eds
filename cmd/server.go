@@ -627,7 +627,7 @@ var serverCmd = &cobra.Command{
 				if resp.StatusCode == http.StatusOK {
 					logger.Info("server paused")
 				} else {
-					logger.Error("pause failed", resp.StatusCode)
+					logger.Error("pause failed %d", resp.StatusCode)
 				}
 			}
 			return nil
@@ -645,7 +645,7 @@ var serverCmd = &cobra.Command{
 				if resp.StatusCode == http.StatusOK {
 					logger.Info("server unpaused")
 				} else {
-					logger.Error("unpause failed", resp.StatusCode)
+					logger.Error("unpause failed %s", resp.StatusCode)
 				}
 			}
 			return nil
