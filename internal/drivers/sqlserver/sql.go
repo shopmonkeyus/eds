@@ -37,7 +37,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 			}
 			if val, ok := o[name]; ok {
 				prop := model.Properties[name]
-				v := util.ToJSONStringVal(name, quoteValue(val), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
 				updateValues = append(updateValues, "NULL")
@@ -62,7 +62,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		for _, name := range model.Columns() {
 			if val, ok := o[name]; ok {
 				prop := model.Properties[name]
-				v := util.ToJSONStringVal(name, quoteValue(val), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				if name != "id" {
 					v = handleSchemaProperty(model.Properties[name], v)
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))

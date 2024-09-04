@@ -39,6 +39,7 @@ func SliceContains(slice []string, val string) bool {
 
 // ToFileURI converts a directory and file to a file URI in a cross-platform way.
 func ToFileURI(dir string, file string) string {
+	dir, _ = filepath.Abs(dir)
 	absDir := filepath.Clean(dir)
 	if os.PathSeparator == '\\' {
 		// if windows replace the backslashes

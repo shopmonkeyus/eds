@@ -238,8 +238,13 @@ func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 		return nil
 	}
 
+	jobId := config.JobID
+	if jobId == "" {
+		jobId = util.Hash(time.Now().UnixNano()) // this can happen if we're not running in a job
+	}
+
 	// create a stage
-	stageName := "eds_import_" + config.JobID
+	stageName := "eds_import_" + jobId
 	logger.Debug("creating stage %s", stageName)
 	if err := executeSQL("CREATE STAGE " + stageName); err != nil {
 		return fmt.Errorf("error creating stage: %s", err)

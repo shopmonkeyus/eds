@@ -600,13 +600,28 @@ var importCmd = &cobra.Command{
 				tableExportInfo = tableData
 			}
 		} else {
-			tableData, err := loadTableExportInfo(logger, dataDir, theTracker)
+			tableData, err := loadTableExportInfo(logger, dataDir, theTracker, true)
 			if err != nil {
 				logger.Fatal("%s", err)
 			}
-			tableExportInfo = tableData
-			tables = tableNames(tableData)
-			logger.Debug("reloading tables (%s) from %s", strings.Join(tables, ","), dir)
+			// if we don't have any previous data before we've specified a directory, we need to
+			// determine the downloaded files from the directory and use that to filter tables
+			if tableData != nil {
+				tableExportInfo = tableData
+				tables = tableNames(tableData)
+				logger.Debug("reloading tables (%s) from %s", strings.Join(tables, ","), dir)
+			} else {
+				files, err := util.ListDir(dir)
+				if err != nil {
+					logger.Fatal("unable to list files in directory: %s", err)
+				}
+				for _, file := range files {
+					table, _, ok := util.ParseCRDBExportFile(file)
+					if ok && !util.SliceContains(tables, table) {
+						tables = append(tables, table)
+					}
+				}
+			}
 		}
 
 		if len(only) > 0 {

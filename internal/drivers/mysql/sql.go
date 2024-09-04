@@ -21,16 +21,6 @@ func quoteIdentifier(val string) string {
 	return val
 }
 
-// numbers and booleans must be quoted for JSON fields in mysql
-var scalarValue = regexp.MustCompile(`^([+-]?([0-9]*[.])?[0-9]+)|(true|false)$`)
-
-func quoteJSONScalar(val string, prop internal.SchemaProperty) string {
-	if prop.Type == "object" && scalarValue.MatchString(val) {
-		return "'" + val + "'"
-	}
-	return val
-}
-
 func toSQLFromObject(operation string, model *internal.Schema, table string, event internal.DBChangeEvent, diff []string) (string, error) {
 	o, err := event.GetObject()
 	if err != nil {
@@ -55,20 +45,20 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 			}
 			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := quoteJSONScalar(util.ToJSONStringVal(name, quoteValue(val), prop), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
-				v := quoteJSONScalar(util.ToJSONStringVal(name, "NULL", prop), prop)
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
 				updateValues = append(updateValues, v)
 			}
 		}
 		for _, name := range model.Columns() {
 			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := quoteJSONScalar(util.ToJSONStringVal(name, quoteValue(val), prop), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				insertVals = append(insertVals, v)
 			} else {
-				v := quoteJSONScalar(util.ToJSONStringVal(name, "NULL", prop), prop)
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
 				insertVals = append(insertVals, v)
 			}
 		}
@@ -76,13 +66,13 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 		for _, name := range model.Columns() {
 			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := quoteJSONScalar(util.ToJSONStringVal(name, quoteValue(val), prop), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				if name != "id" {
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 				}
 				insertVals = append(insertVals, v)
 			} else {
-				v := quoteJSONScalar(util.ToJSONStringVal(name, "NULL", prop), prop)
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
 				updateValues = append(updateValues, v)
 				insertVals = append(insertVals, v)
 			}

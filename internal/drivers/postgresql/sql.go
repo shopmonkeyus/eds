@@ -156,20 +156,20 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 			}
 			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop)
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
 				updateValues = append(updateValues, v)
 			}
 		}
 		for _, name := range model.Columns() {
 			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				insertVals = append(insertVals, v)
 			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop)
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
 				insertVals = append(insertVals, v)
 			}
 		}
@@ -177,13 +177,13 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		for _, name := range model.Columns() {
 			prop := model.Properties[name]
 			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop)
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
 				if name != "id" {
 					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 				}
 				insertVals = append(insertVals, v)
 			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop)
+				v := util.ToJSONStringVal(name, "NULL", prop, true)
 				updateValues = append(updateValues, v)
 				insertVals = append(insertVals, v)
 			}
@@ -315,9 +315,17 @@ func getConnectionStringFromURL(urlstr string) (string, error) {
 	if u.Port() == "" {
 		u.Host = u.Host + ":5432"
 	}
+	var reencode bool
+	q := u.Query()
 	if !u.Query().Has("application_name") {
-		q := u.Query()
 		q.Set("application_name", "eds")
+		reencode = true
+	}
+	if util.IsLocalhost(u.Host) && !u.Query().Has("sslmode") {
+		q.Set("sslmode", "disable")
+		reencode = true
+	}
+	if reencode {
 		u.RawQuery = q.Encode()
 	}
 	return u.String(), nil

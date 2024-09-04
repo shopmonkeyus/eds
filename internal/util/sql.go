@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -40,11 +41,11 @@ func SQLExecuter(ctx context.Context, log logger.Logger, db *sql.DB, dryRun bool
 }
 
 func isEmptyVal(val string) bool {
-	return val == "''" || val == "" || val == "NULL"
+	return val == "''" || val == "" || val == "NULL" || val == "null"
 }
 
 // ToJSONStringVal returns a JSON string value checking for empty string and converting it to '{}'
-func ToJSONStringVal(name string, val string, prop internal.SchemaProperty) string {
+func ToJSONStringVal(name string, val string, prop internal.SchemaProperty, quoteScalar bool) string {
 	if prop.IsArrayOrJSON() && prop.IsNotNull() && isEmptyVal(val) {
 		switch prop.Type {
 		case "array":
@@ -52,6 +53,20 @@ func ToJSONStringVal(name string, val string, prop internal.SchemaProperty) stri
 		case "object":
 			return "'{}'"
 		}
+	}
+	if quoteScalar {
+		return quoteJSONScalar(val, prop)
+	}
+	return val
+}
+
+// numbers and booleans must be quoted for JSON fields in certain databases
+var scalarValue = regexp.MustCompile(`^([+-]?([0-9]*[.])?[0-9]+)|(true|false)$`)
+
+// quoteJSONScalar will attempt to quote a JSON scalar value if it is a number or boolean
+func quoteJSONScalar(val string, prop internal.SchemaProperty) string {
+	if prop.Type == "object" && scalarValue.MatchString(val) {
+		return "'" + val + "'"
 	}
 	return val
 }
