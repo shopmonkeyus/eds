@@ -479,6 +479,7 @@ var serverCmd = &cobra.Command{
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[server]")
 		defer util.RecoverPanic(logger)
+		apiurl := mustFlagString(cmd, "api-url", false)
 
 		// NOTE: do these before bothering with the wrapper since they are required to run
 		edsServerId := viper.GetString("server_id")
@@ -500,7 +501,11 @@ var serverCmd = &cobra.Command{
 				if code == "" {
 					os.Exit(1)
 				}
-				cmd := exec.Command(getExecutable(), "enroll", code, "--silent")
+				args := []string{"enroll", code, "--silent"}
+				if apiurl != "" {
+					args = append(args, "--api-url", apiurl)
+				}
+				cmd := exec.Command(getExecutable(), args...)
 				cmd.Stderr = os.Stderr
 				cmd.Stdout = os.Stdout
 				cmd.Run()
@@ -513,7 +518,6 @@ var serverCmd = &cobra.Command{
 			}
 		}
 		dataDir := getDataDir(cmd, logger)
-		apiurl := mustFlagString(cmd, "api-url", false)
 		driverURL := viper.GetString("url")
 		server := mustFlagString(cmd, "server", false)
 		apikey := viper.GetString("token")
