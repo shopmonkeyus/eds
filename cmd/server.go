@@ -502,7 +502,7 @@ var serverCmd = &cobra.Command{
 					os.Exit(1)
 				}
 				args := []string{"enroll", code, "--silent"}
-				if apiurl != "" {
+				if cmd.Flags().Changed("api-url") {
 					args = append(args, "--api-url", apiurl)
 				}
 				cmd := exec.Command(getExecutable(), args...)
