@@ -357,9 +357,9 @@ func (p *s3Driver) MaxBatchSize() int {
 func (p *s3Driver) process(_ context.Context, logger logger.Logger, event internal.DBChangeEvent, dryRun bool) (bool, error) {
 	var key string
 	if event.SchemaValidatedPath != nil {
-		key = *event.SchemaValidatedPath
+		key = path.Join(p.prefix, *event.SchemaValidatedPath)
 	} else {
-		key = fmt.Sprintf("%s%s/%s.json", p.prefix, event.Table, event.GetPrimaryKey())
+		key = path.Join(p.prefix, event.Table, event.GetPrimaryKey()+".json")
 	}
 	if dryRun {
 		logger.Trace("would store %s:%s", p.bucket, key)
