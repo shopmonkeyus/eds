@@ -243,7 +243,12 @@ func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent)
 	if c.validator != nil {
 		found, valid, path, err := c.validator.Validate(*evt)
 		if err != nil {
-			logger.Error("error validating schema: %s", err)
+			if errors.Is(err, util.ErrSchemaValidation) {
+				// note we join these errors since they are separated by definition in errors.Join and we want to log them together
+				logger.Debug("skipping %s, schema did not validate (%s) for event: %s", evt.Table, strings.TrimSpace(strings.Join(strings.Split(err.Error(), "\n"), " ")), util.JSONStringify(evt))
+				return true
+			}
+			logger.Error("error validating schema: %s for event: %s", err, util.JSONStringify(evt))
 			return true
 		}
 		if !found {
