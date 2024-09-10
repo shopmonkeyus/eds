@@ -101,7 +101,7 @@ var forkCmd = &cobra.Command{
 			os.Exit(exitCodeIncorrectUsage)
 		}
 
-		tableData, err := loadTableExportInfo(tracker, true)
+		tableData, err := loadTableExportInfo(tracker)
 		if err != nil {
 			logger.Error("error loading table export data: %s", err)
 			os.Exit(exitCodeIncorrectUsage)

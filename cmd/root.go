@@ -222,12 +222,12 @@ func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
 	return dataDir
 }
 
-func loadTableExportInfo(theTracker *tracker.Tracker, skipIfNotFound bool) ([]TableExportInfo, error) {
+func loadTableExportInfo(theTracker *tracker.Tracker) ([]TableExportInfo, error) {
 	found, val, err := theTracker.GetKey(trackerTableExportKey)
 	if err != nil {
 		return nil, fmt.Errorf("error loading table export data from tracker: %w", err)
 	}
-	if !found && skipIfNotFound {
+	if !found {
 		return nil, nil
 	}
 	var tableData []TableExportInfo
