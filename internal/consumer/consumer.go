@@ -773,6 +773,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 			jsConfig.OptStartTime = startAt
 		} else {
 			jsConfig.DeliverPolicy = jetstream.DeliverNewPolicy
+			consumer.logger.Warn("no import timestamp found, starting data stream from now")
 		}
 
 		c, err = js.CreateConsumer(configConsumerCtx, "dbchange", jsConfig)
