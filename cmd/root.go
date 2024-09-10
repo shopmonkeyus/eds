@@ -222,7 +222,7 @@ func getDataDir(cmd *cobra.Command, logger logger.Logger) string {
 	return dataDir
 }
 
-func loadTableExportInfo(logger logger.Logger, datadir string, theTracker *tracker.Tracker, skipIfNotFound bool) ([]TableExportInfo, error) {
+func loadTableExportInfo(theTracker *tracker.Tracker, skipIfNotFound bool) ([]TableExportInfo, error) {
 	found, val, err := theTracker.GetKey(trackerTableExportKey)
 	if err != nil {
 		return nil, fmt.Errorf("error loading table export data from tracker: %w", err)
@@ -231,28 +231,6 @@ func loadTableExportInfo(logger logger.Logger, datadir string, theTracker *track
 		return nil, nil
 	}
 	var tableData []TableExportInfo
-	if !found {
-		// NOTE: this is just for backwards compatibility with the old file and will be able to be eventually removed
-		fn := filepath.Join(datadir, "tables.json")
-		if util.Exists(fn) {
-			of, err := os.Open(fn)
-			if err != nil {
-				return nil, fmt.Errorf("error opening table export file: %s. %w", fn, err)
-			}
-			defer of.Close()
-			if err := json.NewDecoder(of).Decode(&tableData); err != nil {
-				return nil, fmt.Errorf("error decoding table export data: %w", err)
-			}
-			if err := theTracker.SetKey(trackerTableExportKey, util.JSONStringify(tableData), 0); err != nil {
-				return nil, fmt.Errorf("error saving table export data to tracker: %w", err)
-			}
-			of.Close()
-			os.Remove(fn) // remove since this file has been migrated
-			logger.Info("migrated table export data from %s to tracker and removed it", fn)
-			return tableData, nil
-		}
-		return nil, fmt.Errorf("no table export data found in tracker")
-	}
 	if err := json.Unmarshal([]byte(val), &tableData); err != nil {
 		return nil, fmt.Errorf("error decoding table export data: %w", err)
 	}
