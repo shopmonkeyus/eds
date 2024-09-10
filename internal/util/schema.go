@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"os"
@@ -11,6 +12,10 @@ import (
 
 	js "github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/shopmonkeyus/eds/internal"
+)
+
+var (
+	ErrSchemaValidation = errors.New("schema validation error")
 )
 
 type SchemaValidator struct {
@@ -89,7 +94,7 @@ func (v *SchemaValidator) Validate(event internal.DBChangeEvent) (bool, bool, st
 		}
 		if err := rule.schema.Validate(o); err != nil {
 			if verr, ok := err.(*js.ValidationError); ok {
-				return true, false, "", verr
+				return true, false, "", errors.Join(ErrSchemaValidation, verr)
 			}
 			return true, false, "", err
 		}

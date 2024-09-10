@@ -1,8 +1,10 @@
 package importer
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -90,7 +92,12 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 
 			if config.SchemaValidator != nil {
 				found, valid, path, err := config.SchemaValidator.Validate(event)
-				if err != nil {
+				if errors.Is(err, util.ErrSchemaValidation) {
+					// note we join these errors since they are separated by definition in errors.Join and we want to log them together
+					logger.Warn("skipping %s, schema did not validate (%s) for event: %s", event.Table, strings.TrimSpace(strings.Join(strings.Split(err.Error(), "\n"), " ")), util.JSONStringify(event))
+					continue
+				}
+				if err != nil && !errors.Is(err, util.ErrSchemaValidation) {
 					return fmt.Errorf("error validating schema: %w", err)
 				}
 				if !found {
