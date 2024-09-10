@@ -172,19 +172,21 @@ func createSQL(s *internal.Schema) string {
 	return sql.String()
 }
 
-func addNewColumnsSQL(columns []string, s *internal.Schema) string {
-	var sql strings.Builder
+func addNewColumnsSQL(columns []string, s *internal.Schema) []string {
+	var sqls []string
 	for _, column := range columns {
 		prop := s.Properties[column]
+		var sql strings.Builder
 		sql.WriteString("ALTER TABLE ")
 		sql.WriteString(quoteIdentifier((s.Table)))
 		sql.WriteString(" ADD COLUMN ")
 		sql.WriteString(quoteIdentifier(column))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop, false))
-		sql.WriteString(";\n")
+		sql.WriteString(";")
+		sqls = append(sqls, sql.String())
 	}
-	return sql.String()
+	return sqls
 }
 
 func parseURLToDSN(urlstr string) (string, error) {

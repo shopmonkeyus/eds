@@ -104,6 +104,6 @@ func TestAddNewColumnsSQL(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, schema)
 	detail := schema["order"]
-	sql := addNewColumnsSQL([]string{"number", "internalNumber", "externalNumber"}, detail)
-	assert.Equal(t, "ALTER TABLE `order` ADD COLUMN number TEXT;\nALTER TABLE `order` ADD COLUMN `internalNumber` TEXT;\nALTER TABLE `order` ADD COLUMN `externalNumber` TEXT;\n", sql)
+	sqls := addNewColumnsSQL([]string{"number", "internalNumber", "externalNumber"}, detail)
+	assert.Equal(t, []string{"ALTER TABLE `order` ADD COLUMN number TEXT;", "ALTER TABLE `order` ADD COLUMN `internalNumber` TEXT;", "ALTER TABLE `order` ADD COLUMN `externalNumber` TEXT;"}, sqls)
 }

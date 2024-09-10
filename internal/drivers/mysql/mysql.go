@@ -262,10 +262,19 @@ func (p *mysqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger,
 func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql := addNewColumnsSQL(columns, schema)
-	logger.Trace("migrate new columns: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	sqls := addNewColumnsSQL(columns, schema)
+	for _, sql := range sqls {
+		logger.Trace("migrate new column: %s", sql)
+		_, err := p.db.ExecContext(ctx, sql)
+		if err != nil {
+			if strings.Contains(err.Error(), "Duplicate column name") {
+				logger.Warn("column already exists for: %s, skipping...", sql)
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func init() {
