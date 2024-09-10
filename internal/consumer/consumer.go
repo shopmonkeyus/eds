@@ -248,7 +248,7 @@ func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent)
 				logger.Debug("skipping %s, schema did not validate (%s) for event: %s", evt.Table, strings.TrimSpace(strings.Join(strings.Split(err.Error(), "\n"), " ")), util.JSONStringify(evt))
 				return true
 			}
-			logger.Error("error validating schema: %s", err)
+			logger.Error("error validating schema: %s for event: %s", err, util.JSONStringify(evt))
 			return true
 		}
 		if !found {
