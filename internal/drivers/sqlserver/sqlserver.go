@@ -267,9 +267,21 @@ func (p *sqlserverDriver) MigrateNewColumns(ctx context.Context, logger logger.L
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	sql := addNewColumnsSQL(columns, schema)
-	logger.Trace("migrate new columns: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	for _, s := range strings.Split(sql, ";\n") {
+		_sql := strings.TrimSpace(s)
+		if _sql != "" {
+			logger.Trace("migrate new column: %s", _sql)
+			_, err := p.db.ExecContext(ctx, _sql)
+			if err != nil {
+				if strings.Contains(err.Error(), "Column names in each table must be unique") {
+					logger.Warn("column already exists for: %s, skipping...", _sql)
+					continue
+				}
+				return fmt.Errorf("error migrating new column with: %s: %w", _sql, err)
+			}
+		}
+	}
+	return nil
 }
 
 func init() {
