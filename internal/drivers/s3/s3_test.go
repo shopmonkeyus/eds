@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -66,7 +68,6 @@ func TestGetBucketInfoGCP(t *testing.T) {
 	assert.Equal(t, "eds-import", bucket)
 	assert.Equal(t, "with/prefix/", prefix)
 	assert.Equal(t, "https://storage.googleapis.com", url)
-
 }
 
 func TestValidate(t *testing.T) {
@@ -141,4 +142,49 @@ func TestValidate(t *testing.T) {
 	})
 	assert.Empty(t, err)
 	assert.Equal(t, "s3://storage.googleapis.com/bucket/foo?access-key-id=AKIAIOSFODNN7EXAMPLE&region=us-east-1&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY", url)
+}
+
+func TestSchemaValidationPath(t *testing.T) {
+	logger := logger.NewTestLogger()
+	_, _, prefix := getBucketInfo(mustParseURL("s3://storage.googleapis.com/eds-import/withprefix"), googleProvider)
+	var s3 s3Driver
+	s3.prefix = prefix
+	s3.ch = make(chan job, 1)
+	ok, err := s3.Process(logger, internal.DBChangeEvent{
+		SchemaValidatedPath: internal.StringPointer("a/b/c"),
+	})
+	assert.False(t, ok)
+	assert.NoError(t, err)
+	job := <-s3.ch
+	assert.Equal(t, "withprefix/a/b/c", job.key)
+}
+
+func TestEventPathWithPrefix(t *testing.T) {
+	logger := logger.NewTestLogger()
+	_, _, prefix := getBucketInfo(mustParseURL("s3://storage.googleapis.com/eds-import/withprefix"), googleProvider)
+	var s3 s3Driver
+	s3.prefix = prefix
+	s3.ch = make(chan job, 1)
+	ok, err := s3.Process(logger, internal.DBChangeEvent{
+		Table: "table",
+		Key:   []string{"pk"},
+	})
+	assert.False(t, ok)
+	assert.NoError(t, err)
+	job := <-s3.ch
+	assert.Equal(t, "withprefix/table/pk.json", job.key)
+}
+
+func TestEventPathNoPrefix(t *testing.T) {
+	logger := logger.NewTestLogger()
+	var s3 s3Driver
+	s3.ch = make(chan job, 1)
+	ok, err := s3.Process(logger, internal.DBChangeEvent{
+		Table: "table",
+		Key:   []string{"pk"},
+	})
+	assert.False(t, ok)
+	assert.NoError(t, err)
+	job := <-s3.ch
+	assert.Equal(t, "table/pk.json", job.key)
 }
