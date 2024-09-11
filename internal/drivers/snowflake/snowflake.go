@@ -54,7 +54,7 @@ func (p *snowflakeDriver) refreshSchema(ctx context.Context) error {
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.db, "public", p.dbname)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.db, p.dbname)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}

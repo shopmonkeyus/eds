@@ -17,9 +17,9 @@ func GetCurrentDatabase(ctx context.Context, db *sql.DB, fn string) (string, err
 }
 
 // BuildDBSchemaFromInfoSchema builds a database schema from the information schema.
-func BuildDBSchemaFromInfoSchema(ctx context.Context, db *sql.DB, schema string, catalog string) (internal.DatabaseSchema, error) {
+func BuildDBSchemaFromInfoSchema(ctx context.Context, db *sql.DB, catalog string) (internal.DatabaseSchema, error) {
 	res := make(internal.DatabaseSchema)
-	rows, err := db.QueryContext(ctx, "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = $1 AND table_catalog = $2", schema, catalog)
+	rows, err := db.QueryContext(ctx, "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_catalog = $1", catalog)
 	if err != nil {
 		return nil, err
 	}
