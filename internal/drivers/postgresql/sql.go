@@ -184,7 +184,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 				insertVals = append(insertVals, v)
 			} else {
 				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				updateValues = append(updateValues, v)
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 				insertVals = append(insertVals, v)
 			}
 		}

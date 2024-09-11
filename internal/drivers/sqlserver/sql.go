@@ -40,7 +40,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
-				updateValues = append(updateValues, "NULL")
+				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name)))
 			}
 		}
 		sql.WriteString(strings.Join(updateValues, ","))
