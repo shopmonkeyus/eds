@@ -73,7 +73,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 				insertVals = append(insertVals, v)
 			} else {
 				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				updateValues = append(updateValues, v)
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 				insertVals = append(insertVals, v)
 			}
 		}
