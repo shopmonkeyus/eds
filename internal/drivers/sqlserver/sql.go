@@ -10,6 +10,7 @@ import (
 
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
+	"github.com/shopmonkeyus/go-common/logger"
 )
 
 var needsQuote = regexp.MustCompile(`[A-Z0-9_\s]`)
@@ -204,9 +205,14 @@ func createSQL(s *internal.Schema) string {
 	return sql.String()
 }
 
-func addNewColumnsSQL(columns []string, s *internal.Schema) string {
-	var sql strings.Builder
+func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema, db internal.DatabaseSchema) []string {
+	var res []string
 	for _, column := range columns {
+		if ok, _ := db.GetType(s.Table, column); ok {
+			logger.Warn("skipping migration for column: %s for table: %s since it already exists", column, s.Table)
+			continue
+		}
+		var sql strings.Builder
 		prop := s.Properties[column]
 		sql.WriteString("ALTER TABLE ")
 		sql.WriteString(quoteIdentifier((s.Table)))
@@ -214,9 +220,10 @@ func addNewColumnsSQL(columns []string, s *internal.Schema) string {
 		sql.WriteString(quoteIdentifier(column))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop, false))
-		sql.WriteString(";\n")
+		sql.WriteString(";")
+		res = append(res, sql.String())
 	}
-	return sql.String()
+	return res
 }
 
 func parseURLToDSN(urlstr string) (string, error) {

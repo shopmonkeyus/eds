@@ -9,6 +9,7 @@ import (
 
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
+	"github.com/shopmonkeyus/go-common/logger"
 )
 
 var needsQuote = regexp.MustCompile(`[A-Z0-9_\s]`)
@@ -172,9 +173,13 @@ func createSQL(s *internal.Schema) string {
 	return sql.String()
 }
 
-func addNewColumnsSQL(columns []string, s *internal.Schema) []string {
+func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema, db internal.DatabaseSchema) []string {
 	var sqls []string
 	for _, column := range columns {
+		if ok, _ := db.GetType(s.Table, column); ok {
+			logger.Warn("skipping migration for column: %s for table: %s since it already exists", column, s.Table)
+			continue
+		}
 		prop := s.Properties[column]
 		var sql strings.Builder
 		sql.WriteString("ALTER TABLE ")

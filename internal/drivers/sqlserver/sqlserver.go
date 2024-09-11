@@ -29,6 +29,8 @@ type sqlserverDriver struct {
 	importConfig internal.ImporterConfig
 	executor     func(string) error
 	size         int
+	dbname       string
+	dbschema     internal.DatabaseSchema
 }
 
 var _ internal.Driver = (*sqlserverDriver)(nil)
@@ -36,6 +38,22 @@ var _ internal.DriverLifecycle = (*sqlserverDriver)(nil)
 var _ internal.Importer = (*sqlserverDriver)(nil)
 var _ internal.DriverHelp = (*sqlserverDriver)(nil)
 var _ importer.Handler = (*sqlserverDriver)(nil)
+
+func (p *sqlserverDriver) refreshSchema(ctx context.Context) error {
+	if p.dbname == "" {
+		dbname, err := util.GetCurrentDatabase(ctx, p.db, "DB_NAME()")
+		if err != nil {
+			return fmt.Errorf("error getting current database name: %w", err)
+		}
+		p.dbname = dbname
+	}
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.db, "public", p.dbname)
+	if err != nil {
+		return fmt.Errorf("error building database schema: %w", err)
+	}
+	p.dbschema = schema
+	return nil
+}
 
 func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
 	dsn, err := parseURLToDSN(urlstr)
@@ -46,12 +64,18 @@ func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.PingContext(pctx); err != nil {
 		db.Close()
 		return nil, err
 	}
+
+	if err := p.refreshSchema(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return db, nil
 }
 
@@ -256,32 +280,31 @@ func (p *sqlserverDriver) Validate(values map[string]any) (string, []internal.Fi
 func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
+	if _, ok := p.dbschema[schema.Table]; ok {
+		logger.Warn("table already exists for: %s, skipping...", schema.Table)
+		return nil
+	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	if _, err := p.db.ExecContext(ctx, sql); err != nil {
+		return err
+	}
+	return p.refreshSchema(ctx)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
 func (p *sqlserverDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql := addNewColumnsSQL(columns, schema)
-	for _, s := range strings.Split(sql, ";\n") {
-		_sql := strings.TrimSpace(s)
-		if _sql != "" {
-			logger.Trace("migrate new column: %s", _sql)
-			_, err := p.db.ExecContext(ctx, _sql)
-			if err != nil {
-				if strings.Contains(err.Error(), "Column names in each table must be unique") {
-					logger.Warn("column already exists for: %s, skipping...", _sql)
-					continue
-				}
-				return fmt.Errorf("error migrating new column with: %s: %w", _sql, err)
-			}
+	sqls := addNewColumnsSQL(logger, columns, schema, p.dbschema)
+	for _, sql := range sqls {
+		_, err := p.db.ExecContext(ctx, sql)
+		if err != nil {
+			return err
 		}
+		logger.Debug("migrated new columns: %s", sql)
 	}
-	return nil
+	return p.refreshSchema(ctx)
 }
 
 func init() {

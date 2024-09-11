@@ -5,6 +5,7 @@ go 1.23
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.2.2
 	github.com/BurntSushi/toml v1.4.0
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/ProtonMail/gopenpgp/v3 v3.0.0-alpha.4-proton
 	github.com/aws/aws-sdk-go-v2 v1.30.5
 	github.com/aws/aws-sdk-go-v2/config v1.27.33

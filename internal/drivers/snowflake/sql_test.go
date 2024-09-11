@@ -84,12 +84,25 @@ func TestValidate(t *testing.T) {
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
-	registery, err := registry.NewAPIRegistry(context.Background(), logger.NewTestLogger(), "http://api.shopmonkey.cloud", nil)
+	logger := logger.NewTestLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
 	assert.NoError(t, err)
 	schema, err := registery.GetLatestSchema()
 	assert.NoError(t, err)
 	assert.NotNil(t, schema)
 	detail := schema["order"]
-	sql := addNewColumnsSQL([]string{"number", "internalNumber", "externalNumber"}, detail)
-	assert.Equal(t, "ALTER TABLE \"order\" ADD COLUMN \"number\" STRING;\nALTER TABLE \"order\" ADD COLUMN \"internalNumber\" STRING;\nALTER TABLE \"order\" ADD COLUMN \"externalNumber\" STRING;\n", sql)
+	sql := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, make(internal.DatabaseSchema))
+	assert.Equal(t, []string{"ALTER TABLE \"order\" ADD COLUMN \"number\" STRING;", "ALTER TABLE \"order\" ADD COLUMN \"internalNumber\" STRING;", "ALTER TABLE \"order\" ADD COLUMN \"externalNumber\" STRING;"}, sql)
+}
+
+func TestAddNewColumnsSQLSkip(t *testing.T) {
+	logger := logger.NewTestLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
+	assert.NoError(t, err)
+	schema, err := registery.GetLatestSchema()
+	assert.NoError(t, err)
+	assert.NotNil(t, schema)
+	detail := schema["order"]
+	sql := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, internal.DatabaseSchema{"order": {"number": "VARCHAR(MAX)"}})
+	assert.Equal(t, []string{"ALTER TABLE \"order\" ADD COLUMN \"internalNumber\" STRING;", "ALTER TABLE \"order\" ADD COLUMN \"externalNumber\" STRING;"}, sql)
 }

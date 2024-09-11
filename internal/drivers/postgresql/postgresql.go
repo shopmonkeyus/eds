@@ -28,6 +28,8 @@ type postgresqlDriver struct {
 	executor     func(string) error
 	importConfig internal.ImporterConfig
 	size         int
+	dbname       string
+	dbschema     internal.DatabaseSchema
 }
 
 var _ internal.Driver = (*postgresqlDriver)(nil)
@@ -35,6 +37,23 @@ var _ internal.DriverLifecycle = (*postgresqlDriver)(nil)
 var _ internal.Importer = (*postgresqlDriver)(nil)
 var _ internal.DriverHelp = (*postgresqlDriver)(nil)
 var _ internal.DriverMigration = (*postgresqlDriver)(nil)
+
+func (p *postgresqlDriver) refreshSchema(ctx context.Context) error {
+	if p.dbname == "" {
+		dbname, err := util.GetCurrentDatabase(ctx, p.db, "current_database()")
+		if err != nil {
+			return fmt.Errorf("error getting current database name: %w", err)
+		}
+		p.dbname = dbname
+	}
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.db, "public", p.dbname)
+	if err != nil {
+		return fmt.Errorf("error building database schema: %w", err)
+	}
+	p.dbschema = schema
+	return nil
+
+}
 
 func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
 	urlstr, err := getConnectionStringFromURL(url)
@@ -45,12 +64,18 @@ func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.PingContext(pctx); err != nil {
 		db.Close()
 		return nil, err
 	}
+
+	if err := p.refreshSchema(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return db, nil
 }
 
@@ -257,20 +282,31 @@ func (p *postgresqlDriver) Validate(values map[string]any) (string, []internal.F
 func (p *postgresqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
+	if _, ok := p.dbschema[schema.Table]; ok {
+		logger.Warn("table already exists for: %s, skipping...", schema.Table)
+		return nil
+	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	if _, err := p.db.ExecContext(ctx, sql); err != nil {
+		return err
+	}
+	return p.refreshSchema(ctx)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
 func (p *postgresqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql := addNewColumnsSQL(columns, schema)
-	_, err := p.db.ExecContext(ctx, sql)
-	logger.Trace("migrate new columns: %s", sql)
-	return err
+	sqls := addNewColumnsSQL(logger, columns, schema, p.dbschema)
+	for _, sql := range sqls {
+		_, err := p.db.ExecContext(ctx, sql)
+		if err != nil {
+			return err
+		}
+		logger.Debug("migrated new columns: %s", sql)
+	}
+	return p.refreshSchema(ctx)
 }
 
 func init() {

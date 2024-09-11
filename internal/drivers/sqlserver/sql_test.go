@@ -67,14 +67,27 @@ func TestParseDSN(t *testing.T) {
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
-	registery, err := registry.NewAPIRegistry(context.Background(), logger.NewConsoleLogger(), "http://api.shopmonkey.cloud", nil)
+	logger := logger.NewConsoleLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
 	assert.NoError(t, err)
 	schema, err := registery.GetLatestSchema()
 	assert.NoError(t, err)
 	assert.NotNil(t, schema)
 	detail := schema["order"]
-	sql := addNewColumnsSQL([]string{"number", "internalNumber", "externalNumber"}, detail)
-	assert.Equal(t, "ALTER TABLE \"order\" ADD number NVARCHAR(MAX);\nALTER TABLE \"order\" ADD \"internalNumber\" NVARCHAR(MAX);\nALTER TABLE \"order\" ADD \"externalNumber\" NVARCHAR(MAX);\n", sql)
+	sql := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, make(internal.DatabaseSchema))
+	assert.Equal(t, []string{"ALTER TABLE \"order\" ADD number NVARCHAR(MAX);", "ALTER TABLE \"order\" ADD \"internalNumber\" NVARCHAR(MAX);", "ALTER TABLE \"order\" ADD \"externalNumber\" NVARCHAR(MAX);"}, sql)
+}
+
+func TestAddNewColumnsSQLSkip(t *testing.T) {
+	logger := logger.NewConsoleLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
+	assert.NoError(t, err)
+	schema, err := registery.GetLatestSchema()
+	assert.NoError(t, err)
+	assert.NotNil(t, schema)
+	detail := schema["order"]
+	sql := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, internal.DatabaseSchema{"order": {"number": "NVARCHAR(MAX)"}})
+	assert.Equal(t, []string{"ALTER TABLE \"order\" ADD \"internalNumber\" NVARCHAR(MAX);", "ALTER TABLE \"order\" ADD \"externalNumber\" NVARCHAR(MAX);"}, sql)
 }
 
 func TestUpdateWithNullSQL(t *testing.T) {

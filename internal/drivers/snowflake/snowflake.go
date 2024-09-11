@@ -29,6 +29,8 @@ type snowflakeDriver struct {
 	batcher   *util.Batcher
 	locker    sync.Mutex
 	sessionID string
+	dbname    string
+	dbschema  internal.DatabaseSchema
 }
 
 var _ internal.Driver = (*snowflakeDriver)(nil)
@@ -42,6 +44,22 @@ func (p *snowflakeDriver) SetSessionID(sessionID string) {
 		p.sessionID = sessionID
 		p.ctx = sf.WithRequestID(p.config.Context, sf.ParseUUID(sessionID))
 	}
+}
+
+func (p *snowflakeDriver) refreshSchema(ctx context.Context) error {
+	if p.dbname == "" {
+		dbname, err := util.GetCurrentDatabase(ctx, p.db, "CURRENT_DATABASE()")
+		if err != nil {
+			return fmt.Errorf("error getting current database name: %w", err)
+		}
+		p.dbname = dbname
+	}
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.db, "public", p.dbname)
+	if err != nil {
+		return fmt.Errorf("error building database schema: %w", err)
+	}
+	p.dbschema = schema
+	return nil
 }
 
 func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
@@ -58,6 +76,12 @@ func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB,
 		db.Close()
 		return nil, err
 	}
+
+	if err := p.refreshSchema(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return db, nil
 }
 
@@ -360,20 +384,31 @@ func (p *snowflakeDriver) Validate(values map[string]any) (string, []internal.Fi
 func (p *snowflakeDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
+	if _, ok := p.dbschema[schema.Table]; ok {
+		logger.Warn("table already exists for: %s, skipping...", schema.Table)
+		return nil
+	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	if _, err := p.db.ExecContext(ctx, sql); err != nil {
+		return err
+	}
+	return p.refreshSchema(ctx)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
 func (p *snowflakeDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql := addNewColumnsSQL(columns, schema)
-	logger.Trace("migrate new columns: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	sqls := addNewColumnsSQL(logger, columns, schema, p.dbschema)
+	for _, sql := range sqls {
+		_, err := p.db.ExecContext(ctx, sql)
+		if err != nil {
+			return err
+		}
+		logger.Debug("migrated new columns: %s", sql)
+	}
+	return p.refreshSchema(ctx)
 }
 
 func init() {
