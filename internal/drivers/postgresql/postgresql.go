@@ -52,7 +52,6 @@ func (p *postgresqlDriver) refreshSchema(ctx context.Context) error {
 	}
 	p.dbschema = schema
 	return nil
-
 }
 
 func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
