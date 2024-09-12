@@ -119,7 +119,7 @@ func RunTests(logger logger.Logger, only []string) error {
 			logger.Info("running test: %s", name)
 			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url}, nil)
 			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort)}, func(c *exec.Cmd) {
-				time.Sleep(time.Second)
+				time.Sleep(2 * time.Second)
 				_logger := logger.WithPrefix("[" + name + "]")
 				_logger.Info("ready to test")
 				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", healthPort))
