@@ -21,6 +21,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/api"
 	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/notification"
 	"github.com/shopmonkeyus/eds/internal/upgrade"
@@ -38,49 +39,6 @@ var ShopmonkeyPublicPGPKey string // set in main
 
 const maxFailures = 5
 
-type driverMeta struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	URL         string `json:"url"` // this is masked since it can contain sensitive information
-}
-
-type sessionStart struct {
-	Version   string      `json:"version"`
-	Hostname  string      `json:"hostname"`
-	IPAddress string      `json:"ipAddress"`
-	MachineId string      `json:"machineId"`
-	OsInfo    any         `json:"osinfo"`
-	Driver    *driverMeta `json:"driver,omitempty"`
-	ServerID  string      `json:"serverId"`
-}
-
-type edsSession struct {
-	SessionId  string  `json:"sessionId"`
-	Credential *string `json:"credential"`
-}
-
-type sessionStartResponse struct {
-	Success bool       `json:"success"`
-	Message string     `json:"message"`
-	Data    edsSession `json:"data"`
-}
-
-type sessionEnd struct {
-	Errored bool `json:"errored"`
-}
-
-type sessionEndURLs struct {
-	URL      string `json:"url"`
-	ErrorURL string `json:"errorUrl"`
-}
-
-type sessionEndResponse struct {
-	Success bool           `json:"success"`
-	Message string         `json:"message"`
-	Data    sessionEndURLs `json:"data"`
-}
-
 func writeCredsToFile(data string, filename string) error {
 	buf, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
@@ -94,8 +52,8 @@ func writeCredsToFile(data string, filename string) error {
 
 var errAlreadyRunning = errors.New("already running")
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*edsSession, error) {
-	var body sessionStart
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*api.EdsSession, error) {
+	var body api.SessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get local IP: %w", err)
@@ -127,7 +85,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 		if driverMetadata == nil {
 			return nil, fmt.Errorf("invalid driver URL: %s", driverUrl)
 		}
-		var driverInfo driverMeta
+		var driverInfo api.DriverMeta
 		driverInfo.Description = driverMetadata.Description
 		driverInfo.Name = driverMetadata.Name
 		driverInfo.ID = driverMetadata.Scheme
@@ -157,7 +115,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 		}
 		return nil, handleAPIError(resp, "session start")
 	}
-	var sessionResp sessionStartResponse
+	var sessionResp api.SessionStartResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sessionResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -168,8 +126,8 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	return &sessionResp.Data, nil
 }
 
-func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId string, errored bool) (*sessionEndURLs, error) {
-	var body sessionEnd
+func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId string, errored bool) (*api.SessionEndURLs, error) {
+	var body api.SessionEnd
 	body.Errored = errored
 	req, err := http.NewRequest("POST", apiURL+"/v3/eds/internal/"+sessionId, bytes.NewBuffer([]byte(util.JSONStringify(body))))
 	if err != nil {
@@ -185,7 +143,7 @@ func sendEnd(logger logger.Logger, apiURL string, apiKey string, sessionId strin
 	if resp.StatusCode != http.StatusOK {
 		return nil, handleAPIError(resp, "session end")
 	}
-	var s sessionEndResponse
+	var s api.SessionEndResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -300,7 +258,7 @@ func getLogUploadURL(logger logger.Logger, apiURL string, apiKey string, session
 	if resp.StatusCode != http.StatusOK {
 		return "", handleAPIError(resp, "log upload url")
 	}
-	var s sessionEndResponse
+	var s api.SessionEndResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -505,7 +463,7 @@ var serverCmd = &cobra.Command{
 				if cmd.Flags().Changed("api-url") {
 					args = append(args, "--api-url", apiurl)
 				}
-				cmd := exec.Command(getExecutable(), args...)
+				cmd := exec.Command(util.GetExecutable(), args...)
 				cmd.Stderr = os.Stderr
 				cmd.Stdout = os.Stdout
 				cmd.Run()
@@ -707,7 +665,7 @@ var serverCmd = &cobra.Command{
 				}
 			}
 
-			exec := getExecutable() // current running executable path
+			exec := util.GetExecutable() // current running executable path
 
 			if err := upgrade.Apply(exec, fn); err != nil {
 				if rerr := upgrade.RollbackError(err); rerr != nil {

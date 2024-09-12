@@ -260,16 +260,8 @@ func Execute() {
 	}
 }
 
-func getExecutable() string {
-	ex, err := os.Executable()
-	if err != nil {
-		ex = os.Args[0]
-	}
-	return ex
-}
-
 func getCommandExample(command string, args ...string) string {
-	ex := getExecutable()
+	ex := util.GetExecutable()
 	var cmd string
 	if strings.Contains(ex, "go-build") {
 		// If we are running in a go build environment, we need to tell the user how to start the server
