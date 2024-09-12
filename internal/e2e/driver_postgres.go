@@ -23,10 +23,20 @@ func (d *driverPostgresTest) URL(dir string) string {
 	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:15432/%s?sslmode=disable", dbuser, dbpass, dbname)
 }
 
+func (d *driverPostgresTest) QuoteTable(table string) string {
+	return fmt.Sprintf(`"%s"`, table)
+}
+
+func (d *driverPostgresTest) QuoteColumn(column string) string {
+	return fmt.Sprintf(`%s`, column)
+}
+
+func (d *driverPostgresTest) QuoteValue(value string) string {
+	return fmt.Sprintf(`'%s'`, value)
+}
+
 func (d *driverPostgresTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	return validateSQLEvent(logger, event, "postgres", url, func(table string) string {
-		return fmt.Sprintf(`"%s"`, table)
-	})
+	return validateSQLEvent(logger, event, "postgres", url, d)
 }
 
 func init() {

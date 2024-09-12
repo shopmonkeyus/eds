@@ -12,16 +12,22 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
+type sqlDriverTransform interface {
+	QuoteTable(table string) string
+	QuoteColumn(column string) string
+	QuoteValue(value string) string
+}
+
 type columnFormat func(string) string
 
-func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format columnFormat) error {
+func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format sqlDriverTransform) error {
 	logger.Info("testing: %s => %s", driver, url)
 	db, err := sql.Open(driver, url)
 	if err != nil {
 		return fmt.Errorf("error opening database: %w", err)
 	}
 	defer db.Close()
-	query := fmt.Sprintf("select * from %s where id = '%s'", format(event.Table), event.GetPrimaryKey())
+	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = %s", format.QuoteTable(event.Table), format.QuoteColumn("id"), format.QuoteValue(event.GetPrimaryKey()))
 	logger.Info("running query: %s", query)
 	rows, err := db.Query(query)
 	if err != nil {

@@ -23,10 +23,20 @@ func (d *driverSQLServerTest) URL(dir string) string {
 	return fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433/master", dbpass)
 }
 
+func (d *driverSQLServerTest) QuoteTable(table string) string {
+	return fmt.Sprintf(`[%s]`, table)
+}
+
+func (d *driverSQLServerTest) QuoteColumn(column string) string {
+	return fmt.Sprintf(`[%s]`, column)
+}
+
+func (d *driverSQLServerTest) QuoteValue(value string) string {
+	return fmt.Sprintf(`%s`, value)
+}
+
 func (d *driverSQLServerTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	return validateSQLEvent(logger, event, "sqlserver", fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433?&database=master&encrypt=disable", dbpass), func(table string) string {
-		return fmt.Sprintf("[%s]", table)
-	})
+	return validateSQLEvent(logger, event, "sqlserver", fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433?&database=master&encrypt=disable", dbpass), d)
 }
 
 func init() {

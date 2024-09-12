@@ -23,10 +23,20 @@ func (d *driverMySQLTest) URL(dir string) string {
 	return fmt.Sprintf("mysql://%s:%s@127.0.0.1:13306/%s", dbuser, dbpass, dbname)
 }
 
+func (d *driverMySQLTest) QuoteTable(table string) string {
+	return fmt.Sprintf("`%s`", table)
+}
+
+func (d *driverMySQLTest) QuoteColumn(column string) string {
+	return fmt.Sprintf(`%s`, column)
+}
+
+func (d *driverMySQLTest) QuoteValue(value string) string {
+	return fmt.Sprintf(`'%s'`, value)
+}
+
 func (d *driverMySQLTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	return validateSQLEvent(logger, event, "mysql", fmt.Sprintf("%s:%s@tcp(127.0.0.1:13306)/%s", dbuser, dbpass, dbname), func(table string) string {
-		return fmt.Sprintf("`%s`", table)
-	})
+	return validateSQLEvent(logger, event, "mysql", fmt.Sprintf("%s:%s@tcp(127.0.0.1:13306)/%s", dbuser, dbpass, dbname), d)
 }
 
 func init() {

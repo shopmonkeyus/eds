@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 )
 
 const (
-	sessionId    = "abc123f"
+	sessionId    = "4641e7c5-0f86-4576-89ca-15db401aea56"
 	companyId    = "1234567890"
 	enrollToken  = "1234567890"
 	modelVersion = "fff000110"
@@ -40,9 +41,18 @@ type e2eTest interface {
 	TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error
 }
 
+type e2eTestDisabled interface {
+	Disabled() bool
+}
+
 var tests = make([]e2eTest, 0)
 
 func registerTest(t e2eTest) {
+	if tv, ok := t.(e2eTestDisabled); ok {
+		if tv.Disabled() {
+			return
+		}
+	}
 	tests = append(tests, t)
 }
 
@@ -125,7 +135,19 @@ func RunTests(logger logger.Logger, only []string) error {
 				time.Sleep(2 * time.Second)
 				_logger := logger.WithPrefix("[" + name + "]")
 				_logger.Info("ready to test")
-				resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", healthPort))
+				pingStarted := time.Now()
+				var resp *http.Response
+				var err error
+				for time.Since(pingStarted) < 30*time.Second {
+					resp, err = http.Get(fmt.Sprintf("http://127.0.0.1:%d/", healthPort))
+					if err != nil {
+						if strings.Contains(err.Error(), "connection refused") {
+							time.Sleep(time.Second)
+							continue
+						}
+					}
+					break
+				}
 				if err != nil {
 					panic(err)
 				}

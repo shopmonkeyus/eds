@@ -218,7 +218,7 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, in
 	return sql.String(), count
 }
 
-func getConnectionStringFromURL(urlString string) (string, error) {
+func GetConnectionStringFromURL(urlString string) (string, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return "", fmt.Errorf("error parsing snowflake connection string from url: %w", err)

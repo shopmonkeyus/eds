@@ -63,7 +63,7 @@ func (p *snowflakeDriver) refreshSchema(ctx context.Context, db *sql.DB) error {
 }
 
 func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB, error) {
-	url, err := getConnectionStringFromURL(url)
+	url, err := GetConnectionStringFromURL(url)
 	if err != nil {
 		return nil, err
 	}
