@@ -58,6 +58,7 @@ services:
     depends_on:
       - kafka
     entrypoint: ["/bin/sh", "-c"]
+    restart: no
     command: |
       "
       # blocks until kafka is reachable
@@ -74,5 +75,6 @@ services:
     depends_on:
       - s3
     entrypoint: ["/bin/sh", "-c"]
+    restart: no
     command: |
       "awslocal s3api create-bucket --bucket eds --endpoint-url http://s3:4566"
