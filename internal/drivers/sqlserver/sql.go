@@ -226,7 +226,7 @@ func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema
 	return res
 }
 
-func parseURLToDSN(urlstr string) (string, error) {
+func ParseURLToDSN(urlstr string) (string, error) {
 	// Example input: "sqlserver://sa:eds@localhost:11433/eds"
 	// Desired output: "sqlserver://sa:eds@localhost:11433/database=eds?multiStatements=true"
 	u, err := url.Parse(urlstr)

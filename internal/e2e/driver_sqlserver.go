@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/drivers/sqlserver"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -36,7 +37,11 @@ func (d *driverSQLServerTest) QuoteValue(value string) string {
 }
 
 func (d *driverSQLServerTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	return validateSQLEvent(logger, event, "sqlserver", fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433?&database=master&encrypt=disable", dbpass), d)
+	dsn, err := sqlserver.ParseURLToDSN(url)
+	if err != nil {
+		return fmt.Errorf("error parsing url: %w", err)
+	}
+	return validateSQLEvent(logger, event, "sqlserver", dsn, d)
 }
 
 func init() {

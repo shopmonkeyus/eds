@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/drivers/postgresql"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -36,7 +37,11 @@ func (d *driverPostgresTest) QuoteValue(value string) string {
 }
 
 func (d *driverPostgresTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	return validateSQLEvent(logger, event, "postgres", url, d)
+	connStr, err := postgresql.GetConnectionStringFromURL(url)
+	if err != nil {
+		return fmt.Errorf("error parsing url: %w", err)
+	}
+	return validateSQLEvent(logger, event, "postgres", connStr, d)
 }
 
 func init() {

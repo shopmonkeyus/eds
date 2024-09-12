@@ -9,10 +9,9 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/shopmonkeyus/eds/internal"
+	s3driver "github.com/shopmonkeyus/eds/internal/drivers/s3"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -41,19 +40,11 @@ func (d *driverS3Test) URL(dir string) string {
 }
 
 func (d *driverS3Test) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	provider := config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "eds", ""))
-	cfg, err := config.LoadDefaultConfig(context.Background(),
-		config.WithRegion("us-east-1"),
-		config.WithEndpointResolverWithOptions(getEndpointResolver("http://127.0.0.1:4566")),
-		provider,
-	)
+	client, _, _, _, _, err := s3driver.NewS3Client(context.Background(), logger, url)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error creating s3 client: %w", err)
 	}
-	s3 := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
-		o.UsePathStyle = true
-	})
-	res, err := s3.GetObject(context.Background(), &awss3.GetObjectInput{
+	res, err := client.GetObject(context.Background(), &awss3.GetObjectInput{
 		Bucket: aws.String(dbname),
 		Key:    aws.String(fmt.Sprintf("order/%s.json", event.GetPrimaryKey())),
 	})

@@ -56,7 +56,7 @@ func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB) error {
 }
 
 func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
-	dsn, err := parseURLToDSN(urlstr)
+	dsn, err := ParseURLToDSN(urlstr)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing url: %w", err)
 	}

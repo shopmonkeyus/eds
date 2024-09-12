@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/eds/internal/drivers/mysql"
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
@@ -36,7 +37,11 @@ func (d *driverMySQLTest) QuoteValue(value string) string {
 }
 
 func (d *driverMySQLTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	return validateSQLEvent(logger, event, "mysql", fmt.Sprintf("%s:%s@tcp(127.0.0.1:13306)/%s", dbuser, dbpass, dbname), d)
+	dsn, err := mysql.ParseURLToDSN(url)
+	if err != nil {
+		return fmt.Errorf("error parsing url: %w", err)
+	}
+	return validateSQLEvent(logger, event, "mysql", dsn, d)
 }
 
 func init() {

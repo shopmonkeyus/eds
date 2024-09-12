@@ -313,7 +313,7 @@ func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema
 	return res
 }
 
-func getConnectionStringFromURL(urlstr string) (string, error) {
+func GetConnectionStringFromURL(urlstr string) (string, error) {
 	u, err := url.Parse(urlstr)
 	if err != nil {
 		return "", fmt.Errorf("error parsing postgres db url: %w", err)

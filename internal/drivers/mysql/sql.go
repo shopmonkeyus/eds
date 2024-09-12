@@ -196,7 +196,7 @@ func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema
 	return sqls
 }
 
-func parseURLToDSN(urlstr string) (string, error) {
+func ParseURLToDSN(urlstr string) (string, error) {
 	//username:password@protocol(address)/dbname?param=value
 	u, err := url.Parse(urlstr)
 	if err != nil {
