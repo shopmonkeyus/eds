@@ -92,7 +92,7 @@ func runTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readRes
 	return nil
 }
 
-func RunTests(logger logger.Logger) error {
+func RunTests(logger logger.Logger, only []string) error {
 	tmpdir, err := os.MkdirTemp("", "e2e")
 	if err != nil {
 		panic(err)
@@ -108,6 +108,9 @@ func RunTests(logger logger.Logger) error {
 		apiurl := fmt.Sprintf("http://127.0.0.1:%d", httpport)
 		run("enroll", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "1234"}, nil)
 		for _, test := range tests {
+			if len(only) > 0 && !util.SliceContains(only, test.Name()) {
+				continue
+			}
 			var wg sync.WaitGroup
 			wg.Add(1)
 			ts := time.Now()

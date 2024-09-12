@@ -18,7 +18,7 @@ tidy:
 	@go mod tidy
 
 e2e:
-	@go run -tags e2e . e2e -v
+	@go run -tags e2e . e2e -v $(E2E_TESTS)
 
 test: tidy build lint vet
 	@go test -v -count=1 ./...

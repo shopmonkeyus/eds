@@ -26,7 +26,7 @@ var e2eCmd = &cobra.Command{
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[e2e]")
 		started := time.Now()
-		if err := e2e.RunTests(logger); err != nil {
+		if err := e2e.RunTests(logger, args); err != nil {
 			logger.Fatal("error running tests: %s", err)
 		}
 		logger.Info("tests completed in %s", time.Since(started))
