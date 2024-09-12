@@ -13,6 +13,7 @@ jobs:
   build:
     runs-on:
       group: eds-runners
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,7 +23,9 @@ jobs:
         with:
           go-version: 1.23
       - name: Start containers
-        run: docker compose up --force-recreate -d --quiet-pull --wait --wait-timeout 60
+        run: docker compose up --force-recreate -d --quiet-pull --wait --wait-timeout 120
+      - name: Start containers
+        run: make e2e
       - name: Stop containers
         run: docker compose down
         if: always()

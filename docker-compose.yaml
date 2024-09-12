@@ -1,8 +1,9 @@
 services:
   s3:
     image: localstack/localstack:s3-latest
+    hostname: s3
     ports:
-      - "127.0.0.1:4566:4566"
+      - 4566:4566
     environment:
       LOCALSTACK_AUTH_TOKEN: "eds"
   zookeeper:
@@ -74,4 +75,4 @@ services:
       - s3
     entrypoint: ["/bin/sh", "-c"]
     command: |
-      "awslocal s3api create-bucket --bucket eds --endpoint-url http://host.docker.internal:4566"
+      "awslocal s3api create-bucket --bucket eds --endpoint-url http://s3:4566"
