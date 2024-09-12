@@ -12,8 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -42,35 +40,31 @@ func (d *driverS3Test) URL(dir string) string {
 	return fmt.Sprintf("s3://127.0.0.1:4566/%s?region=us-east-1&access-key-id=test&secret-access-key=eds", dbname)
 }
 
-func (d *driverS3Test) Test(logger logger.Logger, dir string, nc *nats.Conn, js jetstream.JetStream, url string) error {
-	return runTest(logger, nc, js, func(event internal.DBChangeEvent) internal.DBChangeEvent {
-		logger.Info("need to finish s3 validation") // FIXME
-		provider := config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "eds", ""))
-		cfg, err := config.LoadDefaultConfig(context.Background(),
-			config.WithRegion("us-east-1"),
-			config.WithEndpointResolverWithOptions(getEndpointResolver("http://127.0.0.1:4566")),
-			provider,
-		)
-		if err != nil {
-			panic(err)
-		}
-		s3 := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
-			o.UsePathStyle = true
-		})
-		res, err := s3.GetObject(context.Background(), &awss3.GetObjectInput{
-			Bucket: aws.String(dbname),
-			Key:    aws.String(fmt.Sprintf("order/%s.json", event.GetPrimaryKey())),
-		})
-		if err != nil {
-			logger.Error("error getting object: %s", err)
-		}
-		var event2 internal.DBChangeEvent
-		if err := json.NewDecoder(res.Body).Decode(&event2); err != nil {
-			logger.Fatal("error decoding event: %s", err)
-		}
-		return event2
+func (d *driverS3Test) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+	provider := config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "eds", ""))
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithRegion("us-east-1"),
+		config.WithEndpointResolverWithOptions(getEndpointResolver("http://127.0.0.1:4566")),
+		provider,
+	)
+	if err != nil {
+		panic(err)
+	}
+	s3 := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
+		o.UsePathStyle = true
 	})
-	return nil
+	res, err := s3.GetObject(context.Background(), &awss3.GetObjectInput{
+		Bucket: aws.String(dbname),
+		Key:    aws.String(fmt.Sprintf("order/%s.json", event.GetPrimaryKey())),
+	})
+	if err != nil {
+		logger.Error("error getting object: %s", err)
+	}
+	var event2 internal.DBChangeEvent
+	if err := json.NewDecoder(res.Body).Decode(&event2); err != nil {
+		logger.Fatal("error decoding event: %s", err)
+	}
+	return dbchangeEventMatches(event, event2)
 }
 
 func init() {

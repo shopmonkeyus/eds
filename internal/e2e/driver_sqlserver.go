@@ -6,8 +6,6 @@ package e2e
 import (
 	"fmt"
 
-	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/go-common/logger"
 )
@@ -25,11 +23,9 @@ func (d *driverSQLServerTest) URL(dir string) string {
 	return fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433/master", dbpass)
 }
 
-func (d *driverSQLServerTest) Test(logger logger.Logger, dir string, nc *nats.Conn, js jetstream.JetStream, url string) error {
-	return runTest(logger, nc, js, func(event internal.DBChangeEvent) internal.DBChangeEvent {
-		return validateSQLEvent(logger, event, "sqlserver", fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433?&database=master&encrypt=disable", dbpass), func(table string) string {
-			return fmt.Sprintf("[%s]", table)
-		})
+func (d *driverSQLServerTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+	return validateSQLEvent(logger, event, "sqlserver", fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433?&database=master&encrypt=disable", dbpass), func(table string) string {
+		return fmt.Sprintf("[%s]", table)
 	})
 }
 

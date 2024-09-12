@@ -37,7 +37,7 @@ const (
 type e2eTest interface {
 	Name() string
 	URL(dir string) string
-	Test(logger logger.Logger, dir string, nc *nats.Conn, js jetstream.JetStream, url string) error
+	TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error
 }
 
 var tests = make([]e2eTest, 0)
@@ -60,9 +60,17 @@ func run(cmd string, args []string, cb runCallbackFunc) {
 	}
 }
 
-type readResult func(event internal.DBChangeEvent) internal.DBChangeEvent
+type checkValidEvent func(event internal.DBChangeEvent) error
 
-func runTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult readResult) error {
+func dbchangeEventMatches(event internal.DBChangeEvent, event2 internal.DBChangeEvent) error {
+	event2.Imported = false // remove for comparison
+	if util.JSONStringify(event) != util.JSONStringify(event2) {
+		return fmt.Errorf("events do not match. sent: %s, received: %s", util.JSONStringify(event), util.JSONStringify(event2))
+	}
+	return nil
+}
+
+func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	var event internal.DBChangeEvent
 	event.ID = util.Hash(time.Now())
 	event.Operation = "INSERT"
@@ -84,12 +92,7 @@ func runTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readRes
 		panic(err)
 	}
 	time.Sleep(time.Second)
-	event2 := readResult(event)
-	event2.Imported = false // remove for comparison
-	if util.JSONStringify(event) != util.JSONStringify(event2) {
-		logger.Fatal(fmt.Sprintf("events do not match. sent: %s, received: %s", util.JSONStringify(event), util.JSONStringify(event2)))
-	}
-	return nil
+	return readResult(event)
 }
 
 func RunTests(logger logger.Logger, only []string) error {
@@ -130,8 +133,12 @@ func RunTests(logger logger.Logger, only []string) error {
 				if resp.StatusCode != http.StatusOK {
 					panic("health check failed")
 				}
-				if err := test.Test(_logger, tmpdir, nc, js, url); err != nil {
-					logger.Error("test: %s failed: %s", name, err)
+				if err := runDBChangeInsertTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.TestInsert(_logger, tmpdir, url, event)
+				}); err != nil {
+					logger.Error("🔴 dbchange insert test: %s failed: %s", name, err)
+				} else {
+					logger.Info("✅ dbchange insert: %s succeeded in %s", name, time.Since(ts))
 				}
 				c.Process.Signal(os.Interrupt)
 				wg.Done()
