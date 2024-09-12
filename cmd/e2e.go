@@ -17,11 +17,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
+	gokafka "github.com/segmentio/kafka-go"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -382,6 +387,7 @@ type readResult func(event internal.DBChangeEvent) internal.DBChangeEvent
 
 func runTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult readResult) {
 	var event internal.DBChangeEvent
+	event.ID = util.Hash(time.Now())
 	event.Operation = "INSERT"
 	event.Table = "order"
 	event.Key = []string{"12345"}
@@ -389,19 +395,22 @@ func runTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readRes
 	event.Timestamp = time.Now().UnixMilli()
 	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().Nanosecond())
 	event.After = json.RawMessage(`{"id":"12345","name":"test"}`)
+	event.Imported = false
 	buf, err := json.Marshal(event)
 	if err != nil {
 		panic(err)
 	}
 	subject := "dbchange.order.INSERT." + companyId + ".1.PUBLIC.2"
 	logger.Info("publishing event: %s with timestamp: %d", subject, event.Timestamp)
-	if _, err := js.Publish(context.Background(), subject, buf, jetstream.WithMsgID("abc123")); err != nil {
+	msgId := util.Hash(event)
+	if _, err := js.Publish(context.Background(), subject, buf, jetstream.WithMsgID(msgId)); err != nil {
 		panic(err)
 	}
 	time.Sleep(time.Second)
 	event2 := readResult(event)
+	event2.Imported = false // remove for comparison
 	if util.JSONStringify(event) != util.JSONStringify(event2) {
-		panic("events do not match")
+		logger.Fatal(fmt.Sprintf("events do not match. sent: %s, received: %s", util.JSONStringify(event), util.JSONStringify(event2)))
 	}
 }
 
@@ -440,6 +449,17 @@ func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver
 		logger.Info("event validated: %s", util.JSONStringify(event))
 	}
 	return event
+}
+
+func getEndpointResolver(url string) aws.EndpointResolverWithOptionsFunc {
+	return func(_service, region string, _options ...interface{}) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			PartitionID:   "aws",
+			URL:           url,
+			SigningRegion: "us-east-1",
+			SigningMethod: "v4",
+		}, nil
+	}
 }
 
 type e2eTest struct {
@@ -495,6 +515,72 @@ var e2eTests = []e2eTest{
 			})
 		},
 	},
+	{
+		name: "s3",
+		url: func(dir string) string {
+			return fmt.Sprintf("s3://127.0.0.1:4566/%s?region=us-east-1&access-key-id=test&secret-access-key=eds", dbname)
+		},
+		test: func(logger logger.Logger, dir string, nc *nats.Conn, js jetstream.JetStream, url string) {
+			runTest(logger, nc, js, func(event internal.DBChangeEvent) internal.DBChangeEvent {
+				logger.Info("need to finish s3 validation") // FIXME
+				provider := config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "eds", ""))
+				cfg, err := config.LoadDefaultConfig(context.Background(),
+					config.WithRegion("us-east-1"),
+					config.WithEndpointResolverWithOptions(getEndpointResolver("http://127.0.0.1:4566")),
+					provider,
+				)
+				if err != nil {
+					panic(err)
+				}
+				s3 := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
+					o.UsePathStyle = true
+				})
+				res, err := s3.GetObject(context.Background(), &awss3.GetObjectInput{
+					Bucket: aws.String(dbname),
+					Key:    aws.String(fmt.Sprintf("order/%s.json", event.GetPrimaryKey())),
+				})
+				if err != nil {
+					logger.Error("error getting object: %s", err)
+				}
+				var event2 internal.DBChangeEvent
+				if err := json.NewDecoder(res.Body).Decode(&event2); err != nil {
+					logger.Fatal("error decoding event: %s", err)
+				}
+				return event2
+			})
+		},
+	},
+	{
+		name: "kafka",
+		url: func(dir string) string {
+			return fmt.Sprintf("kafka://127.0.0.1:29092/%s", dbname)
+		},
+		test: func(logger logger.Logger, dir string, nc *nats.Conn, js jetstream.JetStream, url string) {
+			runTest(logger, nc, js, func(event internal.DBChangeEvent) internal.DBChangeEvent {
+				reader := gokafka.NewReader(gokafka.ReaderConfig{
+					Brokers:        []string{"127.0.0.1:29092"},
+					Topic:          "eds",
+					CommitInterval: 0,
+					GroupID:        "eds",
+				})
+				defer reader.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+				defer cancel()
+				msg, err := reader.FetchMessage(ctx)
+				if err != nil {
+					logger.Fatal("error fetching message: %s", err)
+				}
+				if err := reader.CommitMessages(ctx, msg); err != nil {
+					logger.Fatal("error committing message: %s", err)
+				}
+				var event2 internal.DBChangeEvent
+				if err := json.Unmarshal(msg.Value, &event2); err != nil {
+					logger.Fatal("error decoding event: %s", err)
+				}
+				return event2
+			})
+		},
+	},
 }
 
 var e2eCmd = &cobra.Command{
@@ -528,16 +614,17 @@ var e2eCmd = &cobra.Command{
 				run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url}, nil)
 				run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort)}, func(c *exec.Cmd) {
 					time.Sleep(time.Second)
-					logger.Info("ready to test")
+					_logger := logger.WithPrefix("[" + test.name + "]")
+					_logger.Info("ready to test")
 					resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", healthPort))
 					if err != nil {
 						panic(err)
 					}
-					logger.Info("health check: %s", resp.Status)
+					_logger.Info("health check: %s", resp.Status)
 					if resp.StatusCode != http.StatusOK {
 						panic("health check failed")
 					}
-					test.test(logger, tmpdir, nc, js, url)
+					test.test(_logger, tmpdir, nc, js, url)
 					c.Process.Signal(os.Interrupt)
 					wg.Done()
 				})

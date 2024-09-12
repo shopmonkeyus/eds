@@ -44,6 +44,11 @@ func TestGetBucketInfoLocalstack(t *testing.T) {
 	assert.Equal(t, "foo-shopmonkey", bucket)
 	assert.Equal(t, "test/", prefix)
 	assert.Equal(t, "http://localhost:4566", url)
+
+	url, bucket, prefix = getBucketInfo(mustParseURL("s3://127.0.0.1:4566/foo-shopmonkey/test/?region=us-west-1"), localstackProvider)
+	assert.Equal(t, "foo-shopmonkey", bucket)
+	assert.Equal(t, "test/", prefix)
+	assert.Equal(t, "http://127.0.0.1:4566", url)
 }
 
 func TestGetBucketInfoGCP(t *testing.T) {

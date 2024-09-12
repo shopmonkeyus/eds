@@ -236,7 +236,6 @@ func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent)
 		// check if we have a timestamp for this table and only process if its newer
 		if tableTimestamp := c.tableTimestamps[evt.Table]; tableTimestamp != nil {
 			if eventTimestamp.Before(*tableTimestamp) {
-				fmt.Println("!!!!!!!!!!", tableTimestamp, eventTimestamp)
 				return true
 			}
 		}

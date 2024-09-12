@@ -149,7 +149,7 @@ const (
 )
 
 func getCloudProvider(u *url.URL) s3Provider {
-	if strings.Contains(u.Host, "localhost") {
+	if util.IsLocalhost(u.Host) {
 		return localstackProvider
 	}
 	if strings.Contains(u.Host, "googleapis.com") {

@@ -68,3 +68,10 @@ services:
       echo -e 'Successfully created the following topics:'
       kafka-topics --bootstrap-server kafka:9092 --list
       "
+  init-s3:
+    image: localstack/localstack
+    depends_on:
+      - s3
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "awslocal s3api create-bucket --bucket eds --endpoint-url http://host.docker.internal:4566"
