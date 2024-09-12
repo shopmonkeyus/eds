@@ -168,6 +168,8 @@ func createSQL(s *internal.Schema) string {
 			}
 		}
 		sql.WriteString(")")
+	} else {
+		sql.WriteString("\tPRIMARY KEY (id)")
 	}
 	sql.WriteString("\n) CHARACTER SET=utf8mb4;\n")
 	return sql.String()

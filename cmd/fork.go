@@ -112,7 +112,8 @@ var forkCmd = &cobra.Command{
 			exportTableTimestamps[data.Table] = &data.Timestamp
 		}
 
-		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker, datadir)
+		// note: don't use ctx here because we want the driver to continue running during shutdown so we can control the flush
+		driver, err := internal.NewDriver(context.Background(), logger, url, schemaRegistry, tracker, datadir)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(exitCodeIncorrectUsage)
@@ -267,9 +268,9 @@ var forkCmd = &cobra.Command{
 
 		logger.Debug("server is stopping")
 
-		driver.Stop()
 		cancel()
 		wg.Wait()
+		driver.Stop()
 		tracker.Close()
 
 		logger.Trace("server was up for %v", time.Since(serverStarted))

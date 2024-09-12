@@ -1,4 +1,4 @@
-.PHONY: all build lint release test vet tidy
+.PHONY: all build lint release test vet tidy e2e
 
 all: build
 
@@ -17,5 +17,9 @@ vet:
 tidy:
 	@go mod tidy
 
+e2e:
+	@go run -tags e2e . e2e -v
+
 test: tidy build lint vet
 	@go test -v -count=1 ./...
+

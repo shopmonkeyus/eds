@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/shopmonkeyus/eds/internal"
 )
@@ -19,7 +20,7 @@ func GetCurrentDatabase(ctx context.Context, db *sql.DB, fn string) (string, err
 // BuildDBSchemaFromInfoSchema builds a database schema from the information schema.
 func BuildDBSchemaFromInfoSchema(ctx context.Context, db *sql.DB, catalog string) (internal.DatabaseSchema, error) {
 	res := make(internal.DatabaseSchema)
-	rows, err := db.QueryContext(ctx, "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_catalog = $1", catalog)
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_catalog = '%s'", catalog))
 	if err != nil {
 		return nil, err
 	}

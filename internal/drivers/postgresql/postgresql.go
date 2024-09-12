@@ -38,15 +38,15 @@ var _ internal.Importer = (*postgresqlDriver)(nil)
 var _ internal.DriverHelp = (*postgresqlDriver)(nil)
 var _ internal.DriverMigration = (*postgresqlDriver)(nil)
 
-func (p *postgresqlDriver) refreshSchema(ctx context.Context) error {
+func (p *postgresqlDriver) refreshSchema(ctx context.Context, db *sql.DB) error {
 	if p.dbname == "" {
-		dbname, err := util.GetCurrentDatabase(ctx, p.db, "current_database()")
+		dbname, err := util.GetCurrentDatabase(ctx, db, "current_database()")
 		if err != nil {
 			return fmt.Errorf("error getting current database name: %w", err)
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.db, p.dbname)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, p.dbname)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
@@ -70,7 +70,7 @@ func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB
 		return nil, err
 	}
 
-	if err := p.refreshSchema(ctx); err != nil {
+	if err := p.refreshSchema(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -290,7 +290,7 @@ func (p *postgresqlDriver) MigrateNewTable(ctx context.Context, logger logger.Lo
 	if _, err := p.db.ExecContext(ctx, sql); err != nil {
 		return err
 	}
-	return p.refreshSchema(ctx)
+	return p.refreshSchema(ctx, p.db)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
@@ -305,7 +305,7 @@ func (p *postgresqlDriver) MigrateNewColumns(ctx context.Context, logger logger.
 		}
 		logger.Debug("migrated new columns: %s", sql)
 	}
-	return p.refreshSchema(ctx)
+	return p.refreshSchema(ctx, p.db)
 }
 
 func init() {

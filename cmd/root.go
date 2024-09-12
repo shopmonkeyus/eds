@@ -293,11 +293,11 @@ func init() {
 		os.Exit(1)
 	}
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
-	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
-	rootCmd.PersistentFlags().Bool("timestamp", false, "turn on timestamps in logs")
+	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "turn on verbose logging")
+	rootCmd.PersistentFlags().BoolP("silent", "s", false, "turn off all logging")
+	rootCmd.PersistentFlags().BoolP("timestamp", "t", false, "turn on timestamps in logs")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
 	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
-	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", filepath.Join(cwd, "data"), "the data directory for storing state, logs, and other data")
+	rootCmd.PersistentFlags().StringVarP(&dataDir, "data-dir", "d", filepath.Join(cwd, "data"), "the data directory for storing state, logs, and other data")
 }
