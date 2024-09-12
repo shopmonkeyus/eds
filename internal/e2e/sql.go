@@ -14,16 +14,16 @@ import (
 
 type columnFormat func(string) string
 
-func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format columnFormat, placeholder string) internal.DBChangeEvent {
+func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format columnFormat) internal.DBChangeEvent {
 	logger.Info("testing: %s => %s", driver, url)
 	db, err := sql.Open(driver, url)
 	if err != nil {
 		panic(err)
 	}
 	defer db.Close()
-	query := fmt.Sprintf("select * from %s where id = %s", format(event.Table), placeholder)
+	query := fmt.Sprintf("select * from %s where id = '%s'", format(event.Table), event.GetPrimaryKey())
 	logger.Info("running query: %s", query)
-	rows, err := db.Query(query, event.GetPrimaryKey())
+	rows, err := db.Query(query)
 	if err != nil {
 		panic(err)
 	}

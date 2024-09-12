@@ -29,7 +29,7 @@ func (d *driverMySQLTest) Test(logger logger.Logger, dir string, nc *nats.Conn, 
 	return runTest(logger, nc, js, func(event internal.DBChangeEvent) internal.DBChangeEvent {
 		return validateSQLEvent(logger, event, "mysql", fmt.Sprintf("%s:%s@tcp(127.0.0.1:13306)/%s", dbuser, dbpass, dbname), func(table string) string {
 			return fmt.Sprintf("`%s`", table)
-		}, "?")
+		})
 	})
 }
 

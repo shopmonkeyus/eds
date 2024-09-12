@@ -28,8 +28,8 @@ func (d *driverSQLServerTest) URL(dir string) string {
 func (d *driverSQLServerTest) Test(logger logger.Logger, dir string, nc *nats.Conn, js jetstream.JetStream, url string) error {
 	return runTest(logger, nc, js, func(event internal.DBChangeEvent) internal.DBChangeEvent {
 		return validateSQLEvent(logger, event, "sqlserver", fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433?&database=master&encrypt=disable", dbpass), func(table string) string {
-			return fmt.Sprintf("`%s`", table)
-		}, "?")
+			return fmt.Sprintf("[%s]", table)
+		})
 	})
 }
 

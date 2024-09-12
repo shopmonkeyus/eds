@@ -29,7 +29,7 @@ func (d *driverPostgresTest) Test(logger logger.Logger, dir string, nc *nats.Con
 	return runTest(logger, nc, js, func(event internal.DBChangeEvent) internal.DBChangeEvent {
 		return validateSQLEvent(logger, event, "postgres", url, func(table string) string {
 			return fmt.Sprintf(`"%s"`, table)
-		}, "$1")
+		})
 	})
 }
 
