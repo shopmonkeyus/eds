@@ -29,7 +29,7 @@ func (d *driverFileTest) URL(dir string) string {
 }
 
 func (d *driverFileTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
-	fn := filepath.Join(dir, "export", event.Table, fmt.Sprintf("%d-%s.json", time.UnixMilli(event.Timestamp).Unix(), event.Key[0]))
+	fn := filepath.Join(dir, "export", event.Table, fmt.Sprintf("%d-%s.json", time.UnixMilli(event.Timestamp).Unix(), event.GetPrimaryKey()))
 	buf, err := os.ReadFile(fn)
 	if err != nil {
 		return fmt.Errorf("error reading file %s: %w", fn, err)

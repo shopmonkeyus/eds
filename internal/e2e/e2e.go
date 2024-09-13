@@ -308,6 +308,6 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 		logger.Info("shutting down server")
 		shutdown()
 	})
-	logger.Info("✅ %d/%d passed 🔴 %d/%d failed", pass, pass+fail, fail, pass+fail)
+	logger.Info("✅ %d passed 🔴 %d failed", pass, fail)
 	return fail == 0, nil
 }
