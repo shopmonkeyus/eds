@@ -55,11 +55,6 @@ type e2eTestDisabled interface {
 var tests = make([]e2eTest, 0)
 
 func registerTest(t e2eTest) {
-	if tv, ok := t.(e2eTestDisabled); ok {
-		if tv.Disabled() {
-			return
-		}
-	}
 	tests = append(tests, t)
 }
 
@@ -137,7 +132,7 @@ func runDBChangeNewTableTest2(logger logger.Logger, _ *nats.Conn, js jetstream.J
 }
 
 func runDBChangeNewColumnTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
-	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion2, defaultPayload2)
+	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion2, defaultPayload2)
 	if err != nil {
 		return err
 	}
@@ -200,14 +195,23 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var pass, fail uint32
+	var pass, fail, skipped uint32
 	runNatsTestServer(func(nc *nats.Conn, js jetstream.JetStream, srv *server.Server, userCreds string) {
 		logger.Trace("creds: %s", userCreds)
 		httpport, shutdown := setupServer(logger, userCreds)
 		apiurl := fmt.Sprintf("http://127.0.0.1:%d", httpport)
 		run("enroll", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "1234"}, nil)
 		for _, test := range tests {
+			if tv, ok := test.(e2eTestDisabled); ok {
+				if tv.Disabled() {
+					skipped++
+					logger.Warn("skipping test: %s", test.Name())
+					continue
+				}
+			}
 			if len(only) > 0 && !util.SliceContains(only, test.Name()) {
+				skipped++
+				logger.Warn("skipping test: %s", test.Name())
 				continue
 			}
 			os.Remove(filepath.Join(tmpdir, "eds-data.db"))
@@ -339,6 +343,6 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 		logger.Info("shutting down server")
 		shutdown()
 	})
-	logger.Info("✅ %d passed 🔴 %d failed", pass, fail)
+	logger.Info("✅ %d passed 🔴 %d failed 🚧 %d skipped", pass, fail, skipped)
 	return fail == 0, nil
 }

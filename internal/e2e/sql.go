@@ -6,7 +6,6 @@ package e2e
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
@@ -39,40 +38,38 @@ func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver
 	}
 	defer rows.Close()
 	var count int
+	columns, _ := rows.Columns()
+	colcount := len(columns)
+	values := make([]interface{}, colcount)
+	valuePtrs := make([]interface{}, colcount)
 	for rows.Next() {
 		count++
-		if event.Table == "order" && event.Operation == "UPDATE" && strings.HasSuffix(event.ModelVersion, "-update") {
-			var id string
-			var name string
-			var age float64
-			if err := rows.Scan(&id, &name, &age); err != nil {
-				return fmt.Errorf("error scanning row: %w", err)
-			}
-			logger.Info("row returned: %v, %v, %v", id, name, age)
-			if id != kv["id"] {
-				return fmt.Errorf("id values do not match, was: %s, expected: %s", id, kv["id"])
-			}
-			if name != kv["name"] {
-				return fmt.Errorf("name values do not match, was: %s, expected: %s", name, kv["name"])
-			}
-			if age != kv["age"] {
-				return fmt.Errorf("age values do not match, was: %v, expected: %v", age, kv["age"])
-			}
-		} else {
-			var id string
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
-				return fmt.Errorf("error scanning row: %w", err)
-			}
-			logger.Info("row returned: %v, %v", id, name)
-			if id != kv["id"] {
-				return fmt.Errorf("id values do not match, was: %s, expected: %s", id, kv["id"])
-			}
-			if name != kv["name"] {
-				return fmt.Errorf("name values do not match, was: %s, expected: %s", name, kv["name"])
-			}
+		for i := range columns {
+			valuePtrs[i] = &values[i]
 		}
-		logger.Info("event validated: %s", util.JSONStringify(event))
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return fmt.Errorf("error scanning row: %w", err)
+		}
+		row := make(map[string]interface{})
+		for i, col := range columns {
+			val := values[i]
+			b, ok := val.([]byte)
+			var v interface{}
+			if ok {
+				v = string(b)
+			} else {
+				v = val
+			}
+			if ev, ok := kv[col]; ok {
+				if util.JSONStringify(ev) != util.JSONStringify(v) {
+					return fmt.Errorf("%s value does not match, was: %v, expected: %v", col, v, ev)
+				}
+			} else {
+				return fmt.Errorf("%s value %v was returned from db but was not expected", col, v)
+			}
+			row[col] = v
+		}
+		logger.Info("row %d matched: %v", count-1, util.JSONStringify(row))
 	}
 	if event.Operation == "DELETE" {
 		if count != 0 {

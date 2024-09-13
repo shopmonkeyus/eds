@@ -282,7 +282,11 @@ func (p *postgresqlDriver) MigrateNewTable(ctx context.Context, logger logger.Lo
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if _, ok := p.dbschema[schema.Table]; ok {
-		logger.Warn("table already exists for: %s, skipping...", schema.Table)
+		logger.Info("table already exists for: %s, truncating...", schema.Table)
+		sql := "TRUNCATE TABLE " + quoteIdentifier(schema.Table)
+		if _, err := p.db.ExecContext(ctx, sql); err != nil {
+			return err
+		}
 		return nil
 	}
 	sql := createSQL(schema)

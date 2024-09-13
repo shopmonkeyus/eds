@@ -271,32 +271,32 @@ func (c *Consumer) Error() <-chan error {
 	return c.subError
 }
 
-func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Logger, event *internal.DBChangeEvent) error {
+func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Logger, event *internal.DBChangeEvent) (bool, error) {
 	found, version, err := c.registry.GetTableVersion(event.Table)
 	if err != nil {
-		return fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+		return false, fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 	}
 	if !found || version != event.ModelVersion {
 		logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, version, event.ModelVersion)
 		newschema, err := c.registry.GetSchema(event.Table, event.ModelVersion)
 		if err != nil {
-			return fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			return false, fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 		}
 		migration := c.driver.(internal.DriverMigration)
 		if !found {
 			logger.Debug("need to migrate new table: %s, model version: %s", event.Table, event.ModelVersion)
 			if err := migration.MigrateNewTable(ctx, logger, newschema); err != nil {
-				return fmt.Errorf("error migrating new table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+				return false, fmt.Errorf("error migrating new table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
 			logger.Info("migrated new table: %s, model version: %s", event.Table, event.ModelVersion)
 			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
-				return fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
-			return nil
+			return true, nil
 		}
 		oldschema, err := c.registry.GetSchema(event.Table, version)
 		if err != nil {
-			return fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
+			return false, fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
 		}
 		// figure out which columns are new
 		var columns []string
@@ -309,7 +309,7 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 		if len(columns) > 0 {
 			logger.Debug("need to migrate table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
 			if err := migration.MigrateNewColumns(ctx, logger, newschema, columns); err != nil {
-				return fmt.Errorf("error migrating new columns for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+				return false, fmt.Errorf("error migrating new columns for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
 			for _, col := range columns {
 				if !util.SliceContains(event.Diff, col) {
@@ -317,15 +317,16 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 				}
 			}
 			logger.Info("migrated table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
+			return true, nil
 		} else {
 			logger.Info("new table: %s with different model version: %s but no new columns added", event.Table, event.ModelVersion)
 		}
 		// we want to bring the table up to the new version in all cases
 		if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
-			return fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func (c *Consumer) bufferer() {
@@ -393,12 +394,16 @@ func (c *Consumer) bufferer() {
 			}
 			evt.NatsMsg = msg // in case the driver wants to get specific information from it for logging, etc
 
+			var forceFlushAfterMigration bool
+
 			// check to see if we need to perform a migration
 			if c.supportsMigration {
-				if err := c.handlePossibleMigration(c.ctx, log, &evt); err != nil {
+				migrated, err := c.handlePossibleMigration(c.ctx, log, &evt)
+				if err != nil {
 					c.handleError(err)
 					return
 				}
+				forceFlushAfterMigration = migrated
 			}
 
 			flush, err := c.driver.Process(log, evt)
@@ -414,7 +419,7 @@ func (c *Consumer) bufferer() {
 			if traceLogNatsProcessDetail {
 				log.Trace("process returned. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
 			}
-			if flush || len(c.pending) >= maxsize {
+			if flush || len(c.pending) >= maxsize || forceFlushAfterMigration {
 				if traceLogNatsProcessDetail {
 					log.Trace("flush 1 called. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
 				}

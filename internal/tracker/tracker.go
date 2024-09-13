@@ -107,6 +107,26 @@ func (t *Tracker) DeleteKey(keys ...string) error {
 	})
 }
 
+// DeleteKeysWithPrefix will delete all keys with the given prefix from the database.
+func (t *Tracker) DeleteKeysWithPrefix(prefix string) (int, error) {
+	var count int
+	err := t.db.Update(func(tx *buntdb.Tx) error {
+		var delkeys []string
+		tx.AscendKeys(prefix+"*", func(k, v string) bool {
+			delkeys = append(delkeys, k)
+			return true // continue
+		})
+		for _, k := range delkeys {
+			if _, err := tx.Delete(k); err != nil {
+				return err
+			}
+			count++
+		}
+		return nil
+	})
+	return count, err
+}
+
 // TrackerFilenameFromDir returns the filename for the tracker database based on a specific directory.
 func TrackerFilenameFromDir(dir string) string {
 	return filepath.Join(dir, "eds-data.db")

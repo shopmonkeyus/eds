@@ -76,7 +76,6 @@ func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB,
 	}
 	row := db.QueryRowContext(ctx, "SELECT 1")
 	if err := row.Err(); err != nil {
-		fmt.Println("QUERY RESULT", row, "ERR", err)
 		db.Close()
 		return nil, err
 	}
@@ -214,10 +213,16 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 			}
 			ts := time.Now()
 			logger.Trace("executing query (%s/%d)", tag, statementCount)
-			if _, err := p.db.ExecContext(execCTX, query.String()); err != nil {
+			res, err := p.db.ExecContext(execCTX, query.String())
+			if err != nil {
 				return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
 			}
-			logger.Trace("executed query (%s/%d) in %v", tag, statementCount, time.Since(ts))
+			rows, _ := res.RowsAffected()
+			if rows != int64(statementCount) {
+				logger.Warn("executed query (%s/%d/%d) in %v (expected %d rows, was %d)", tag, statementCount, rows, time.Since(ts), statementCount, rows)
+			} else {
+				logger.Trace("executed query (%s/%d/%d) in %v", tag, statementCount, rows, time.Since(ts))
+			}
 		}
 		if len(cachekeys) > 0 {
 			// cache keys seen for the past 24 hours ... might want to make it configurable at some point but this is good enough for now
@@ -389,7 +394,15 @@ func (p *snowflakeDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if _, ok := p.dbschema[schema.Table]; ok {
-		logger.Warn("table already exists for: %s, skipping...", schema.Table)
+		logger.Info("table already exists for: %s, truncating...", schema.Table)
+		if err := util.TruncateTable(ctx, logger, p.db, util.QuoteIdentifier(schema.Table)); err != nil {
+			return err
+		}
+		delCount, err := p.config.Tracker.DeleteKeysWithPrefix("snowflake:" + schema.Table + ":")
+		if err != nil {
+			return fmt.Errorf("error deleting cache keys on table truncate: %w", err)
+		}
+		logger.Debug("deleted %d cache keys for table %s", delCount, schema.Table)
 		return nil
 	}
 	sql := createSQL(schema)

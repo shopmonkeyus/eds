@@ -281,7 +281,10 @@ func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if _, ok := p.dbschema[schema.Table]; ok {
-		logger.Warn("table already exists for: %s, skipping...", schema.Table)
+		logger.Info("table already exists for: %s, truncating...", schema.Table)
+		if err := util.TruncateTable(ctx, logger, p.db, quoteIdentifier(schema.Table, true)); err != nil {
+			return err
+		}
 		return nil
 	}
 	sql := createSQL(schema)

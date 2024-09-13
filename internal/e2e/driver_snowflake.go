@@ -6,6 +6,7 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/drivers/snowflake"
@@ -54,6 +55,7 @@ func (d *driverSnowflakeTest) Validate(logger logger.Logger, dir string, url str
 	if err != nil {
 		return fmt.Errorf("error getting connection string: %w", err)
 	}
+	time.Sleep(2 * time.Second) // snowflake needs more time than others
 	return validateSQLEvent(logger, event, "snowflake", connStr, d)
 }
 
