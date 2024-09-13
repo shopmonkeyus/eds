@@ -38,21 +38,38 @@ func toSQLFromObject(model *internal.Schema, table string, o map[string]any, dif
 	sql.WriteString("')")
 	sql.WriteString(") AS source (id)")
 	sql.WriteString(" ON target.id=source.id")
-	sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
 	var updateValues []string
-	for _, name := range diff {
-		if !util.SliceContains(model.Columns(), name) || name == "id" {
-			continue
+	if len(diff) > 0 {
+		for _, name := range diff {
+			if !util.SliceContains(model.Columns(), name) || name == "id" {
+				continue
+			}
+			if val, ok := o[name]; ok {
+				prop := model.Properties[name]
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
+			} else {
+				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
+			}
 		}
-		if val, ok := o[name]; ok {
-			prop := model.Properties[name]
-			v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
-		} else {
-			updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
+	} else {
+		for _, name := range model.Columns() {
+			if name == "id" {
+				continue
+			}
+			if val, ok := o[name]; ok {
+				prop := model.Properties[name]
+				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
+			} else {
+				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
+			}
 		}
 	}
-	sql.WriteString(strings.Join(updateValues, ","))
+	if len(updateValues) > 0 {
+		sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
+		sql.WriteString(strings.Join(updateValues, ","))
+	}
 	sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
 	var columns []string
 	for _, name := range model.Columns() {
