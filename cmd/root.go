@@ -175,7 +175,12 @@ func newLogger(cmd *cobra.Command) logger.Logger {
 			log = logger.NewConsoleLogger(logger.LevelInfo)
 		}
 	}
-
+	if cmd.Flags().Changed("log-label") {
+		label, _ := cmd.Flags().GetString("log-label")
+		if label != "" {
+			log = log.WithPrefix(fmt.Sprintf("[%s]", label))
+		}
+	}
 	return log
 }
 
@@ -290,6 +295,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("timestamp", "t", false, "turn on timestamps in logs")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
+	rootCmd.PersistentFlags().String("log-label", "", "a log label to add")
+	rootCmd.PersistentFlags().MarkHidden("log-label")
 	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
 	rootCmd.PersistentFlags().StringVarP(&dataDir, "data-dir", "d", filepath.Join(cwd, "data"), "the data directory for storing state, logs, and other data")
 }

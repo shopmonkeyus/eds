@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	snowflakeUser     = "JNGUYEN"
+	snowflakeUser     = "EDS_E2E_TEST"
 	snowflakePassword = os.Getenv("SM_SNOWFLAKE_PASSWORD")
 	snowflakeDB       = "EDS_E2E"
 	snowflakeHost     = "TFLXCJY-LU41015"

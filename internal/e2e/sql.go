@@ -21,7 +21,6 @@ type sqlDriverTransform interface {
 type columnFormat func(string) string
 
 func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format sqlDriverTransform) error {
-	logger.Info("testing: %s => %s", driver, url)
 	db, err := sql.Open(driver, url)
 	if err != nil {
 		return fmt.Errorf("error opening database: %w", err)

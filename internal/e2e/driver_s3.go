@@ -49,11 +49,11 @@ func (d *driverS3Test) TestInsert(logger logger.Logger, dir string, url string, 
 		Key:    aws.String(fmt.Sprintf("order/%s.json", event.GetPrimaryKey())),
 	})
 	if err != nil {
-		logger.Error("error getting object: %s", err)
+		return fmt.Errorf("error getting object: %w", err)
 	}
 	var event2 internal.DBChangeEvent
 	if err := json.NewDecoder(res.Body).Decode(&event2); err != nil {
-		logger.Fatal("error decoding event: %s", err)
+		return fmt.Errorf("error unmarshalling event: %w", err)
 	}
 	return dbchangeEventMatches(event, event2)
 }

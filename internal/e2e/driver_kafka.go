@@ -39,14 +39,14 @@ func (d *driverKafkaTest) TestInsert(logger logger.Logger, dir string, url strin
 	defer cancel()
 	msg, err := reader.FetchMessage(ctx)
 	if err != nil {
-		logger.Fatal("error fetching message: %s", err)
+		return fmt.Errorf("error fetching message: %w", err)
 	}
 	if err := reader.CommitMessages(ctx, msg); err != nil {
-		logger.Fatal("error committing message: %s", err)
+		return fmt.Errorf("error committing message: %w", err)
 	}
 	var event2 internal.DBChangeEvent
 	if err := json.Unmarshal(msg.Value, &event2); err != nil {
-		logger.Fatal("error decoding event: %s", err)
+		return fmt.Errorf("error decoding event: %w", err)
 	}
 	return dbchangeEventMatches(event, event2)
 }

@@ -34,16 +34,28 @@ var _ importer.Handler = (*eventHubDriver)(nil)
 var _ internal.Importer = (*eventHubDriver)(nil)
 var _ internal.ImporterHelp = (*eventHubDriver)(nil)
 
-func (p *eventHubDriver) connect(urlString string) error {
+// ParseConnectionString returns a connection string from a url
+func ParseConnectionString(urlString string) (string, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
-		return fmt.Errorf("unable to parse url: %w", err)
+		return "", fmt.Errorf("unable to parse url: %w", err)
 	}
 	u.Scheme = "sb"
-	connectionString := "Endpoint=" + u.String()
+	return "Endpoint=" + u.String(), nil
 
+}
+
+func newProducerClient(urlString string) (*azeventhubs.ProducerClient, error) {
+	connectionString, err := ParseConnectionString(urlString)
+	if err != nil {
+		return nil, err
+	}
 	// create an Event Hubs producer client using a connection string to the namespace and the event hub
-	producerClient, err := azeventhubs.NewProducerClientFromConnectionString(connectionString, "", nil)
+	return azeventhubs.NewProducerClientFromConnectionString(connectionString, "", nil)
+}
+
+func (p *eventHubDriver) connect(urlString string) error {
+	producerClient, err := newProducerClient(urlString)
 	if err != nil {
 		return fmt.Errorf("error connecting to eventhub: %w", err)
 	}
@@ -106,9 +118,14 @@ func (p *eventHubDriver) Process(logger logger.Logger, event internal.DBChangeEv
 	return false, nil
 }
 
+// NewPartitionKey creates a new partition key for the event data for a record
+func NewPartitionKey(table string, companyId *string, locationId *string, id string) string {
+	return fmt.Sprintf("%s.%s.%s.%s", table, strWithDef(companyId, "NONE"), strWithDef(locationId, "NONE"), id)
+}
+
 func (p *eventHubDriver) getKeys(record *util.Record, companyId string, locationId string) (string, string) {
 	key := fmt.Sprintf("dbchange.%s.%s.%s.%s.%s", record.Table, record.Operation, strWithDef(&companyId, "NONE"), strWithDef(&locationId, "NONE"), record.Id)
-	partitionKey := fmt.Sprintf("%s.%s.%s.%s", record.Table, strWithDef(&companyId, "NONE"), strWithDef(&locationId, "NONE"), record.Id)
+	partitionKey := NewPartitionKey(record.Table, &companyId, &locationId, record.Id)
 	return key, partitionKey
 }
 

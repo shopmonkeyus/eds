@@ -32,11 +32,11 @@ func (d *driverFileTest) TestInsert(logger logger.Logger, dir string, url string
 	fn := filepath.Join(dir, "export", event.Table, fmt.Sprintf("%d-%s.json", time.UnixMilli(event.Timestamp).Unix(), event.Key[0]))
 	buf, err := os.ReadFile(fn)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error reading file %s: %w", fn, err)
 	}
 	var event2 internal.DBChangeEvent
 	if err := json.Unmarshal(buf, &event2); err != nil {
-		panic(err)
+		return fmt.Errorf("error unmarshalling event: %w", err)
 	}
 	return dbchangeEventMatches(event, event2)
 }

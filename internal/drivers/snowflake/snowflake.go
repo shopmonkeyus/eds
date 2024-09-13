@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -39,8 +40,10 @@ var _ internal.Importer = (*snowflakeDriver)(nil)
 var _ internal.DriverSessionHandler = (*snowflakeDriver)(nil)
 var _ internal.DriverHelp = (*snowflakeDriver)(nil)
 
+var uuidRegexp = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
 func (p *snowflakeDriver) SetSessionID(sessionID string) {
-	if sessionID != "" {
+	if sessionID != "" && uuidRegexp.MatchString(sessionID) {
 		p.sessionID = sessionID
 		p.ctx = sf.WithRequestID(p.config.Context, sf.ParseUUID(sessionID))
 	}
@@ -73,6 +76,7 @@ func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB,
 	}
 	row := db.QueryRowContext(ctx, "SELECT 1")
 	if err := row.Err(); err != nil {
+		fmt.Println("QUERY RESULT", row, "ERR", err)
 		db.Close()
 		return nil, err
 	}

@@ -130,8 +130,8 @@ func RunTests(logger logger.Logger, only []string) error {
 			name := test.Name()
 			url := test.URL(tmpdir)
 			logger.Info("running test: %s", name)
-			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url}, nil)
-			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort)}, func(c *exec.Cmd) {
+			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url, "--log-label", name}, nil)
+			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort), "--log-label", name}, func(c *exec.Cmd) {
 				time.Sleep(2 * time.Second)
 				_logger := logger.WithPrefix("[" + name + "]")
 				_logger.Info("ready to test")
