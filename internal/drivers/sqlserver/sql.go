@@ -26,61 +26,56 @@ func quoteIdentifier(val string, istable bool) string {
 	return val
 }
 
-func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string) string {
+func toSQLFromObject(model *internal.Schema, table string, o map[string]any, diff []string) string {
 	var sql strings.Builder
 
-	var insertVals []string
+	sql.WriteString("MERGE ")
+	sql.WriteString(quoteIdentifier(table, true))
+	sql.WriteString(" AS target")
+	sql.WriteString(" USING (")
+	sql.WriteString("VALUES(")
+	sql.WriteString(quoteIdentifier(o["id"].(string), false))
+	sql.WriteString(")")
+	sql.WriteString(") AS source")
+	sql.WriteString(" ON target.id=source.id")
+	sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
 	var updateValues []string
-	if operation == "UPDATE" {
-		sql.WriteString("UPDATE ")
-		sql.WriteString(quoteIdentifier(table, true))
-		sql.WriteString(" SET ")
-		for _, name := range diff {
-			if !util.SliceContains(model.Columns(), name) || name == "id" {
-				continue
-			}
-			if val, ok := o[name]; ok {
-				prop := model.Properties[name]
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
-			} else {
-				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
-			}
+	for _, name := range diff {
+		if !util.SliceContains(model.Columns(), name) || name == "id" {
+			continue
 		}
-		sql.WriteString(strings.Join(updateValues, ","))
-		sql.WriteString(" WHERE id=")
-		sql.WriteString(quoteValue(o["id"]))
-		sql.WriteString(";\n")
-
-	} else {
-		sql.WriteString("INSERT INTO ")
-
-		sql.WriteString(quoteIdentifier(table, true))
-		var columns []string
-		for _, name := range model.Columns() {
-			columns = append(columns, quoteIdentifier(name, false))
+		if val, ok := o[name]; ok {
+			prop := model.Properties[name]
+			v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
+			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
+		} else {
+			updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
 		}
-		sql.WriteString(" (")
-		sql.WriteString(strings.Join(columns, ","))
-		sql.WriteString(") VALUES (")
-		for _, name := range model.Columns() {
-			if val, ok := o[name]; ok {
-				prop := model.Properties[name]
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-				if name != "id" {
-					v = handleSchemaProperty(model.Properties[name], v)
-					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
-				}
-				insertVals = append(insertVals, v)
-			} else {
-				v := handleSchemaProperty(model.Properties[name], "NULL")
-				updateValues = append(updateValues, v)
-				insertVals = append(insertVals, v)
-			}
-		}
-		sql.WriteString(strings.Join(insertVals, ","))
-		sql.WriteString(");\n")
 	}
+	sql.WriteString(strings.Join(updateValues, ","))
+	sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
+	var columns []string
+	for _, name := range model.Columns() {
+		columns = append(columns, quoteIdentifier(name, false))
+	}
+	sql.WriteString(strings.Join(columns, ","))
+	var insertVals []string
+	for _, name := range model.Columns() {
+		if val, ok := o[name]; ok {
+			prop := model.Properties[name]
+			v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
+			if name != "id" {
+				v = handleSchemaProperty(model.Properties[name], v)
+			}
+			insertVals = append(insertVals, v)
+		} else {
+			v := handleSchemaProperty(model.Properties[name], "NULL")
+			insertVals = append(insertVals, v)
+		}
+	}
+	sql.WriteString(") VALUES (")
+	sql.WriteString(strings.Join(insertVals, ","))
+	sql.WriteString(");") // must be terminated for merge to work
 
 	return sql.String()
 }
@@ -104,7 +99,7 @@ func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 		if err := json.Unmarshal(c.After, &o); err != nil {
 			return "", err
 		}
-		return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff), nil
+		return toSQLFromObject(model, c.Table, o, c.Diff), nil
 	}
 }
 
