@@ -29,11 +29,11 @@ func (d *driverSQLServerTest) QuoteTable(table string) string {
 }
 
 func (d *driverSQLServerTest) QuoteColumn(column string) string {
-	return fmt.Sprintf(`[%s]`, column)
+	return fmt.Sprintf(`%s`, column)
 }
 
 func (d *driverSQLServerTest) QuoteValue(value string) string {
-	return fmt.Sprintf(`%s`, value)
+	return fmt.Sprintf(`'%s'`, value)
 }
 
 func (d *driverSQLServerTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {

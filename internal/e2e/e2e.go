@@ -99,6 +99,9 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 		event.Before = json.RawMessage([]byte(payload))
 	} else {
 		event.After = json.RawMessage([]byte(payload))
+		if event.Operation == "UPDATE" {
+			event.Diff = []string{"name"}
+		}
 	}
 	event.Imported = false
 	buf, err := json.Marshal(event)
