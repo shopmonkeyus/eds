@@ -76,12 +76,12 @@ func (p *fileDriver) MaxBatchSize() int {
 	return -1
 }
 
-func (p *fileDriver) getFileName(table string, id string) string {
-	return fmt.Sprintf("%s/%d-%s.json", table, time.Now().Unix(), id)
+func (p *fileDriver) getFileName(table string, ts time.Time, id string) string {
+	return fmt.Sprintf("%s/%d-%s.json", table, ts.Unix(), id)
 }
 
 func (p *fileDriver) writeEvent(logger logger.Logger, event internal.DBChangeEvent, dryRun bool) error {
-	key := p.getFileName(event.Table, event.GetPrimaryKey())
+	key := p.getFileName(event.Table, time.UnixMilli(event.Timestamp), event.GetPrimaryKey())
 	buf := []byte(util.JSONStringify(event))
 	fp := filepath.Join(p.dir, key)
 	if !dryRun {

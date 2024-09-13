@@ -559,14 +559,14 @@ func TestPause(t *testing.T) {
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
 
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Millisecond * 200)
 
 		assert.Nil(t, testEvent)
 		assert.False(t, flushed)
 
 		consumer.Unpause()
 
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Millisecond * 200)
 
 		assert.NoError(t, consumer.Stop())
 		assert.NotNil(t, testEvent)

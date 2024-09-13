@@ -20,7 +20,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/importer"
 	"github.com/shopmonkeyus/eds/internal/util"
@@ -149,7 +148,7 @@ const (
 )
 
 func getCloudProvider(u *url.URL) s3Provider {
-	if strings.Contains(u.Host, "localhost") {
+	if util.IsLocalhost(u.Host) {
 		return localstackProvider
 	}
 	if strings.Contains(u.Host, "googleapis.com") {
@@ -158,19 +157,13 @@ func getCloudProvider(u *url.URL) s3Provider {
 	return awsProvider
 }
 
-func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string, testonly bool) error {
+func NewS3Client(ctx context.Context, logger logger.Logger, urlString string) (*awss3.Client, string, string, int, int, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
-		return fmt.Errorf("unable to parse url: %w", err)
+		return nil, "", "", 0, 0, fmt.Errorf("unable to parse url: %w", err)
 	}
 	cloudProvider := getCloudProvider(u)
 	customResolver, bucket, prefix := parseBucketURL(u, cloudProvider)
-	c, cancel := context.WithCancel(ctx)
-	p.ctx = c
-	p.cancel = cancel
-	p.bucket = bucket
-	p.prefix = prefix
-
 	region := os.Getenv("AWS_REGION")
 	if u.Query().Get("region") != "" {
 		region = u.Query().Get("region")
@@ -234,38 +227,17 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	}
 
 	if err != nil {
-		return fmt.Errorf("unable to load AWS config: %w", err)
+		return nil, "", "", 0, 0, fmt.Errorf("unable to load AWS config: %w", err)
 	}
 
 	customRetry := retry.NewStandard(func(o *retry.StandardOptions) {
 		o.MaxAttempts = maxRetries
 	})
 
-	p.s3 = awss3.NewFromConfig(cfg, func(o *awss3.Options) {
+	client := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
 		o.UsePathStyle = true
 		o.Retryer = customRetry
 	})
-
-	if _, err := p.s3.ListObjects(ctx, &awss3.ListObjectsInput{Bucket: aws.String(p.bucket), MaxKeys: aws.Int32(1)}); err != nil {
-		var bnf *types.NoSuchBucket
-		// only attempt to create the bucket if we are using localhost
-		if cloudProvider == localstackProvider {
-			if errors.As(err, &bnf) {
-				if _, err := p.s3.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(p.bucket)}); err != nil {
-					return fmt.Errorf("bucket not found and unable to create bucket %s: %w", p.bucket, err)
-				}
-				logger.Info("created bucket %s", p.bucket)
-				err = nil // we created the bucket ok, so reset the error
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("unable to verify bucket %s: %w", p.bucket, err)
-		}
-	}
-
-	if testonly {
-		return nil
-	}
 
 	maxBatchSize := 1_000 // maximum number of events to batch
 	uploadTasks := 4      // number of concurrent upload tasks
@@ -273,7 +245,7 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	if u.Query().Get("maxBatchSize") != "" {
 		maxBatchSize, err = strconv.Atoi(u.Query().Get("maxBatchSize"))
 		if err != nil {
-			return fmt.Errorf("unable to parse maxBatchSize: %w", err)
+			return nil, "", "", 0, 0, fmt.Errorf("unable to parse maxBatchSize: %w", err)
 		}
 		if maxBatchSize <= 0 {
 			maxBatchSize = 1_000
@@ -282,12 +254,33 @@ func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString 
 	if u.Query().Get("uploadTasks") != "" {
 		uploadTasks, err = strconv.Atoi(u.Query().Get("uploadTasks"))
 		if err != nil {
-			return fmt.Errorf("unable to parse uploadTasks: %w", err)
+			return nil, "", "", 0, 0, fmt.Errorf("unable to parse uploadTasks: %w", err)
 		}
 		if uploadTasks <= 0 {
 			uploadTasks = 4
 		}
 	}
+
+	return client, bucket, prefix, maxBatchSize, uploadTasks, nil
+}
+
+func (p *s3Driver) connect(ctx context.Context, logger logger.Logger, urlString string, testonly bool) error {
+	c, cancel := context.WithCancel(ctx)
+	p.ctx = c
+	p.cancel = cancel
+
+	client, bucket, prefix, maxBatchSize, uploadTasks, err := NewS3Client(ctx, logger, urlString)
+	if err != nil {
+		return fmt.Errorf("unable to create s3 client: %w", err)
+	}
+	p.bucket = bucket
+	p.prefix = prefix
+	p.s3 = client
+
+	if testonly {
+		return nil
+	}
+
 	p.logger.Debug("setting maxBatchSize=%d uploadTasks=%d", maxBatchSize, uploadTasks)
 
 	p.ch = make(chan job, maxBatchSize)

@@ -75,6 +75,8 @@ var forkCmd = &cobra.Command{
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
+		minPendingLatency, _ := cmd.Flags().GetDuration("minPendingLatency")
+		maxPendingLatency, _ := cmd.Flags().GetDuration("maxPendingLatency")
 		port := mustFlagInt(cmd, "port", false)
 
 		// check to see if there's a schema validator and if so load it
@@ -112,7 +114,8 @@ var forkCmd = &cobra.Command{
 			exportTableTimestamps[data.Table] = &data.Timestamp
 		}
 
-		driver, err := internal.NewDriver(ctx, logger, url, schemaRegistry, tracker, datadir)
+		// note: don't use ctx here because we want the driver to continue running during shutdown so we can control the flush
+		driver, err := internal.NewDriver(context.Background(), logger, url, schemaRegistry, tracker, datadir)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(exitCodeIncorrectUsage)
@@ -187,6 +190,8 @@ var forkCmd = &cobra.Command{
 						SchemaValidator:       validator,
 						CompanyIDs:            companyIds,
 						Registry:              schemaRegistry,
+						MinPendingLatency:     minPendingLatency,
+						MaxPendingLatency:     maxPendingLatency,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)
@@ -267,9 +272,9 @@ var forkCmd = &cobra.Command{
 
 		logger.Debug("server is stopping")
 
-		driver.Stop()
 		cancel()
 		wg.Wait()
+		driver.Stop()
 		tracker.Close()
 
 		logger.Trace("server was up for %v", time.Since(serverStarted))

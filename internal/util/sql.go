@@ -83,3 +83,12 @@ func ToUserPass(u *url.URL) string {
 	}
 	return dsn.String()
 }
+
+// DropTable drops the table if it exists
+func DropTable(ctx context.Context, logger logger.Logger, db *sql.DB, table string) error {
+	sql := "DROP TABLE IF EXISTS " + table
+	if _, err := db.ExecContext(ctx, sql); err != nil {
+		return err
+	}
+	return nil
+}

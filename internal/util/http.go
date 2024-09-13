@@ -54,7 +54,7 @@ func (r *HTTPRetry) Do() (*http.Response, error) {
 			if resp != nil {
 				code = resp.StatusCode
 			}
-			r.logger.Trace("request failed (path: %s) (status: %d), retrying request in %v", r.req.URL.String(), code, jitter)
+			r.logger.Trace("%s request failed (path: %s) (status: %d), retrying request in %v", r.req.Method, r.req.URL.String(), code, jitter)
 		}
 		time.Sleep(jitter)
 		return r.Do()

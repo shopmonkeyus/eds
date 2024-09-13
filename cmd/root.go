@@ -175,7 +175,12 @@ func newLogger(cmd *cobra.Command) logger.Logger {
 			log = logger.NewConsoleLogger(logger.LevelInfo)
 		}
 	}
-
+	if cmd.Flags().Changed("log-label") {
+		label, _ := cmd.Flags().GetString("log-label")
+		if label != "" {
+			log = log.WithPrefix(fmt.Sprintf("[%s]", label))
+		}
+	}
 	return log
 }
 
@@ -260,16 +265,8 @@ func Execute() {
 	}
 }
 
-func getExecutable() string {
-	ex, err := os.Executable()
-	if err != nil {
-		ex = os.Args[0]
-	}
-	return ex
-}
-
 func getCommandExample(command string, args ...string) string {
-	ex := getExecutable()
+	ex := util.GetExecutable()
 	var cmd string
 	if strings.Contains(ex, "go-build") {
 		// If we are running in a go build environment, we need to tell the user how to start the server
@@ -293,11 +290,13 @@ func init() {
 		os.Exit(1)
 	}
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().Bool("verbose", false, "turn on verbose logging")
-	rootCmd.PersistentFlags().Bool("silent", false, "turn off all logging")
-	rootCmd.PersistentFlags().Bool("timestamp", false, "turn on timestamps in logs")
+	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "turn on verbose logging")
+	rootCmd.PersistentFlags().BoolP("silent", "s", false, "turn off all logging")
+	rootCmd.PersistentFlags().BoolP("timestamp", "t", false, "turn on timestamps in logs")
 	rootCmd.PersistentFlags().String("log-file-sink", "", "the log file sink to use")
 	rootCmd.PersistentFlags().MarkHidden("log-file-sink")
+	rootCmd.PersistentFlags().String("log-label", "", "a log label to add")
+	rootCmd.PersistentFlags().MarkHidden("log-label")
 	rootCmd.PersistentFlags().String("schema-validator", "", "the schema validator directory to use")
-	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", filepath.Join(cwd, "data"), "the data directory for storing state, logs, and other data")
+	rootCmd.PersistentFlags().StringVarP(&dataDir, "data-dir", "d", filepath.Join(cwd, "data"), "the data directory for storing state, logs, and other data")
 }

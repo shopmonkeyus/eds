@@ -55,7 +55,7 @@ func TestDBChanges(t *testing.T) {
 }
 
 func TestParseDSN(t *testing.T) {
-	dsn, err := parseURLToDSN("mysql://root:password@localhost:3306/dbname")
+	dsn, err := ParseURLToDSN("mysql://root:password@localhost:3306/dbname")
 	assert.NoError(t, err)
 	assert.Equal(t, "root:password@tcp(localhost:3306)/dbname?multiStatements=true", dsn)
 }
@@ -98,12 +98,25 @@ func TestValidate(t *testing.T) {
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
-	registery, err := registry.NewAPIRegistry(context.Background(), logger.NewTestLogger(), "http://api.shopmonkey.cloud", nil)
+	logger := logger.NewTestLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
 	assert.NoError(t, err)
 	schema, err := registery.GetLatestSchema()
 	assert.NoError(t, err)
 	assert.NotNil(t, schema)
 	detail := schema["order"]
-	sqls := addNewColumnsSQL([]string{"number", "internalNumber", "externalNumber"}, detail)
+	sqls := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, make(internal.DatabaseSchema))
 	assert.Equal(t, []string{"ALTER TABLE `order` ADD COLUMN number TEXT;", "ALTER TABLE `order` ADD COLUMN `internalNumber` TEXT;", "ALTER TABLE `order` ADD COLUMN `externalNumber` TEXT;"}, sqls)
+}
+
+func TestAddNewColumnsSQLSkip(t *testing.T) {
+	logger := logger.NewTestLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
+	assert.NoError(t, err)
+	schema, err := registery.GetLatestSchema()
+	assert.NoError(t, err)
+	assert.NotNil(t, schema)
+	detail := schema["order"]
+	sqls := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, internal.DatabaseSchema{"order": {"number": "TEXT"}})
+	assert.Equal(t, []string{"ALTER TABLE `order` ADD COLUMN `internalNumber` TEXT;", "ALTER TABLE `order` ADD COLUMN `externalNumber` TEXT;"}, sqls)
 }

@@ -3,40 +3,15 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	"github.com/shopmonkeyus/eds/internal/api"
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/spf13/cobra"
 )
-
-type enrollTokenData struct {
-	Token    string `json:"token" toml:"token"`
-	ServerID string `json:"serverId" toml:"server_id"`
-}
-
-type enrollResponse struct {
-	Success bool            `json:"success"`
-	Message string          `json:"message"`
-	Data    enrollTokenData `json:"data"`
-}
-
-func getAPIURL(firstLetter string) (*string, error) {
-	apiUrls := map[string]string{
-		"P": "https://api.shopmonkey.cloud",
-		"S": "https://sandbox-api.shopmonkey.cloud",
-		"E": "https://edge-api.shopmonkey.cloud",
-		"L": "http://localhost:3101",
-	}
-
-	if url, exists := apiUrls[firstLetter]; exists {
-		return &url, nil
-	}
-	return nil, errors.New("invalid code")
-}
 
 var enrollCmd = &cobra.Command{
 	Use:   "enroll [code]",
@@ -52,7 +27,7 @@ var enrollCmd = &cobra.Command{
 		if apiURL == "" {
 			logger.Debug("Getting api from prefix")
 			firstLetter := code[0:1]
-			maybeApiURL, err := getAPIURL(firstLetter)
+			maybeApiURL, err := api.GetAPIURL(firstLetter)
 			if err != nil {
 				logger.Fatal("error getting api url: %s", err)
 			}
@@ -77,7 +52,7 @@ var enrollCmd = &cobra.Command{
 			logger.Fatal("%s", handleAPIError(resp, "enroll"))
 		}
 
-		var enrollResp enrollResponse
+		var enrollResp api.EnrollResponse
 		if err := json.NewDecoder(resp.Body).Decode(&enrollResp); err != nil {
 			logger.Fatal("failed to decode response: %w", err)
 		}

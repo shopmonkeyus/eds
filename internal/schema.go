@@ -94,3 +94,27 @@ type SchemaValidator interface {
 	// Validate the event against the schema. Returns true if a schema is found for the table, true if the event is valid, the path transformed and an error if one occurs.
 	Validate(event DBChangeEvent) (bool, bool, string, error)
 }
+
+// DatabaseSchema is a map of table names to a map of column names to column types.
+type DatabaseSchema map[string]map[string]string
+
+func (d DatabaseSchema) Columns(table string) []string {
+	if t, ok := d[table]; ok {
+		var columns []string
+		for name := range t {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+		return columns
+	}
+	return []string{}
+}
+
+func (d DatabaseSchema) GetType(table string, column string) (bool, string) {
+	if t, ok := d[table]; ok {
+		if v, ok := t[column]; ok {
+			return true, v
+		}
+	}
+	return false, ""
+}

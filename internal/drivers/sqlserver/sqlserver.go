@@ -29,6 +29,8 @@ type sqlserverDriver struct {
 	importConfig internal.ImporterConfig
 	executor     func(string) error
 	size         int
+	dbname       string
+	dbschema     internal.DatabaseSchema
 }
 
 var _ internal.Driver = (*sqlserverDriver)(nil)
@@ -37,8 +39,24 @@ var _ internal.Importer = (*sqlserverDriver)(nil)
 var _ internal.DriverHelp = (*sqlserverDriver)(nil)
 var _ importer.Handler = (*sqlserverDriver)(nil)
 
+func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
+	if p.dbname == "" {
+		dbname, err := util.GetCurrentDatabase(ctx, db, "DB_NAME()")
+		if err != nil {
+			return fmt.Errorf("error getting current database name: %w", err)
+		}
+		p.dbname = dbname
+	}
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.logger, db, "table_catalog", p.dbname, failIfEmpty)
+	if err != nil {
+		return fmt.Errorf("error building database schema: %w", err)
+	}
+	p.dbschema = schema
+	return nil
+}
+
 func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
-	dsn, err := parseURLToDSN(urlstr)
+	dsn, err := ParseURLToDSN(urlstr)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing url: %w", err)
 	}
@@ -46,22 +64,28 @@ func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.PingContext(pctx); err != nil {
 		db.Close()
 		return nil, err
 	}
+
+	if err := p.refreshSchema(ctx, db, false); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return db, nil
 }
 
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
 func (p *sqlserverDriver) Start(config internal.DriverConfig) error {
+	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
@@ -163,7 +187,7 @@ func (p *sqlserverDriver) ImportEvent(event internal.DBChangeEvent, schema *inte
 	if err != nil {
 		return err
 	}
-	sql := toSQLFromObject("INSERT", schema, event.Table, object, nil)
+	sql := toSQLFromObject(schema, event.Table, object, nil)
 	p.pending.WriteString(sql)
 	p.count++
 	p.size += len(sql)
@@ -191,6 +215,7 @@ func (p *sqlserverDriver) ImportCompleted() error {
 
 // Import is called to import data from the source.
 func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
+	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
@@ -199,7 +224,6 @@ func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
 
 	p.importConfig = config
 	p.registry = config.SchemaRegistry
-	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
 	p.pending = strings.Builder{}
 	p.count = 0
@@ -235,6 +259,7 @@ func (p *sqlserverDriver) Aliases() []string {
 
 // Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 func (p *sqlserverDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	p.logger = logger.WithPrefix("[sqlserver]")
 	db, err := p.connectToDB(ctx, url)
 	if err != nil {
 		return err
@@ -256,32 +281,34 @@ func (p *sqlserverDriver) Validate(values map[string]any) (string, []internal.Fi
 func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
+	if _, ok := p.dbschema[schema.Table]; ok {
+		logger.Info("table already exists for: %s, dropping and recreating...", schema.Table)
+		if err := util.DropTable(ctx, logger, p.db, quoteIdentifier(schema.Table, true)); err != nil {
+			return err
+		}
+	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	if _, err := p.db.ExecContext(ctx, sql); err != nil {
+		return err
+	}
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
 func (p *sqlserverDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sql := addNewColumnsSQL(columns, schema)
-	for _, s := range strings.Split(sql, ";\n") {
-		_sql := strings.TrimSpace(s)
-		if _sql != "" {
-			logger.Trace("migrate new column: %s", _sql)
-			_, err := p.db.ExecContext(ctx, _sql)
-			if err != nil {
-				if strings.Contains(err.Error(), "Column names in each table must be unique") {
-					logger.Warn("column already exists for: %s, skipping...", _sql)
-					continue
-				}
-				return fmt.Errorf("error migrating new column with: %s: %w", _sql, err)
-			}
+	sqls := addNewColumnsSQL(logger, columns, schema, p.dbschema)
+	for _, sql := range sqls {
+		logger.Trace("migrating new columns: %s", sql)
+		_, err := p.db.ExecContext(ctx, sql)
+		if err != nil {
+			return err
 		}
+		logger.Debug("migrated new columns: %s", sql)
 	}
-	return nil
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 func init() {

@@ -29,6 +29,8 @@ type mysqlDriver struct {
 	executor     func(string) error
 	importConfig internal.ImporterConfig
 	size         int
+	dbname       string
+	dbschema     internal.DatabaseSchema
 }
 
 var _ internal.Driver = (*mysqlDriver)(nil)
@@ -37,8 +39,24 @@ var _ internal.Importer = (*mysqlDriver)(nil)
 var _ internal.DriverHelp = (*mysqlDriver)(nil)
 var _ importer.Handler = (*mysqlDriver)(nil)
 
+func (p *mysqlDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
+	if p.dbname == "" {
+		dbname, err := util.GetCurrentDatabase(ctx, db, "DATABASE()")
+		if err != nil {
+			return fmt.Errorf("error getting current database name: %w", err)
+		}
+		p.dbname = dbname
+	}
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.logger, db, "table_schema", p.dbname, failIfEmpty)
+	if err != nil {
+		return fmt.Errorf("error building database schema: %w", err)
+	}
+	p.dbschema = schema
+	return nil
+}
+
 func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, error) {
-	dsn, err := parseURLToDSN(urlstr)
+	dsn, err := ParseURLToDSN(urlstr)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing url: %w", err)
 	}
@@ -46,22 +64,28 @@ func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, 
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.PingContext(pctx); err != nil {
 		db.Close()
 		return nil, err
 	}
+
+	if err := p.refreshSchema(ctx, db, false); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return db, nil
 }
 
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
 func (p *mysqlDriver) Start(config internal.DriverConfig) error {
+	p.logger = config.Logger.WithPrefix("[mysql]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[mysql]")
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
@@ -190,6 +214,7 @@ func (p *mysqlDriver) ImportCompleted() error {
 
 // Import is called to import data from the source.
 func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
+	p.logger = config.Logger.WithPrefix("[mysql]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
@@ -198,7 +223,6 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 
 	p.registry = config.SchemaRegistry
 	p.importConfig = config
-	p.logger = config.Logger.WithPrefix("[mysql]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
 	p.pending = strings.Builder{}
 	p.count = 0
@@ -231,6 +255,7 @@ func (p *mysqlDriver) Help() string {
 
 // Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 func (p *mysqlDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	p.logger = logger.WithPrefix("[mysql]")
 	db, err := p.connectToDB(ctx, url)
 	if err != nil {
 		return err
@@ -252,29 +277,34 @@ func (p *mysqlDriver) Validate(values map[string]any) (string, []internal.FieldE
 func (p *mysqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
+	if _, ok := p.dbschema[schema.Table]; ok {
+		logger.Info("table already exists for: %s, dropping and recreating...", schema.Table)
+		if err := util.DropTable(ctx, logger, p.db, quoteIdentifier(schema.Table)); err != nil {
+			return err
+		}
+	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)
-	_, err := p.db.ExecContext(ctx, sql)
-	return err
+	if _, err := p.db.ExecContext(ctx, sql); err != nil {
+		return err
+	}
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
 func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	sqls := addNewColumnsSQL(columns, schema)
+	sqls := addNewColumnsSQL(logger, columns, schema, p.dbschema)
 	for _, sql := range sqls {
-		logger.Trace("migrate new column: %s", sql)
+		logger.Trace("migrating new columns: %s", sql)
 		_, err := p.db.ExecContext(ctx, sql)
 		if err != nil {
-			if strings.Contains(err.Error(), "Duplicate column name") {
-				logger.Warn("column already exists for: %s, skipping...", sql)
-				continue
-			}
 			return err
 		}
+		logger.Debug("migrated new columns: %s", sql)
 	}
-	return nil
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 func init() {

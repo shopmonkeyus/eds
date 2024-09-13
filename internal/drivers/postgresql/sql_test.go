@@ -37,22 +37,22 @@ func TestDBChanges(t *testing.T) {
 }
 
 func TestDBConnectionString(t *testing.T) {
-	val, err := getConnectionStringFromURL("postgres://localhost")
+	val, err := GetConnectionStringFromURL("postgres://localhost")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://localhost:5432?application_name=eds&sslmode=disable", val)
-	val, err = getConnectionStringFromURL("postgres://localhost:15432")
+	val, err = GetConnectionStringFromURL("postgres://localhost:15432")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://localhost:15432?application_name=eds&sslmode=disable", val)
-	val, err = getConnectionStringFromURL("postgres://localhost:15432?application_name=foo&sslmode=disable")
+	val, err = GetConnectionStringFromURL("postgres://localhost:15432?application_name=foo&sslmode=disable")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://localhost:15432?application_name=foo&sslmode=disable", val)
-	val, err = getConnectionStringFromURL("postgres://127.0.0.1:15432?application_name=foo&sslmode=disable")
+	val, err = GetConnectionStringFromURL("postgres://127.0.0.1:15432?application_name=foo&sslmode=disable")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://127.0.0.1:15432?application_name=foo&sslmode=disable", val)
-	val, err = getConnectionStringFromURL("postgres://127.0.0.1:15432?application_name=foo&sslmode=require")
+	val, err = GetConnectionStringFromURL("postgres://127.0.0.1:15432?application_name=foo&sslmode=require")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://127.0.0.1:15432?application_name=foo&sslmode=require", val)
-	val, err = getConnectionStringFromURL("postgres://foo.aws.com:15432?application_name=foo")
+	val, err = GetConnectionStringFromURL("postgres://foo.aws.com:15432?application_name=foo")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgresql://foo.aws.com:15432?application_name=foo", val)
 }
@@ -95,12 +95,25 @@ func TestValidate(t *testing.T) {
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
-	registery, err := registry.NewAPIRegistry(context.Background(), logger.NewTestLogger(), "http://api.shopmonkey.cloud", nil)
+	logger := logger.NewTestLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
 	assert.NoError(t, err)
 	schema, err := registery.GetLatestSchema()
 	assert.NoError(t, err)
 	assert.NotNil(t, schema)
 	detail := schema["order"]
-	sql := addNewColumnsSQL([]string{"number", "internalNumber", "externalNumber"}, detail)
-	assert.Equal(t, "ALTER TABLE \"order\" ADD COLUMN number TEXT;\nALTER TABLE \"order\" ADD COLUMN \"internalNumber\" TEXT;\nALTER TABLE \"order\" ADD COLUMN \"externalNumber\" TEXT;\n", sql)
+	sql := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, make(internal.DatabaseSchema))
+	assert.Equal(t, []string{"ALTER TABLE \"order\" ADD COLUMN number TEXT;", "ALTER TABLE \"order\" ADD COLUMN \"internalNumber\" TEXT;", "ALTER TABLE \"order\" ADD COLUMN \"externalNumber\" TEXT;"}, sql)
+}
+
+func TestAddNewColumnsSQLSkip(t *testing.T) {
+	logger := logger.NewTestLogger()
+	registery, err := registry.NewAPIRegistry(context.Background(), logger, "http://api.shopmonkey.cloud", nil)
+	assert.NoError(t, err)
+	schema, err := registery.GetLatestSchema()
+	assert.NoError(t, err)
+	assert.NotNil(t, schema)
+	detail := schema["order"]
+	sql := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, internal.DatabaseSchema{"order": {"number": "TEXT"}})
+	assert.Equal(t, []string{"ALTER TABLE \"order\" ADD COLUMN \"internalNumber\" TEXT;", "ALTER TABLE \"order\" ADD COLUMN \"externalNumber\" TEXT;"}, sql)
 }
