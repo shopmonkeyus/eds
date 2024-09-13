@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -200,6 +201,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 			if len(only) > 0 && !util.SliceContains(only, test.Name()) {
 				continue
 			}
+			os.Remove(filepath.Join(tmpdir, "eds-data.db"))
 			var wg sync.WaitGroup
 			wg.Add(1)
 			ts := time.Now()

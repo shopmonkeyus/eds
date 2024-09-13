@@ -29,10 +29,12 @@ func (d *driverKafkaTest) URL(dir string) string {
 
 func (d *driverKafkaTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	reader := gokafka.NewReader(gokafka.ReaderConfig{
-		Brokers:        []string{"127.0.0.1:29092"},
-		Topic:          "eds",
-		CommitInterval: 0,
-		GroupID:        "eds",
+		Brokers:          []string{"127.0.0.1:29092"},
+		Topic:            "eds",
+		CommitInterval:   0,
+		GroupID:          "eds",
+		ReadBatchTimeout: time.Second,
+		MaxWait:          time.Millisecond * 500,
 	})
 	defer reader.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)

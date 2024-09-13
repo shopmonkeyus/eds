@@ -277,7 +277,7 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 		return fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 	}
 	if !found || version != event.ModelVersion {
-		logger.Trace("found: %v, version: %v, model version: %v", found, version, event.ModelVersion)
+		logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, version, event.ModelVersion)
 		newschema, err := c.registry.GetSchema(event.Table, event.ModelVersion)
 		if err != nil {
 			return fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)

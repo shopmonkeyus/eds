@@ -67,6 +67,7 @@ func setupServer(logger logger.Logger, creds string) (int, ShutdownFunc) {
 		var resp internal.Schema
 		object := r.PathValue("object")
 		version := r.PathValue("version")
+		logger.Info("schema request received for %s %s", object, version)
 		switch object {
 		case "order":
 			resp = internal.Schema{
