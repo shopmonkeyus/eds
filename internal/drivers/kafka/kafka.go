@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	gokafka "github.com/segmentio/kafka-go"
 	"github.com/shopmonkeyus/eds/internal"
@@ -69,6 +70,8 @@ func (p *kafkaDriver) connect(urlString string) error {
 		Topic:                  topic,
 		Balancer:               &messageBalancer{},
 		AllowAutoTopicCreation: true,
+		MaxAttempts:            25,
+		RequiredAcks:           gokafka.RequireAll,
 	}
 
 	return nil
@@ -154,10 +157,19 @@ func (p *kafkaDriver) Flush(logger logger.Logger) error {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if len(p.pending) > 0 {
-		if err := p.writer.WriteMessages(p.ctx, p.pending...); err != nil {
-			return fmt.Errorf("error publishing message. %w", err)
+		ts := time.Now()
+		for time.Since(ts) < time.Second*10 {
+			if err := p.writer.WriteMessages(p.ctx, p.pending...); err != nil {
+				if strings.Contains(err.Error(), "Leader Not Available") {
+					logger.Debug("waiting for kafka to become available")
+					time.Sleep(time.Second)
+					continue
+				}
+				return fmt.Errorf("error publishing message. %w", err)
+			}
+			logger.Debug("flushed %d messages", len(p.pending))
+			break
 		}
-		logger.Debug("flushed %d messages", len(p.pending))
 		p.pending = nil
 	}
 	return nil

@@ -79,3 +79,14 @@ func NewNDJSONDecoder(fn string) (JSONDecoder, error) {
 		dec: je,
 	}, nil
 }
+
+// JSONDiff returns the keys that are in obj but not in found in the slice
+func JSONDiff(obj map[string]any, found []string) []string {
+	diff := make([]string, 0)
+	for key := range obj {
+		if !SliceContains(found, key) {
+			diff = append(diff, key)
+		}
+	}
+	return diff
+}

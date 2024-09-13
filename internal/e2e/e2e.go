@@ -39,6 +39,7 @@ const (
 	apikey            = "apikey"
 	defaultPayload    = `{"id":"12345","name":"test"}`
 	defaultPayload2   = `{"id":"12345","name":"test","age":1}`
+	defaultPayload3   = `{"id":"12345","name":"test","foo":1}`
 	eventDeliverDelay = time.Millisecond * 150
 )
 
@@ -59,8 +60,9 @@ func registerTest(t e2eTest) {
 }
 
 type runCallbackFunc func(*exec.Cmd)
+type exitCallbackFunc func(int) bool // return true to not exit
 
-func run(cmd string, args []string, cb runCallbackFunc) {
+func run(cmd string, args []string, cb runCallbackFunc, exitCallback exitCallbackFunc) {
 	c := exec.Command(util.GetExecutable(), append([]string{cmd}, args...)...)
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -68,7 +70,16 @@ func run(cmd string, args []string, cb runCallbackFunc) {
 		go cb(c)
 	}
 	if err := c.Run(); err != nil {
-		os.Exit(1)
+		ec := 1
+		if c.ProcessState != nil {
+			ec = c.ProcessState.ExitCode()
+		}
+		if exitCallback != nil {
+			if exitCallback(ec) {
+				return
+			}
+		}
+		os.Exit(ec)
 	}
 }
 
@@ -185,6 +196,15 @@ func runDBChangeDeleteTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetS
 	return readResult(*event)
 }
 
+func runDBChangeSchemaMismatchTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion, defaultPayload3)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
 func RunTests(logger logger.Logger, only []string) (bool, error) {
 	tmpdir, err := os.MkdirTemp("", "e2e")
 	if err != nil {
@@ -200,7 +220,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 		logger.Trace("creds: %s", userCreds)
 		httpport, shutdown := setupServer(logger, userCreds)
 		apiurl := fmt.Sprintf("http://127.0.0.1:%d", httpport)
-		run("enroll", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "1234"}, nil)
+		run("enroll", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "1234"}, nil, nil)
 		for _, test := range tests {
 			if tv, ok := test.(e2eTestDisabled); ok {
 				if tv.Disabled() {
@@ -220,8 +240,10 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 			ts := time.Now()
 			name := test.Name()
 			url := test.URL(tmpdir)
+			var lookingForExitCode int
+			var foundExitCode bool
 			logger.Info("running test: %s", name)
-			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url, "--log-label", name}, nil)
+			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url, "--log-label", name}, nil, nil)
 			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort), "--log-label", name, "--minPendingLatency", "1ms", "--maxPendingLatency", "1ms", "--no-restart"}, func(c *exec.Cmd) {
 				defer func() {
 					if c.Process != nil {
@@ -336,6 +358,28 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					atomic.AddUint32(&pass, 1)
 					logger.Info("✅ dbchange insert (#2) test: %s succeeded in %s", name, time.Since(testStarted))
 				}
+
+				// NOTE: this must be the last test because it will exit the process
+				testStarted = time.Now()
+				lookingForExitCode = 6 /*exitCodeSchemaMismatch*/
+				if err := runDBChangeSchemaMismatchTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					if foundExitCode {
+						return nil
+					}
+					return fmt.Errorf("expected exit code %d but it was not returned", lookingForExitCode)
+				}); err != nil {
+					logger.Error("🔴 dbchange schema mismatch test: %s failed: %s", name, err)
+					atomic.AddUint32(&fail, 1)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange schema mismatch test: %s succeeded in %s", name, time.Since(testStarted))
+				}
+			}, func(ec int) bool {
+				if ec == lookingForExitCode {
+					foundExitCode = true
+					return true
+				}
+				return false
 			})
 			wg.Wait()
 			logger.Info("test: %s completed in %s", name, time.Since(ts))

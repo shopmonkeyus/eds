@@ -3,6 +3,7 @@ package consumer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -1012,6 +1013,70 @@ func TestTableSchemaMigrationNoNewColumns(t *testing.T) {
 		assert.True(t, getSchema2Called)
 
 		assert.NoError(t, consumer.Stop())
+	})
+}
+
+func TestTableSchemaMismatch(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, _ *server.Server) {
+
+		mockDriver := &mockDriverWithMigration{
+			process: func(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
+				return false, fmt.Errorf("shouldn't have called process")
+			},
+			migrateTable: func(ctx context.Context, logger logger.Logger, schema *internal.Schema) error {
+				return fmt.Errorf("shouldn't have called migrate table")
+			},
+			migrateColumns: func(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns_ []string) error {
+				return fmt.Errorf("shouldn't have called migrate columns")
+			},
+		}
+
+		props := make(map[string]internal.SchemaProperty)
+		props["id"] = internal.SchemaProperty{
+			Type: "string",
+		}
+
+		mockRegistry := &mockRegistry{
+			getSchema: func(table string, version string) (*internal.Schema, error) {
+				return &internal.Schema{
+					Properties: props,
+				}, nil
+			},
+			getTableVersion: func(table string) (bool, string, error) {
+				return true, "1", nil
+			},
+		}
+
+		consumer, err := NewConsumer(ConsumerConfig{
+			Context:  context.Background(),
+			Logger:   logger.NewTestLogger(),
+			Driver:   mockDriver,
+			URL:      natsurl,
+			Registry: mockRegistry,
+		})
+
+		assert.NoError(t, err)
+
+		var sendEvent internal.DBChangeEvent
+		sendEvent.Table = "order"
+		sendEvent.Operation = "INSERT"
+		sendEvent.Timestamp = time.Now().UnixMilli()
+		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.ModelVersion = "1"
+		sendEvent.After = json.RawMessage(`{"id":"123","foo":"bar"}`)
+
+		puback, err := js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
+		assert.NoError(t, err)
+
+		time.Sleep(time.Millisecond * 200)
+
+		assert.NoError(t, consumer.Stop())
+		cn, err := js.Consumer(context.Background(), puback.Stream, consumer.Name())
+		assert.NoError(t, err)
+		ci, err := cn.Info(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(0), ci.AckFloor.Consumer)
+		assert.Equal(t, 1, ci.NumRedelivered) // schema mismatch should trigger nak
 	})
 }
 

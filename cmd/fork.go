@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +31,7 @@ const (
 	exitCodeIncorrectUsage   = 3
 	exitCodeRestart          = 4
 	exitCodeNatsDisconnected = 5
+	exitCodeSchemaMismatch   = 6
 )
 
 func runHealthCheckServerFork(logger logger.Logger, port int) {
@@ -55,7 +57,7 @@ var forkCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		logger := newLogger(cmd)
-		companyIds, _ := cmd.Flags().GetStringSlice("company-id")
+		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
 		datadir := mustFlagString(cmd, "data-dir", true)
 		logDir := mustFlagString(cmd, "logs-dir", true)
 		sink, err := newLogFileSink(logDir)
@@ -217,6 +219,11 @@ var forkCmd = &cobra.Command{
 						localConsumer = nil
 					}
 				case err := <-localConsumer.Error():
+					if errors.Is(err, consumer.ErrSchemaMismatch) {
+						logger.Error("schema mismatch: %s", strings.TrimSpace(strings.Join(strings.Split(err.Error(), "\n"), " ")))
+						exitCode = exitCodeSchemaMismatch
+						return
+					}
 					if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) {
 						logger.Warn("nats server / consumer needs reconnection: %s", err)
 					} else {

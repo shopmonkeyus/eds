@@ -26,7 +26,7 @@ func quoteIdentifier(val string, istable bool) string {
 	return val
 }
 
-func toSQLFromObject(model *internal.Schema, table string, o map[string]any, diff []string) string {
+func toSQLFromObject(model *internal.Schema, table string, object map[string]any, diff []string) string {
 	var sql strings.Builder
 
 	sql.WriteString("MERGE ")
@@ -34,7 +34,7 @@ func toSQLFromObject(model *internal.Schema, table string, o map[string]any, dif
 	sql.WriteString(" AS target")
 	sql.WriteString(" USING (")
 	sql.WriteString("VALUES('")
-	sql.WriteString(o["id"].(string))
+	sql.WriteString(object["id"].(string))
 	sql.WriteString("')")
 	sql.WriteString(") AS source (id)")
 	sql.WriteString(" ON target.id=source.id")
@@ -44,7 +44,7 @@ func toSQLFromObject(model *internal.Schema, table string, o map[string]any, dif
 			if !util.SliceContains(model.Columns(), name) || name == "id" {
 				continue
 			}
-			if val, ok := o[name]; ok {
+			if val, ok := object[name]; ok {
 				prop := model.Properties[name]
 				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
@@ -57,7 +57,7 @@ func toSQLFromObject(model *internal.Schema, table string, o map[string]any, dif
 			if name == "id" {
 				continue
 			}
-			if val, ok := o[name]; ok {
+			if val, ok := object[name]; ok {
 				prop := model.Properties[name]
 				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
@@ -78,7 +78,7 @@ func toSQLFromObject(model *internal.Schema, table string, o map[string]any, dif
 	sql.WriteString(strings.Join(columns, ","))
 	var insertVals []string
 	for _, name := range model.Columns() {
-		if val, ok := o[name]; ok {
+		if val, ok := object[name]; ok {
 			prop := model.Properties[name]
 			v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 			if name != "id" {
