@@ -30,7 +30,7 @@ services:
     ports:
       - 15432:5432
   kafka:
-    image: confluentinc/cp-kafka:7.7.0
+    image: confluentinc/cp-kafka:7.7.1
     depends_on:
       - zookeeper
     ports:
@@ -53,7 +53,7 @@ services:
       - ACCEPT_EULA=Y
       - MSSQL_DATA_DIR=/var/opt/mssql/data
   init-kafka:
-    image: confluentinc/cp-kafka:7.7.0
+    image: confluentinc/cp-kafka:7.7.1
     depends_on:
       - kafka
     entrypoint: ["/bin/sh", "-c"]
