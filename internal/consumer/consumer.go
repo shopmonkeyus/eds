@@ -408,7 +408,7 @@ func (c *Consumer) bufferer() {
 			}
 
 			// check to see if the schema matches the incoming object
-			if evt.Operation != "DELETE" {
+			if evt.Operation != "DELETE" && c.registry != nil {
 				schema, err := c.registry.GetSchema(evt.Table, evt.ModelVersion)
 				if err != nil {
 					c.handleError(fmt.Errorf("error getting schema for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err))
