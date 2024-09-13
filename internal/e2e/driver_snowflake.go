@@ -49,7 +49,7 @@ func (d *driverSnowflakeTest) QuoteValue(value string) string {
 	return fmt.Sprintf(`'%s'`, value)
 }
 
-func (d *driverSnowflakeTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverSnowflakeTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	connStr, err := snowflake.GetConnectionStringFromURL(url)
 	if err != nil {
 		return fmt.Errorf("error getting connection string: %w", err)

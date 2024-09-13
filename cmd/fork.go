@@ -75,6 +75,8 @@ var forkCmd = &cobra.Command{
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
+		minPendingLatency, _ := cmd.Flags().GetDuration("minPendingLatency")
+		maxPendingLatency, _ := cmd.Flags().GetDuration("maxPendingLatency")
 		port := mustFlagInt(cmd, "port", false)
 
 		// check to see if there's a schema validator and if so load it
@@ -188,6 +190,8 @@ var forkCmd = &cobra.Command{
 						SchemaValidator:       validator,
 						CompanyIDs:            companyIds,
 						Registry:              schemaRegistry,
+						MinPendingLatency:     minPendingLatency,
+						MaxPendingLatency:     maxPendingLatency,
 					})
 					if err != nil {
 						logger.Error("error creating consumer: %s", err)

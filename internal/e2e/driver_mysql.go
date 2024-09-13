@@ -36,7 +36,7 @@ func (d *driverMySQLTest) QuoteValue(value string) string {
 	return fmt.Sprintf(`'%s'`, value)
 }
 
-func (d *driverMySQLTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverMySQLTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	dsn, err := mysql.ParseURLToDSN(url)
 	if err != nil {
 		return fmt.Errorf("error parsing url: %w", err)

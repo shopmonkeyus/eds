@@ -44,7 +44,7 @@ func (d *driverEventHubTest) URL(dir string) string {
 	return fmt.Sprintf("eventhub://%s/;SharedAccessKeyName=%s;SharedAccessKey=%s;EntityPath=%s", eventHubServiceBusNamespace, eventHubSharedAccessKeyName, eventHubSharedAccessKey, eventHubEntityPath)
 }
 
-func (d *driverEventHubTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverEventHubTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	if !eventHubEnabled {
 		return nil
 	}

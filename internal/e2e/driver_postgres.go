@@ -36,7 +36,7 @@ func (d *driverPostgresTest) QuoteValue(value string) string {
 	return fmt.Sprintf(`'%s'`, value)
 }
 
-func (d *driverPostgresTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverPostgresTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	connStr, err := postgresql.GetConnectionStringFromURL(url)
 	if err != nil {
 		return fmt.Errorf("error parsing url: %w", err)

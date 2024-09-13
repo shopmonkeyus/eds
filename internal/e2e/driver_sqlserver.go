@@ -36,7 +36,7 @@ func (d *driverSQLServerTest) QuoteValue(value string) string {
 	return fmt.Sprintf(`%s`, value)
 }
 
-func (d *driverSQLServerTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverSQLServerTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	dsn, err := sqlserver.ParseURLToDSN(url)
 	if err != nil {
 		return fmt.Errorf("error parsing url: %w", err)

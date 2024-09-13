@@ -39,14 +39,14 @@ func (d *driverS3Test) URL(dir string) string {
 	return fmt.Sprintf("s3://127.0.0.1:4566/%s?region=us-east-1&access-key-id=test&secret-access-key=eds", dbname)
 }
 
-func (d *driverS3Test) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverS3Test) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	client, _, _, _, _, err := s3driver.NewS3Client(context.Background(), logger, url)
 	if err != nil {
 		return fmt.Errorf("error creating s3 client: %w", err)
 	}
 	res, err := client.GetObject(context.Background(), &awss3.GetObjectInput{
 		Bucket: aws.String(dbname),
-		Key:    aws.String(fmt.Sprintf("order/%s.json", event.GetPrimaryKey())),
+		Key:    aws.String(fmt.Sprintf("%s/%s.json", event.Table, event.GetPrimaryKey())),
 	})
 	if err != nil {
 		return fmt.Errorf("error getting object: %w", err)

@@ -63,6 +63,48 @@ func setupServer(logger logger.Logger, creds string) (int, ShutdownFunc) {
 		json.NewEncoder(w).Encode(resp)
 	})
 
+	http.HandleFunc("/v3/schema/{object}/{version}", func(w http.ResponseWriter, r *http.Request) {
+		var resp internal.Schema
+		object := r.PathValue("object")
+		version := r.PathValue("version")
+		switch object {
+		case "order":
+			resp = internal.Schema{
+				Table:        "order",
+				ModelVersion: version,
+				Properties: map[string]internal.SchemaProperty{
+					"id": {
+						Type: "string",
+					},
+					"name": {
+						Type: "string",
+					},
+					"age": {
+						Type: "number",
+					},
+				},
+				PrimaryKeys: []string{"id"},
+			}
+		case "customer":
+			resp = internal.Schema{
+				Table:        "customer",
+				ModelVersion: version,
+				Properties: map[string]internal.SchemaProperty{
+					"id": {
+						Type: "string",
+					},
+					"name": {
+						Type: "string",
+					},
+				},
+				PrimaryKeys: []string{"id"},
+			}
+		}
+		logger.Info("schema fetched for %s %s", object, version)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	})
+
 	http.HandleFunc("/v3/schema", func(w http.ResponseWriter, r *http.Request) {
 		var resp = make(internal.SchemaMap)
 		resp["order"] = &internal.Schema{

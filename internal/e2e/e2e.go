@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -24,21 +25,26 @@ import (
 )
 
 const (
-	sessionId    = "4641e7c5-0f86-4576-89ca-15db401aea56"
-	companyId    = "1234567890"
-	enrollToken  = "1234567890"
-	modelVersion = "fff000110"
-	serverID     = "1"
-	dbuser       = "eds"
-	dbpass       = "Asdf1234!"
-	dbname       = "eds"
-	apikey       = "apikey"
+	sessionId         = "4641e7c5-0f86-4576-89ca-15db401aea56"
+	companyId         = "1234567890"
+	enrollToken       = "1234567890"
+	modelVersion      = "fff000111"
+	modelVersion2     = "fff000112-update"
+	modelVersion3     = "fff000113-update"
+	serverID          = "1"
+	dbuser            = "eds"
+	dbpass            = "Asdf1234!"
+	dbname            = "eds"
+	apikey            = "apikey"
+	defaultPayload    = `{"id":"12345","name":"test"}`
+	defaultPayload2   = `{"id":"12345","name":"test","age":1}`
+	eventDeliverDelay = time.Millisecond * 150
 )
 
 type e2eTest interface {
 	Name() string
 	URL(dir string) string
-	TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error
+	Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error
 }
 
 type e2eTestDisabled interface {
@@ -80,41 +86,108 @@ func dbchangeEventMatches(event internal.DBChangeEvent, event2 internal.DBChange
 	return nil
 }
 
-func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table string, operation string, modelVersion string, payload string) (*internal.DBChangeEvent, error) {
 	var event internal.DBChangeEvent
 	event.ID = util.Hash(time.Now())
-	event.Operation = "INSERT"
-	event.Table = "order"
-	event.Key = []string{"12345"}
+	event.Operation = operation
+	event.Table = table
+	event.Key = []string{"gcp-us-central1", "12345"}
 	event.ModelVersion = modelVersion
 	event.Timestamp = time.Now().UnixMilli()
 	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().Nanosecond())
-	event.After = json.RawMessage(`{"id":"12345","name":"test"}`)
+	if operation == "DELETE" {
+		event.Before = json.RawMessage([]byte(payload))
+	} else {
+		event.After = json.RawMessage([]byte(payload))
+	}
 	event.Imported = false
 	buf, err := json.Marshal(event)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("error marshalling event: %w", err)
 	}
-	subject := "dbchange.order.INSERT." + companyId + ".1.PUBLIC.2"
-	logger.Info("publishing event: %s with timestamp: %d", subject, event.Timestamp)
+	subject := fmt.Sprintf("dbchange.%s.%s."+companyId+".1.PUBLIC.2", table, operation)
+	logger.Info("publishing event: %s => %v", subject, util.JSONStringify(event))
 	msgId := util.Hash(event)
 	if _, err := js.Publish(context.Background(), subject, buf, jetstream.WithMsgID(msgId)); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("error publishing event: %w", err)
 	}
-	time.Sleep(time.Second)
-	return readResult(event)
+	return &event, nil
 }
 
-func RunTests(logger logger.Logger, only []string) error {
+func runDBChangeNewTableTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion, defaultPayload)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeNewTableTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeNewColumnTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion2, defaultPayload2)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeNewColumnTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion3, defaultPayload2)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion, defaultPayload)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeUpdateTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion, defaultPayload)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeDeleteTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "DELETE", modelVersion, defaultPayload)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func RunTests(logger logger.Logger, only []string) (bool, error) {
 	tmpdir, err := os.MkdirTemp("", "e2e")
 	if err != nil {
-		panic(err)
+		return false, err
 	}
 	defer os.RemoveAll(tmpdir)
 	healthPort, err := util.GetFreePort()
 	if err != nil {
-		panic(err)
+		return false, err
 	}
+	var pass, fail uint32
 	runNatsTestServer(func(nc *nats.Conn, js jetstream.JetStream, srv *server.Server, userCreds string) {
 		logger.Trace("creds: %s", userCreds)
 		httpport, shutdown := setupServer(logger, userCreds)
@@ -131,8 +204,14 @@ func RunTests(logger logger.Logger, only []string) error {
 			url := test.URL(tmpdir)
 			logger.Info("running test: %s", name)
 			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url, "--log-label", name}, nil)
-			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort), "--log-label", name}, func(c *exec.Cmd) {
-				time.Sleep(2 * time.Second)
+			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort), "--log-label", name, "--minPendingLatency", "1ms", "--maxPendingLatency", "1ms"}, func(c *exec.Cmd) {
+				defer func() {
+					if c.Process != nil {
+						c.Process.Signal(os.Interrupt)
+					}
+					wg.Done()
+				}()
+				time.Sleep(time.Second)
 				_logger := logger.WithPrefix("[" + name + "]")
 				_logger.Info("ready to test")
 				pingStarted := time.Now()
@@ -149,21 +228,79 @@ func RunTests(logger logger.Logger, only []string) error {
 					break
 				}
 				if err != nil {
-					panic(err)
+					logger.Error("🔴 ping failed for test: %s. %s", name, err)
+					atomic.AddUint32(&fail, 1)
+					return
 				}
 				_logger.Info("health check: %s", resp.Status)
 				if resp.StatusCode != http.StatusOK {
-					panic("health check failed")
+					logger.Error("🔴 health check failed for test: %s. %s", name, resp.Status)
+					atomic.AddUint32(&fail, 1)
+					return
 				}
 				if err := runDBChangeInsertTest(logger, nc, js, func(event internal.DBChangeEvent) error {
-					return test.TestInsert(_logger, tmpdir, url, event)
+					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
 					logger.Error("🔴 dbchange insert test: %s failed: %s", name, err)
+					atomic.AddUint32(&fail, 1)
 				} else {
-					logger.Info("✅ dbchange insert: %s succeeded in %s", name, time.Since(ts))
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange insert test: %s succeeded in %s", name, time.Since(ts))
 				}
-				c.Process.Signal(os.Interrupt)
-				wg.Done()
+				if err := runDBChangeNewTableTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					atomic.AddUint32(&fail, 1)
+					logger.Error("🔴 dbchange new table test: %s failed: %s", name, err)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange new table test: %s succeeded in %s", name, time.Since(ts))
+				}
+				if err := runDBChangeUpdateTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					atomic.AddUint32(&fail, 1)
+					logger.Error("🔴 dbchange update test: %s failed: %s", name, err)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange update test: %s succeeded in %s", name, time.Since(ts))
+				}
+				if err := runDBChangeDeleteTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					atomic.AddUint32(&fail, 1)
+					logger.Error("🔴 dbchange delete test: %s failed: %s", name, err)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange delete test: %s succeeded in %s", name, time.Since(ts))
+				}
+				if err := runDBChangeNewTableTest2(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					atomic.AddUint32(&fail, 1)
+					logger.Error("🔴 dbchange new table (#2) test: %s failed: %s", name, err)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange new table (#2) test: %s succeeded in %s", name, time.Since(ts))
+				}
+				if err := runDBChangeNewColumnTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					atomic.AddUint32(&fail, 1)
+					logger.Error("🔴 dbchange new column test: %s failed: %s", name, err)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange new column: %s succeeded in %s", name, time.Since(ts))
+				}
+				if err := runDBChangeNewColumnTest2(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					atomic.AddUint32(&fail, 1)
+					logger.Error("🔴 dbchange new column (#2) test: %s failed: %s", name, err)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange new column (#2) test: %s succeeded in %s", name, time.Since(ts))
+				}
 			})
 			wg.Wait()
 			logger.Info("test: %s completed in %s", name, time.Since(ts))
@@ -171,5 +308,6 @@ func RunTests(logger logger.Logger, only []string) error {
 		logger.Info("shutting down server")
 		shutdown()
 	})
-	return nil
+	logger.Info("✅ %d/%d passed 🔴 %d/%d failed", pass, pass+fail, fail, pass+fail)
+	return fail == 0, nil
 }

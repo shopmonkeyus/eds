@@ -133,6 +133,9 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 
 	// we have to now fallback to the API to get the data
 	object := r.objects[table]
+	if object == "" {
+		object = table
+	}
 	resp, err := http.Get(r.apiURL + "/v3/schema/" + object + "/" + version)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching schema: %s", err)

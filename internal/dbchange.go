@@ -48,7 +48,7 @@ func (c *DBChangeEvent) GetPrimaryKey() string {
 }
 
 func (c *DBChangeEvent) GetObject() (map[string]any, error) {
-	if c.After != nil {
+	if len(c.After) > 0 {
 		if c.object == nil {
 			res := make(map[string]any)
 			if err := json.Unmarshal(c.After, &res); err != nil {
@@ -57,7 +57,7 @@ func (c *DBChangeEvent) GetObject() (map[string]any, error) {
 			c.object = res
 		}
 		return c.object, nil
-	} else if c.Before != nil {
+	} else if len(c.Before) > 0 {
 		if c.object == nil {
 			res := make(map[string]any)
 			if err := json.Unmarshal(c.Before, &res); err != nil {

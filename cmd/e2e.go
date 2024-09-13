@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"os"
 	"time"
 
 	"github.com/shopmonkeyus/eds/internal/e2e"
@@ -26,10 +27,14 @@ var e2eCmd = &cobra.Command{
 		logger := newLogger(cmd)
 		logger = logger.WithPrefix("[e2e]")
 		started := time.Now()
-		if err := e2e.RunTests(logger, args); err != nil {
+		ok, err := e2e.RunTests(logger, args)
+		if err != nil {
 			logger.Fatal("error running tests: %s", err)
 		}
 		logger.Info("tests completed in %s", time.Since(started))
+		if !ok {
+			os.Exit(1)
+		}
 	},
 }
 

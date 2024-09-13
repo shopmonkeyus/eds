@@ -28,7 +28,7 @@ func (d *driverFileTest) URL(dir string) string {
 	return util.ToFileURI(dir, "export")
 }
 
-func (d *driverFileTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverFileTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	fn := filepath.Join(dir, "export", event.Table, fmt.Sprintf("%d-%s.json", time.UnixMilli(event.Timestamp).Unix(), event.Key[0]))
 	buf, err := os.ReadFile(fn)
 	if err != nil {

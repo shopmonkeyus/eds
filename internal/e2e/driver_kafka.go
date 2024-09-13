@@ -27,7 +27,7 @@ func (d *driverKafkaTest) URL(dir string) string {
 	return fmt.Sprintf("kafka://127.0.0.1:29092/%s", dbname)
 }
 
-func (d *driverKafkaTest) TestInsert(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
+func (d *driverKafkaTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	reader := gokafka.NewReader(gokafka.ReaderConfig{
 		Brokers:        []string{"127.0.0.1:29092"},
 		Topic:          "eds",
