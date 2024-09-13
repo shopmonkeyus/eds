@@ -69,6 +69,11 @@ func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver
 			}
 			row[col] = v
 		}
+		for k := range kv {
+			if _, ok := row[k]; !ok {
+				return fmt.Errorf("column %s was expected but not returned from db", k)
+			}
+		}
 		logger.Info("row %d matched: %v", count-1, util.JSONStringify(row))
 	}
 	if event.Operation == "DELETE" {

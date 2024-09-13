@@ -3,7 +3,6 @@ package util
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -85,20 +84,11 @@ func ToUserPass(u *url.URL) string {
 	return dsn.String()
 }
 
-// TruncateTable truncates a table and verifies that it is empty
-func TruncateTable(ctx context.Context, logger logger.Logger, db *sql.DB, table string) error {
-	sql := "TRUNCATE TABLE " + table
+// DropTable drops the table if it exists
+func DropTable(ctx context.Context, logger logger.Logger, db *sql.DB, table string) error {
+	sql := "DROP TABLE IF EXISTS " + table
 	if _, err := db.ExecContext(ctx, sql); err != nil {
 		return err
-	}
-	sql = "SELECT COUNT(*) FROM " + table
-	row := db.QueryRowContext(ctx, sql)
-	var count int
-	if err := row.Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return fmt.Errorf("table %s is not empty after truncate", table)
 	}
 	return nil
 }

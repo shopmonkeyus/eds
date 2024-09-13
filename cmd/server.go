@@ -767,7 +767,7 @@ var serverCmd = &cobra.Command{
 			if validateOnly {
 				logger.Info("configuring the driver, one moment please...")
 			} else {
-				logger.Info("running an import, one moment please...")
+				logger.Info("running import process ... (duration will vary based on the amount of data being exported)")
 			}
 			result, err := command.Fork(command.ForkArgs{
 				Context:          ctx,

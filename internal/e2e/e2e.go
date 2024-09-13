@@ -159,7 +159,7 @@ func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetS
 }
 
 func runDBChangeInsertTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
-	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload2)
+	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload)
 	if err != nil {
 		return err
 	}

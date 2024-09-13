@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -17,7 +18,7 @@ func TestBuildDBSchemaFromInfoSchema(t *testing.T) {
 
 	mock.ExpectQuery("SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_catalog = '1").WillReturnRows(sqlmock.NewRows([]string{"table_name", "column_name", "data_type"}).AddRow("table1", "column1", "int"))
 
-	res, err := BuildDBSchemaFromInfoSchema(context.Background(), db, "table_catalog", "1", false)
+	res, err := BuildDBSchemaFromInfoSchema(context.Background(), logger.NewTestLogger(), db, "table_catalog", "1", false)
 	assert.NoError(t, err)
 	assert.NotNil(t, res)
 	assert.NotEmpty(t, res)

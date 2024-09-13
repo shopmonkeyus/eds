@@ -57,7 +57,7 @@ func (p *snowflakeDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfE
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_catalog", p.dbname, failIfEmpty)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.logger, db, "table_catalog", p.dbname, failIfEmpty)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
@@ -241,16 +241,16 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 
 // Import is called to import data from the source.
 func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
+	p.logger = config.Logger.WithPrefix("[snowflake]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	logger := config.Logger.WithPrefix("[snowflake]")
 	p.registry = config.SchemaRegistry
-	executeSQL := util.SQLExecuter(config.Context, logger, db, config.DryRun)
-	logger.Info("loading data into database")
+	executeSQL := util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
+	p.logger.Info("loading data into database")
 
 	schema, err := p.registry.GetLatestSchema()
 	if err != nil {
@@ -260,11 +260,11 @@ func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 	// create all the tables
 	for _, table := range config.Tables {
 		data := schema[table]
-		logger.Debug("creating table %s", table)
+		p.logger.Debug("creating table %s", table)
 		if err := executeSQL(createSQL(data)); err != nil {
 			return fmt.Errorf("error creating table: %s. %w", table, err)
 		}
-		logger.Debug("created table %s", table)
+		p.logger.Debug("created table %s", table)
 	}
 
 	if config.SchemaOnly {
@@ -278,11 +278,11 @@ func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 
 	// create a stage
 	stageName := "eds_import_" + jobId
-	logger.Debug("creating stage %s", stageName)
+	p.logger.Debug("creating stage %s", stageName)
 	if err := executeSQL("CREATE STAGE " + stageName); err != nil {
 		return fmt.Errorf("error creating stage: %s", err)
 	}
-	logger.Debug("stage %s created", stageName)
+	p.logger.Debug("stage %s created", stageName)
 
 	started := time.Now()
 
@@ -298,7 +298,7 @@ func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 	if err := executeSQL(fmt.Sprintf(`PUT '%s' @%s PARALLEL=%d SOURCE_COMPRESSION=gzip`, fileURI, stageName, parallel)); err != nil {
 		return fmt.Errorf("error uploading files: %s", err)
 	}
-	logger.Debug("files uploaded in %v", time.Since(started))
+	p.logger.Debug("files uploaded in %v", time.Since(started))
 
 	// import the data
 	var wg sync.WaitGroup
@@ -309,28 +309,28 @@ func (p *snowflakeDriver) Import(config internal.ImporterConfig) error {
 	for _, table := range config.Tables {
 		wg.Add(1)
 		go func(table string) {
-			defer util.RecoverPanic(logger)
+			defer util.RecoverPanic(p.logger)
 			defer func() {
 				sem.Release(1)
 				wg.Done()
 			}()
 			sem.Acquire(config.Context, 1)
 			if err := executeSQL(fmt.Sprintf(`COPY INTO %s FROM @%s MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE FILE_FORMAT = (TYPE = 'JSON' STRIP_OUTER_ARRAY = true COMPRESSION = 'GZIP') PATTERN='.*-%s-.*'`, util.QuoteIdentifier(table), stageName, table)); err != nil {
-				logger.Trace("error importing data: %s", err)
+				p.logger.Trace("error importing data: %s", err)
 				errorChannel <- fmt.Errorf("error importing %s data: %s", table, err)
 			}
 		}(table)
 	}
-	logger.Debug("waiting for all tables to import")
+	p.logger.Debug("waiting for all tables to import")
 	wg.Wait()
-	logger.Debug("all tables completed in %v", time.Since(started))
+	p.logger.Debug("all tables completed in %v", time.Since(started))
 
 	errs := make([]error, 0)
 done:
 	for {
 		select {
 		case err := <-errorChannel:
-			logger.Error("%s", err)
+			p.logger.Error("%s", err)
 			errs = append(errs, err)
 		default:
 			break done
@@ -372,6 +372,7 @@ func (p *snowflakeDriver) Help() string {
 
 // Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 func (p *snowflakeDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	p.logger = logger.WithPrefix("[snowflake]")
 	db, err := p.connectToDB(ctx, url)
 	if err != nil {
 		return err
@@ -394,8 +395,8 @@ func (p *snowflakeDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if _, ok := p.dbschema[schema.Table]; ok {
-		logger.Info("table already exists for: %s, truncating...", schema.Table)
-		if err := util.TruncateTable(ctx, logger, p.db, util.QuoteIdentifier(schema.Table)); err != nil {
+		logger.Info("table already exists for: %s, dropping and recreating...", schema.Table)
+		if err := util.DropTable(ctx, logger, p.db, util.QuoteIdentifier(schema.Table)); err != nil {
 			return err
 		}
 		delCount, err := p.config.Tracker.DeleteKeysWithPrefix("snowflake:" + schema.Table + ":")
@@ -403,7 +404,6 @@ func (p *snowflakeDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 			return fmt.Errorf("error deleting cache keys on table truncate: %w", err)
 		}
 		logger.Debug("deleted %d cache keys for table %s", delCount, schema.Table)
-		return nil
 	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)

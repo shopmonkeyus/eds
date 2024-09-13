@@ -15,17 +15,6 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-func getEndpointResolver(url string) aws.EndpointResolverWithOptionsFunc {
-	return func(_service, region string, _options ...interface{}) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			PartitionID:   "aws",
-			URL:           url,
-			SigningRegion: "us-east-1",
-			SigningMethod: "v4",
-		}, nil
-	}
-}
-
 type driverS3Test struct {
 }
 

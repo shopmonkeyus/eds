@@ -47,7 +47,7 @@ func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfE
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_catalog", p.dbname, failIfEmpty)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.logger, db, "table_catalog", p.dbname, failIfEmpty)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
@@ -81,11 +81,11 @@ func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.
 
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
 func (p *sqlserverDriver) Start(config internal.DriverConfig) error {
+	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
@@ -215,6 +215,7 @@ func (p *sqlserverDriver) ImportCompleted() error {
 
 // Import is called to import data from the source.
 func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
+	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
@@ -223,7 +224,6 @@ func (p *sqlserverDriver) Import(config internal.ImporterConfig) error {
 
 	p.importConfig = config
 	p.registry = config.SchemaRegistry
-	p.logger = config.Logger.WithPrefix("[sqlserver]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
 	p.pending = strings.Builder{}
 	p.count = 0
@@ -259,6 +259,7 @@ func (p *sqlserverDriver) Aliases() []string {
 
 // Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 func (p *sqlserverDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	p.logger = logger.WithPrefix("[sqlserver]")
 	db, err := p.connectToDB(ctx, url)
 	if err != nil {
 		return err
@@ -281,11 +282,10 @@ func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if _, ok := p.dbschema[schema.Table]; ok {
-		logger.Info("table already exists for: %s, truncating...", schema.Table)
-		if err := util.TruncateTable(ctx, logger, p.db, quoteIdentifier(schema.Table, true)); err != nil {
+		logger.Info("table already exists for: %s, dropping and recreating...", schema.Table)
+		if err := util.DropTable(ctx, logger, p.db, quoteIdentifier(schema.Table, true)); err != nil {
 			return err
 		}
-		return nil
 	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)

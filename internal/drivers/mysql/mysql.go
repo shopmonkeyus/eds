@@ -47,7 +47,7 @@ func (p *mysqlDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_schema", p.dbname, failIfEmpty)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.logger, db, "table_schema", p.dbname, failIfEmpty)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
@@ -81,11 +81,11 @@ func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, 
 
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
 func (p *mysqlDriver) Start(config internal.DriverConfig) error {
+	p.logger = config.Logger.WithPrefix("[mysql]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
 	}
-	p.logger = config.Logger.WithPrefix("[mysql]")
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
@@ -214,6 +214,7 @@ func (p *mysqlDriver) ImportCompleted() error {
 
 // Import is called to import data from the source.
 func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
+	p.logger = config.Logger.WithPrefix("[mysql]")
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return err
@@ -222,7 +223,6 @@ func (p *mysqlDriver) Import(config internal.ImporterConfig) error {
 
 	p.registry = config.SchemaRegistry
 	p.importConfig = config
-	p.logger = config.Logger.WithPrefix("[mysql]")
 	p.executor = util.SQLExecuter(config.Context, p.logger, db, config.DryRun)
 	p.pending = strings.Builder{}
 	p.count = 0
@@ -255,6 +255,7 @@ func (p *mysqlDriver) Help() string {
 
 // Test is called to test the drivers connectivity with the configured url. It should return an error if the test fails or nil if the test passes.
 func (p *mysqlDriver) Test(ctx context.Context, logger logger.Logger, url string) error {
+	p.logger = logger.WithPrefix("[mysql]")
 	db, err := p.connectToDB(ctx, url)
 	if err != nil {
 		return err
@@ -277,11 +278,10 @@ func (p *mysqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger,
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
 	if _, ok := p.dbschema[schema.Table]; ok {
-		logger.Info("table already exists for: %s, truncating...", schema.Table)
-		if err := util.TruncateTable(ctx, logger, p.db, quoteIdentifier(schema.Table)); err != nil {
+		logger.Info("table already exists for: %s, dropping and recreating...", schema.Table)
+		if err := util.DropTable(ctx, logger, p.db, quoteIdentifier(schema.Table)); err != nil {
 			return err
 		}
-		return nil
 	}
 	sql := createSQL(schema)
 	logger.Trace("migrate new table: %s", sql)
