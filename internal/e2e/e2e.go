@@ -68,7 +68,7 @@ func run(cmd string, args []string, cb runCallbackFunc) {
 		go cb(c)
 	}
 	if err := c.Run(); err != nil {
-		panic(err)
+		os.Exit(1)
 	}
 }
 
@@ -222,7 +222,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 			url := test.URL(tmpdir)
 			logger.Info("running test: %s", name)
 			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url, "--log-label", name}, nil)
-			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort), "--log-label", name, "--minPendingLatency", "1ms", "--maxPendingLatency", "1ms"}, func(c *exec.Cmd) {
+			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort), "--log-label", name, "--minPendingLatency", "1ms", "--maxPendingLatency", "1ms", "--no-restart"}, func(c *exec.Cmd) {
 				defer func() {
 					if c.Process != nil {
 						c.Process.Signal(os.Interrupt)

@@ -17,7 +17,7 @@ func TestBuildDBSchemaFromInfoSchema(t *testing.T) {
 
 	mock.ExpectQuery("SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_catalog = '1").WillReturnRows(sqlmock.NewRows([]string{"table_name", "column_name", "data_type"}).AddRow("table1", "column1", "int"))
 
-	res, err := BuildDBSchemaFromInfoSchema(context.Background(), db, "1")
+	res, err := BuildDBSchemaFromInfoSchema(context.Background(), db, "table_catalog", "1")
 	assert.NoError(t, err)
 	assert.NotNil(t, res)
 	assert.NotEmpty(t, res)

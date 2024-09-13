@@ -21,7 +21,7 @@ import (
 var (
 	eventHubEntityPath          = "shopmonkey-eds-test"
 	eventHubServiceBusNamespace = eventHubEntityPath + ".servicebus.windows.net"
-	eventHubSharedAccessKeyName = "sendreceive"
+	eventHubSharedAccessKeyName = "send"
 	eventHubSharedAccessKey     = os.Getenv("SM_EVENTHUB_SHARED_ACCESS_KEY")
 	eventHubEnabled             = false
 )

@@ -46,7 +46,7 @@ func (p *postgresqlDriver) refreshSchema(ctx context.Context, db *sql.DB) error 
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, p.dbname)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_catalog", p.dbname)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
@@ -303,6 +303,7 @@ func (p *postgresqlDriver) MigrateNewColumns(ctx context.Context, logger logger.
 	defer p.waitGroup.Done()
 	sqls := addNewColumnsSQL(logger, columns, schema, p.dbschema)
 	for _, sql := range sqls {
+		logger.Trace("migrating new columns: %s", sql)
 		_, err := p.db.ExecContext(ctx, sql)
 		if err != nil {
 			return err

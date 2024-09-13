@@ -282,6 +282,7 @@ var serverIgnoreFlags = map[string]bool{
 	"--url":            true,
 	"--server":         true,
 	"--keep-logs":      true,
+	"--no-restart":     true,
 }
 
 func collectCommandArgs() []string {
@@ -484,6 +485,7 @@ var serverCmd = &cobra.Command{
 		}
 		keepLogs := viper.GetBool("keep_logs")
 		verbose := mustFlagBool(cmd, "verbose", false)
+		noRestart := mustFlagBool(cmd, "no-restart", false)
 
 		// run the wrapper to handle the rest of the code from inside the wrapper
 		wrapper := mustFlagBool(cmd, "wrapper", false)
@@ -784,6 +786,9 @@ var serverCmd = &cobra.Command{
 			} else {
 				ec := result.ProcessState.ExitCode()
 				logger.Debug("import exit code: %d, last log line: %s", ec, result.LastErrorLines)
+				if noRestart {
+					os.Exit(ec)
+				}
 				switch ec {
 				case 0:
 					return true, true, nil, nil
@@ -1004,6 +1009,9 @@ var serverCmd = &cobra.Command{
 				failures++
 			} else {
 				ec := result.ProcessState.ExitCode()
+				if noRestart {
+					os.Exit(ec)
+				}
 				if ec != exitCodeIncorrectUsage {
 					logFile, err := getRemainingLog(sessionLogsDir)
 					if err != nil {
@@ -1161,4 +1169,6 @@ func init() {
 	serverCmd.Flags().MarkHidden("wrapper")
 	serverCmd.Flags().Int("parent", -1, "the parent pid")
 	serverCmd.Flags().MarkHidden("parent")
+	serverCmd.Flags().Bool("no-restart", false, "do not restart the server if it exits")
+	serverCmd.Flags().MarkHidden("no-restart")
 }
