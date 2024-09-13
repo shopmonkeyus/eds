@@ -39,7 +39,7 @@ var _ internal.Importer = (*mysqlDriver)(nil)
 var _ internal.DriverHelp = (*mysqlDriver)(nil)
 var _ importer.Handler = (*mysqlDriver)(nil)
 
-func (p *mysqlDriver) refreshSchema(ctx context.Context, db *sql.DB) error {
+func (p *mysqlDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
 		dbname, err := util.GetCurrentDatabase(ctx, db, "DATABASE()")
 		if err != nil {
@@ -47,7 +47,7 @@ func (p *mysqlDriver) refreshSchema(ctx context.Context, db *sql.DB) error {
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_schema", p.dbname)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_schema", p.dbname, failIfEmpty)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
@@ -71,7 +71,7 @@ func (p *mysqlDriver) connectToDB(ctx context.Context, urlstr string) (*sql.DB, 
 		return nil, err
 	}
 
-	if err := p.refreshSchema(ctx, db); err != nil {
+	if err := p.refreshSchema(ctx, db, false); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -288,7 +288,7 @@ func (p *mysqlDriver) MigrateNewTable(ctx context.Context, logger logger.Logger,
 	if _, err := p.db.ExecContext(ctx, sql); err != nil {
 		return err
 	}
-	return p.refreshSchema(ctx, p.db)
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
@@ -304,7 +304,7 @@ func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logge
 		}
 		logger.Debug("migrated new columns: %s", sql)
 	}
-	return p.refreshSchema(ctx, p.db)
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 func init() {

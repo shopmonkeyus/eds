@@ -39,7 +39,7 @@ var _ internal.Importer = (*sqlserverDriver)(nil)
 var _ internal.DriverHelp = (*sqlserverDriver)(nil)
 var _ importer.Handler = (*sqlserverDriver)(nil)
 
-func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB) error {
+func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
 		dbname, err := util.GetCurrentDatabase(ctx, db, "DB_NAME()")
 		if err != nil {
@@ -47,7 +47,7 @@ func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB) error {
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_catalog", p.dbname)
+	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, db, "table_catalog", p.dbname, failIfEmpty)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
@@ -71,7 +71,7 @@ func (p *sqlserverDriver) connectToDB(ctx context.Context, urlstr string) (*sql.
 		return nil, err
 	}
 
-	if err := p.refreshSchema(ctx, db); err != nil {
+	if err := p.refreshSchema(ctx, db, false); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -292,7 +292,7 @@ func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 	if _, err := p.db.ExecContext(ctx, sql); err != nil {
 		return err
 	}
-	return p.refreshSchema(ctx, p.db)
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 // MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
@@ -308,7 +308,7 @@ func (p *sqlserverDriver) MigrateNewColumns(ctx context.Context, logger logger.L
 		}
 		logger.Debug("migrated new columns: %s", sql)
 	}
-	return p.refreshSchema(ctx, p.db)
+	return p.refreshSchema(ctx, p.db, true)
 }
 
 func init() {

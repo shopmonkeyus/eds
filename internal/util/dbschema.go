@@ -18,7 +18,7 @@ func GetCurrentDatabase(ctx context.Context, db *sql.DB, fn string) (string, err
 }
 
 // BuildDBSchemaFromInfoSchema builds a database schema from the information schema.
-func BuildDBSchemaFromInfoSchema(ctx context.Context, db *sql.DB, column string, value string) (internal.DatabaseSchema, error) {
+func BuildDBSchemaFromInfoSchema(ctx context.Context, db *sql.DB, column string, value string, failIfEmpty bool) (internal.DatabaseSchema, error) {
 	res := make(internal.DatabaseSchema)
 	q := fmt.Sprintf("SELECT table_name, column_name, data_type FROM information_schema.columns WHERE %s = '%s'", column, value)
 	rows, err := db.QueryContext(ctx, q)
@@ -36,7 +36,7 @@ func BuildDBSchemaFromInfoSchema(ctx context.Context, db *sql.DB, column string,
 		}
 		res[tableName][columnName] = dataType
 	}
-	if len(res) == 0 {
+	if failIfEmpty && len(res) == 0 {
 		return nil, fmt.Errorf("no tables found using %s = %s", column, value)
 	}
 	return res, nil
