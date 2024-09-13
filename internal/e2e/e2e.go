@@ -163,6 +163,15 @@ func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetS
 	return readResult(*event)
 }
 
+func runDBChangeInsertTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload2)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
 func runDBChangeUpdateTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion, defaultPayload)
 	if err != nil {
@@ -243,6 +252,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					atomic.AddUint32(&fail, 1)
 					return
 				}
+				testStarted := time.Now()
 				if err := runDBChangeInsertTest(logger, nc, js, func(event internal.DBChangeEvent) error {
 					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
@@ -250,8 +260,9 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					atomic.AddUint32(&fail, 1)
 				} else {
 					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange insert test: %s succeeded in %s", name, time.Since(ts))
+					logger.Info("✅ dbchange insert test: %s succeeded in %s", name, time.Since(testStarted))
 				}
+				testStarted = time.Now()
 				if err := runDBChangeNewTableTest(logger, nc, js, func(event internal.DBChangeEvent) error {
 					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
@@ -259,8 +270,9 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					logger.Error("🔴 dbchange new table test: %s failed: %s", name, err)
 				} else {
 					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange new table test: %s succeeded in %s", name, time.Since(ts))
+					logger.Info("✅ dbchange new table test: %s succeeded in %s", name, time.Since(testStarted))
 				}
+				testStarted = time.Now()
 				if err := runDBChangeUpdateTest(logger, nc, js, func(event internal.DBChangeEvent) error {
 					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
@@ -268,8 +280,9 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					logger.Error("🔴 dbchange update test: %s failed: %s", name, err)
 				} else {
 					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange update test: %s succeeded in %s", name, time.Since(ts))
+					logger.Info("✅ dbchange update test: %s succeeded in %s", name, time.Since(testStarted))
 				}
+				testStarted = time.Now()
 				if err := runDBChangeDeleteTest(logger, nc, js, func(event internal.DBChangeEvent) error {
 					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
@@ -277,8 +290,9 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					logger.Error("🔴 dbchange delete test: %s failed: %s", name, err)
 				} else {
 					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange delete test: %s succeeded in %s", name, time.Since(ts))
+					logger.Info("✅ dbchange delete test: %s succeeded in %s", name, time.Since(testStarted))
 				}
+				testStarted = time.Now()
 				if err := runDBChangeNewTableTest2(logger, nc, js, func(event internal.DBChangeEvent) error {
 					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
@@ -286,8 +300,9 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					logger.Error("🔴 dbchange new table (#2) test: %s failed: %s", name, err)
 				} else {
 					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange new table (#2) test: %s succeeded in %s", name, time.Since(ts))
+					logger.Info("✅ dbchange new table (#2) test: %s succeeded in %s", name, time.Since(testStarted))
 				}
+				testStarted = time.Now()
 				if err := runDBChangeNewColumnTest(logger, nc, js, func(event internal.DBChangeEvent) error {
 					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
@@ -295,8 +310,9 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					logger.Error("🔴 dbchange new column test: %s failed: %s", name, err)
 				} else {
 					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange new column: %s succeeded in %s", name, time.Since(ts))
+					logger.Info("✅ dbchange new column: %s succeeded in %s", name, time.Since(testStarted))
 				}
+				testStarted = time.Now()
 				if err := runDBChangeNewColumnTest2(logger, nc, js, func(event internal.DBChangeEvent) error {
 					return test.Validate(_logger, tmpdir, url, event)
 				}); err != nil {
@@ -304,7 +320,17 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					logger.Error("🔴 dbchange new column (#2) test: %s failed: %s", name, err)
 				} else {
 					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange new column (#2) test: %s succeeded in %s", name, time.Since(ts))
+					logger.Info("✅ dbchange new column (#2) test: %s succeeded in %s", name, time.Since(testStarted))
+				}
+				testStarted = time.Now()
+				if err := runDBChangeInsertTest2(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					logger.Error("🔴 dbchange insert (#2) test: %s failed: %s", name, err)
+					atomic.AddUint32(&fail, 1)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange insert (#2) test: %s succeeded in %s", name, time.Since(testStarted))
 				}
 			})
 			wg.Wait()
