@@ -405,24 +405,24 @@ func (c *Consumer) bufferer() {
 					return
 				}
 				forceFlushAfterMigration = migrated
+			}
 
-				// check to see if the schema matches the incoming object
-				if evt.Operation != "DELETE" {
-					schema, err := c.registry.GetSchema(evt.Table, evt.ModelVersion)
-					if err != nil {
-						c.handleError(fmt.Errorf("error getting schema for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err))
-						return
-					}
-					object, err := evt.GetObject()
-					if err != nil {
-						c.handleError(fmt.Errorf("error getting object for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err))
-						return
-					}
-					diff := util.JSONDiff(object, schema.Columns())
-					if len(diff) > 0 {
-						c.handleError(errors.Join(ErrSchemaMismatch, fmt.Errorf("table: %s object has extra fields (%s) that are not in the model. %v", evt.Table, strings.Join(diff, ","), util.JSONStringify(evt))))
-						return
-					}
+			// check to see if the schema matches the incoming object
+			if evt.Operation != "DELETE" {
+				schema, err := c.registry.GetSchema(evt.Table, evt.ModelVersion)
+				if err != nil {
+					c.handleError(fmt.Errorf("error getting schema for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err))
+					return
+				}
+				object, err := evt.GetObject()
+				if err != nil {
+					c.handleError(fmt.Errorf("error getting object for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err))
+					return
+				}
+				diff := util.JSONDiff(object, schema.Columns())
+				if len(diff) > 0 {
+					c.handleError(errors.Join(ErrSchemaMismatch, fmt.Errorf("table: %s object has extra fields (%s) that are not in the model. %v", evt.Table, strings.Join(diff, ","), util.JSONStringify(evt))))
+					return
 				}
 			}
 

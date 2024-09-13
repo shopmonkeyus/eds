@@ -57,7 +57,7 @@ var forkCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		logger := newLogger(cmd)
-		companyIds, _ := cmd.Flags().GetStringSlice("company-id")
+		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
 		datadir := mustFlagString(cmd, "data-dir", true)
 		logDir := mustFlagString(cmd, "logs-dir", true)
 		sink, err := newLogFileSink(logDir)
