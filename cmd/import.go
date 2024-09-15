@@ -51,6 +51,7 @@ type exportJobCreateResponse struct {
 }
 
 type exportJobCreateRequest struct {
+	TimeOffset  *int64   `json:"timeOffset,omitempty"`
 	CompanyIDs  []string `json:"companyIds,omitempty"`
 	LocationIDs []string `json:"locationIds,omitempty"`
 	Tables      []string `json:"tables,omitempty"`
@@ -360,6 +361,9 @@ var importCmd = &cobra.Command{
 	Short: "Import data from your Shopmonkey instance to your system",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		logger := newLogger(cmd)
+		logger = logger.WithPrefix("[import]")
+
 		noconfirm, _ := cmd.Flags().GetBool("no-confirm")
 		driverUrl := mustFlagString(cmd, "url", true)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -371,9 +375,19 @@ var importCmd = &cobra.Command{
 		dir := mustFlagString(cmd, "dir", false)
 		schemaOnly := mustFlagBool(cmd, "schema-only", false)
 		validateOnly := mustFlagBool(cmd, "validate-only", false)
+		timeOffset := mustFlagString(cmd, "timeOffset", false)
+		noDelete := mustFlagBool(cmd, "no-delete", false)
+		var timeOffsetUnixMilli *int64
 
-		logger := newLogger(cmd)
-		logger = logger.WithPrefix("[import]")
+		if timeOffset != "" {
+			tv, err := time.Parse(time.RFC3339, timeOffset)
+			if err != nil {
+				logger.Fatal("error parsing time offset: %s", err)
+			}
+			t := tv.UnixMilli()
+			timeOffsetUnixMilli = &t
+		}
+
 		defer util.RecoverPanic(logger)
 
 		dataDir := getDataDir(cmd, logger)
@@ -469,7 +483,7 @@ var importCmd = &cobra.Command{
 			skipDeleteConfirm = !importerHelp.SupportsDelete()
 		}
 
-		if !dryRun && !noconfirm && !skipDeleteConfirm && !schemaOnly {
+		if !dryRun && !noconfirm && !skipDeleteConfirm && !schemaOnly && !noDelete {
 
 			meta, err := internal.GetDriverMetadataForURL(driverUrl)
 			if err != nil {
@@ -546,6 +560,7 @@ var importCmd = &cobra.Command{
 						Tables:      only,
 						CompanyIDs:  companyIds,
 						LocationIDs: locationIds,
+						TimeOffset:  timeOffsetUnixMilli,
 					})
 					if err != nil {
 						logger.Fatal("error creating export job: %s", err)
@@ -648,6 +663,7 @@ var importCmd = &cobra.Command{
 			Single:          single,
 			SchemaValidator: validator,
 			SchemaOnly:      schemaOnly,
+			NoDelete:        noDelete,
 		}); err != nil {
 			logger.Error("error running import: %s", err)
 			return
@@ -692,9 +708,11 @@ func init() {
 	importCmd.Flags().Bool("dry-run", false, "only simulate loading but don't actually make changes")
 	importCmd.Flags().Bool("no-confirm", false, "skip the confirmation prompt")
 	importCmd.Flags().Bool("no-cleanup", false, "skip removing the temp directory")
+	importCmd.Flags().Bool("no-delete", false, "skip dropping tables and recreating them")
 	importCmd.Flags().String("dir", "", "restart reading files from this existing import directory instead of downloading again")
 	importCmd.Flags().Bool("schema-only", false, "run the schema creation only, skipping the data import")
 	importCmd.Flags().Bool("validate-only", false, "run the validation only, skipping the data import")
+	importCmd.Flags().String("timeOffset", "", "timestamp in RFC3339 format to export data with records updated after this time")
 
 	// tuning and testing flags
 	importCmd.Flags().Int("parallel", 4, "the number of parallel upload tasks (if supported by driver)")

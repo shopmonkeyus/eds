@@ -31,8 +31,10 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 	if err != nil {
 		return fmt.Errorf("unable to get schema: %w", err)
 	}
-	if err := handler.CreateDatasource(schema); err != nil {
-		return err
+	if !config.NoDelete {
+		if err := handler.CreateDatasource(schema); err != nil {
+			return err
+		}
 	}
 	if config.SchemaOnly {
 		return nil

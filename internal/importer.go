@@ -47,6 +47,9 @@ type ImporterConfig struct {
 
 	// Only create the schema but do not import any data.
 	SchemaOnly bool
+
+	// NoDelete is true if the importer should not delete the tables before importing.
+	NoDelete bool
 }
 
 // Importer is the interface that must be implemented by all importer implementations
