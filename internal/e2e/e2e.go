@@ -358,22 +358,6 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					atomic.AddUint32(&pass, 1)
 					logger.Info("✅ dbchange insert (#2) test: %s succeeded in %s", name, time.Since(testStarted))
 				}
-
-				// NOTE: this must be the last test because it will exit the process
-				testStarted = time.Now()
-				lookingForExitCode = 6 /*exitCodeSchemaMismatch*/
-				if err := runDBChangeSchemaMismatchTest(logger, nc, js, func(event internal.DBChangeEvent) error {
-					if foundExitCode {
-						return nil
-					}
-					return fmt.Errorf("expected exit code %d but it was not returned", lookingForExitCode)
-				}); err != nil {
-					logger.Error("🔴 dbchange schema mismatch test: %s failed: %s", name, err)
-					atomic.AddUint32(&fail, 1)
-				} else {
-					atomic.AddUint32(&pass, 1)
-					logger.Info("✅ dbchange schema mismatch test: %s succeeded in %s", name, time.Since(testStarted))
-				}
 			}, func(ec int) bool {
 				if ec == lookingForExitCode {
 					foundExitCode = true

@@ -28,7 +28,6 @@ const (
 )
 
 var ErrConsumerAlreadyRunning = errors.New("consumer already running")
-var ErrSchemaMismatch = errors.New("schema mismatch")
 
 // Driver is a local interface which slims down the driver to only the methods we need to make it easier to test.
 type Driver interface {
