@@ -421,8 +421,10 @@ func (c *Consumer) bufferer() {
 				}
 				diff := util.JSONDiff(object, schema.Columns())
 				if len(diff) > 0 {
-					c.handleError(errors.Join(ErrSchemaMismatch, fmt.Errorf("table: %s object has extra fields (%s) that are not in the model. %v", evt.Table, strings.Join(diff, ","), util.JSONStringify(evt))))
-					return
+					if err := evt.OmitProperties(diff...); err != nil {
+						c.handleError(fmt.Errorf("error omitting extra properties: %s properties for table: %s, model version: %s: %w", diff, evt.Table, evt.ModelVersion, err))
+						return
+					}
 				}
 			}
 
