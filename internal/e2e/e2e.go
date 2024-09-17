@@ -241,7 +241,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 			name := test.Name()
 			url := test.URL(tmpdir)
 			var lookingForExitCode int
-			var foundExitCode bool
+			// var foundExitCode bool
 			logger.Info("running test: %s", name)
 			run("import", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "--no-confirm", "--schema-only", "--api-key", apikey, "--url", url, "--log-label", name}, nil, nil)
 			run("server", []string{"--api-url", apiurl, "--url", url, "-v", "-d", tmpdir, "--server", srv.ClientURL(), "--port", strconv.Itoa(healthPort), "--log-label", name, "--minPendingLatency", "1ms", "--maxPendingLatency", "1ms", "--no-restart"}, func(c *exec.Cmd) {
@@ -360,7 +360,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 				}
 			}, func(ec int) bool {
 				if ec == lookingForExitCode {
-					foundExitCode = true
+					// foundExitCode = true  --> leaving this in for now
 					return true
 				}
 				return false
