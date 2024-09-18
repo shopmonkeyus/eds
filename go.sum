@@ -303,6 +303,8 @@ github.com/shopmonkeyus/go-common v0.0.72 h1:4lmU/Kux8UvYIbO8di6nVoZjfRd2ioSnLU9
 github.com/shopmonkeyus/go-common v0.0.72/go.mod h1:rMIMbPqqoyY84QQYPAc6DRITqxBTby+YAUXhbH/OJwc=
 github.com/shopmonkeyus/go-common v0.0.73 h1:UBJ409rx1ULxje4e+f44+qlOyNPnDfozY1DbV9g4W+I=
 github.com/shopmonkeyus/go-common v0.0.73/go.mod h1:rMIMbPqqoyY84QQYPAc6DRITqxBTby+YAUXhbH/OJwc=
+github.com/shopmonkeyus/go-common v0.0.74 h1:CPc0bO1z3mDBdbby9/6uCn+lwy8TVerHrT8vZXl+NMY=
+github.com/shopmonkeyus/go-common v0.0.74/go.mod h1:rMIMbPqqoyY84QQYPAc6DRITqxBTby+YAUXhbH/OJwc=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/snowflakedb/gosnowflake v1.11.1 h1:E91s8vBOSroaSTLsyjO4QPkEuzGmZcCxEFQLg214mvk=
