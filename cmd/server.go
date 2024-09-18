@@ -413,7 +413,7 @@ func runWrapperLoop(logger logger.Logger) {
 				logger.Trace("upgrade failed, resetting to original process and restarting")
 				continue
 			}
-			if exitCode == 0 || exitCode == 1 || exitCode == exitCodeSchemaMismatch {
+			if exitCode == 0 || exitCode == 1 {
 				completed = true
 			} else {
 				failures++
@@ -1034,11 +1034,6 @@ var serverCmd = &cobra.Command{
 					logger.Info("nats disconnected, retrying in 5 seconds")
 					time.Sleep(time.Second * 5)
 					continue
-				}
-				// this is a special exit code that is returned when there is a schema mismatch
-				if ec == exitCodeSchemaMismatch {
-					notificationConsumer.Stop()
-					os.Exit(ec)
 				}
 				if ec == 0 {
 					// on success, remove the logs

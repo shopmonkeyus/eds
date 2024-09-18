@@ -47,6 +47,19 @@ func (c *DBChangeEvent) GetPrimaryKey() string {
 	return ""
 }
 
+// OmitProperties removes the specified properties from the object
+func (c *DBChangeEvent) OmitProperties(props ...string) error {
+	object, err := c.GetObject()
+	if err != nil {
+		return err
+	}
+	for _, prop := range props {
+		delete(object, prop)
+	}
+	c.object = object
+	return nil
+}
+
 func (c *DBChangeEvent) GetObject() (map[string]any, error) {
 	if len(c.After) > 0 {
 		if c.object == nil {
