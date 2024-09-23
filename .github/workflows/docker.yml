@@ -77,19 +77,15 @@ jobs:
       - name: Build and push to Artifact Registry
         uses: docker/build-push-action@v6
         id: push
-        env:
-          BUILD_DATE: ${{ steps.date.outputs.date }}
-          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
-          GIT_SHA: ${{ github.sha }}
         with:
           push: true
           context: .
           file: ./Dockerfile
           tags: ${{ steps.construct_tags.outputs.tags }}
           build-args: |
-            BUILD_DATE=$BUILD_DATE
-            GIT_BRANCH=$GIT_BRANCH 
-            GIT_SHA=$GIT_SHA
+            BUILD_DATE=${{ steps.date.outputs.date }}
+            GIT_BRANCH=${{ steps.branch-name.outputs.current_branch }}
+            GIT_SHA=${{ github.sha }}
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
