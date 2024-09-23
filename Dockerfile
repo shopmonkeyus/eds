@@ -5,7 +5,9 @@ ENV APP_HOME=/go/src/github.com/shopmonkeyus/eds
 WORKDIR "$APP_HOME"
 COPY . .
 
-RUN go mod download && go mod verify && go build -o eds
+ARG VERSION
+
+RUN go build -ldflags "-s -w -X main.version=$VERSION" -o eds
 
 FROM alpine:3.20
 

@@ -66,6 +66,7 @@ jobs:
 
           # default to the SHA
           TAGS="$SHA"
+          VERSION="$SHA"
 
           # if we're on the main branch, add the beta tag
           if [[ $GITHUB_REF == 'refs/heads/main' ]]; then
@@ -74,10 +75,11 @@ jobs:
 
           # if it's a release, use the version and latest tags
           if [[ $GITHUB_EVENT_NAME == 'release' ]]; then
-            VERSION_TAG=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
-            TAGS="$TAGS $VERSION_TAG latest"
-            echo release_version=$RELEASE_VERSION >> $GITHUB_OUTPUT
+            VERSION=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
+            TAGS="$TAGS $VERSION latest"
           fi
+
+          echo version=$VERSION >> $GITHUB_OUTPUT
 
           for TAG in $TAGS; do
             TAG_LIST+="us-docker.pkg.dev/${{ env.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:$TAG,"
@@ -100,7 +102,7 @@ jobs:
             BUILD_DATE=${{ steps.date.outputs.date }}
             GIT_BRANCH=${{ steps.branch-name.outputs.current_branch }}
             GIT_SHA=${{ steps.construct_tags.outputs.sha }}
-            VERSION=${{ steps.construct_tags.outputs.release_version }}
+            VERSION=${{ steps.construct_tags.outputs.version }}
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
