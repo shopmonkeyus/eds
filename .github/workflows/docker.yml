@@ -58,9 +58,9 @@ jobs:
           SHA=""
           if [ "$GIT_BRANCH" = "main" ];
           then
-            $SHA=$MERGE_SHA
+            SHA=$MERGE_SHA
           else
-            $SHA=$PR_SHA
+            SHA=$PR_SHA
           fi
           echo sha=$SHA >> $GITHUB_OUTPUT
 
