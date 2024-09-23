@@ -50,9 +50,23 @@ jobs:
 
       - name: Construct the tags
         id: construct_tags
+        env:
+          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
         run: |
+          SHA=""
+          if [ "$GIT_BRANCH" = "main" ];
+          then
+            SHA=$MERGE_SHA
+          else
+            SHA=$PR_SHA
+          fi
+          echo sha=$SHA >> $GITHUB_OUTPUT
+
           # default to the SHA
-          TAGS=${{ github.sha }}
+          TAGS="$SHA"
+          VERSION="$SHA"
 
           # if we're on the main branch, add the beta tag
           if [[ $GITHUB_REF == 'refs/heads/main' ]]; then
@@ -61,9 +75,11 @@ jobs:
 
           # if it's a release, use the version and latest tags
           if [[ $GITHUB_EVENT_NAME == 'release' ]]; then
-            VERSION_TAG=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
-            TAGS="$TAGS $VERSION_TAG latest"
+            VERSION=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
+            TAGS="$TAGS $VERSION latest"
           fi
+
+          echo version=$VERSION >> $GITHUB_OUTPUT
 
           for TAG in $TAGS; do
             TAG_LIST+="us-docker.pkg.dev/${{ env.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:$TAG,"
@@ -77,19 +93,16 @@ jobs:
       - name: Build and push to Artifact Registry
         uses: docker/build-push-action@v6
         id: push
-        env:
-          BUILD_DATE: ${{ steps.date.outputs.date }}
-          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
-          GIT_SHA: ${{ github.sha }}
         with:
           push: true
           context: .
           file: ./Dockerfile
           tags: ${{ steps.construct_tags.outputs.tags }}
           build-args: |
-            BUILD_DATE=$BUILD_DATE
-            GIT_BRANCH=$GIT_BRANCH 
-            GIT_SHA=$GIT_SHA
+            BUILD_DATE=${{ steps.date.outputs.date }}
+            GIT_BRANCH=${{ steps.branch-name.outputs.current_branch }}
+            GIT_SHA=${{ steps.construct_tags.outputs.sha }}
+            VERSION=${{ steps.construct_tags.outputs.version }}
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
