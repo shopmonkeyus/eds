@@ -50,9 +50,22 @@ jobs:
 
       - name: Construct the tags
         id: construct_tags
+        env:
+          GIT_BRANCH: ${{ steps.branch-name.outputs.current_branch }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
         run: |
+          SHA=""
+          if [ "$GIT_BRANCH" = "main" ];
+          then
+            $SHA=$MERGE_SHA
+          else
+            $SHA=$PR_SHA
+          fi
+          echo sha=$SHA >> $GITHUB_OUTPUT
+
           # default to the SHA
-          TAGS=${{ github.sha }}
+          TAGS="$SHA"
 
           # if we're on the main branch, add the beta tag
           if [[ $GITHUB_REF == 'refs/heads/main' ]]; then
@@ -63,6 +76,7 @@ jobs:
           if [[ $GITHUB_EVENT_NAME == 'release' ]]; then
             VERSION_TAG=$(echo $GITHUB_REF | sed 's/refs\/tags\///')
             TAGS="$TAGS $VERSION_TAG latest"
+            echo release_version=$RELEASE_VERSION >> $GITHUB_OUTPUT
           fi
 
           for TAG in $TAGS; do
@@ -85,7 +99,8 @@ jobs:
           build-args: |
             BUILD_DATE=${{ steps.date.outputs.date }}
             GIT_BRANCH=${{ steps.branch-name.outputs.current_branch }}
-            GIT_SHA=${{ github.sha }}
+            GIT_SHA=${{ steps.construct_tags.outputs.sha }}
+            VERSION=${{ steps.construct_tags.outputs.release_version }}
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
