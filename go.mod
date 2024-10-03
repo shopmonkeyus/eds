@@ -33,7 +33,7 @@ require (
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/shopmonkeyus/go-common v0.0.75
-	github.com/snowflakedb/gosnowflake v1.11.1
+	github.com/snowflakedb/gosnowflake v1.11.2
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.9.0
