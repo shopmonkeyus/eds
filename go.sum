@@ -36,10 +36,14 @@ github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
 github.com/ProtonMail/go-crypto v1.1.0-alpha.5-proton h1:KVBEgU3CJpmzLChnLiSuEyCuhGhcMt3eOST+7A+ckto=
 github.com/ProtonMail/go-crypto v1.1.0-alpha.5-proton/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
+github.com/ProtonMail/go-crypto v1.1.0-beta.0-proton h1:ZGewsAoeSirbUS5cO8L0FMQA+iSop9xR1nmFYifDBPo=
+github.com/ProtonMail/go-crypto v1.1.0-beta.0-proton/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
 github.com/ProtonMail/gopenpgp/v3 v3.0.0-alpha.4-proton h1:Gh/fxUy/ugAEvE1p+BuLT8NZ3kDqOD+QbYrIzLJWhkA=
 github.com/ProtonMail/gopenpgp/v3 v3.0.0-alpha.4-proton/go.mod h1:LuHMmhzP13vNgWzMFSpxSQCiLp0blcN9H9hqGBn4RWQ=
 github.com/ProtonMail/gopenpgp/v3 v3.0.0-beta.0-proton h1:oUilGtv2L87epmj8c7cJIpOk4r7Q2sFHewmcT4djLKE=
 github.com/ProtonMail/gopenpgp/v3 v3.0.0-beta.0-proton/go.mod h1:LuHMmhzP13vNgWzMFSpxSQCiLp0blcN9H9hqGBn4RWQ=
+github.com/ProtonMail/gopenpgp/v3 v3.0.0-beta.1-proton h1:WwNSUldLJ2Di+gvRK8ePCsY1HEgieVGyWhD90MGaSak=
+github.com/ProtonMail/gopenpgp/v3 v3.0.0-beta.1-proton/go.mod h1:TBpqWZ9IzA7g3TEzNA9Fwv/nA/eYpjcvYQBq+FX+tE4=
 github.com/apache/arrow/go/v15 v15.0.2 h1:60IliRbiyTWCWjERBCkO1W4Qun9svcYoZrSLcyOsMLE=
 github.com/apache/arrow/go/v15 v15.0.2/go.mod h1:DGXsR3ajT524njufqf95822i+KTh+yea1jass9YXgjA=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
