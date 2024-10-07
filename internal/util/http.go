@@ -2,12 +2,12 @@ package util
 
 import (
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/shopmonkeyus/go-common/logger"
-	"golang.org/x/exp/rand"
 )
 
 const (

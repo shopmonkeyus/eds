@@ -444,7 +444,7 @@ var importCmd = &cobra.Command{
 		}
 
 		// load the schema from the api fresh
-		registry, err := registry.NewAPIRegistry(ctx, logger, apiURL, theTracker)
+		registry, err := registry.NewAPIRegistry(ctx, logger, apiURL, Version, theTracker)
 		if err != nil {
 			logger.Fatal("error creating registry: %s", err)
 		}

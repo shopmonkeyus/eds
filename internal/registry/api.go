@@ -21,13 +21,14 @@ const (
 )
 
 type APIRegistry struct {
-	logger  logger.Logger
-	apiURL  string
-	schema  internal.SchemaMap
-	objects tableToObjectNameMap
-	tracker *tracker.Tracker
-	cache   util.Cache
-	once    sync.Once
+	logger    logger.Logger
+	apiURL    string
+	userAgent string
+	schema    internal.SchemaMap
+	objects   tableToObjectNameMap
+	tracker   *tracker.Tracker
+	cache     util.Cache
+	once      sync.Once
 }
 
 var _ internal.SchemaRegistry = (*APIRegistry)(nil)
@@ -136,7 +137,12 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 	if object == "" {
 		object = table
 	}
-	resp, err := http.Get(r.apiURL + "/v3/schema/" + object + "/" + version)
+	req, err := http.NewRequest("GET", r.apiURL+"/v3/schema/"+object+"/"+version, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %s", err)
+	}
+	req.Header.Set("User-Agent", r.userAgent)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching schema: %s", err)
 	}
@@ -170,12 +176,14 @@ type errorResponse struct {
 }
 
 // NewAPIRegistry creates a new schema registry from the API. This implementation doesn't support versioning.
-func NewAPIRegistry(ctx context.Context, logger logger.Logger, apiURL string, tracker *tracker.Tracker) (internal.SchemaRegistry, error) {
+func NewAPIRegistry(ctx context.Context, logger logger.Logger, apiURL string, edsVersion string, tracker *tracker.Tracker) (internal.SchemaRegistry, error) {
 	var registry APIRegistry
+	registry.userAgent = "Shopmonkey EDS Server/" + edsVersion
 	req, err := http.NewRequest("GET", apiURL+"/v3/schema", nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
+	req.Header.Set("User-Agent", registry.userAgent)
 	retry := util.NewHTTPRetry(req, util.WithLogger(logger))
 	resp, err := retry.Do()
 	if err != nil {

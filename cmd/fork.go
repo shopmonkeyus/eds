@@ -97,7 +97,7 @@ var forkCmd = &cobra.Command{
 		defer tracker.Close()
 
 		apiUrl := mustFlagString(cmd, "api-url", true)
-		schemaRegistry, err := registry.NewAPIRegistry(ctx, logger, apiUrl, tracker)
+		schemaRegistry, err := registry.NewAPIRegistry(ctx, logger, apiUrl, Version, tracker)
 		if err != nil {
 			logger.Error("error creating registry: %s", err)
 			os.Exit(exitCodeIncorrectUsage)
