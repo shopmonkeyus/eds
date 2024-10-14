@@ -3,7 +3,7 @@ module github.com/shopmonkeyus/eds
 go 1.23
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.2.2
+	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.2.3
 	github.com/BurntSushi/toml v1.4.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/ProtonMail/gopenpgp/v3 v3.0.0-beta.2-proton
