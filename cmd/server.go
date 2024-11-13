@@ -971,7 +971,7 @@ var serverCmd = &cobra.Command{
 			logger.Trace("creds written to %s", credsFile)
 			if err := notificationConsumer.Start(credsFile); err != nil {
 				if strings.Contains(err.Error(), "error connecting to NATS") {
-					logger.Trace("error from nats:", err)
+					logger.Trace("error from nats: %s", err)
 					logger.Trace("nats not available, retrying in 5 seconds")
 					time.Sleep(time.Second * 5)
 					continue
