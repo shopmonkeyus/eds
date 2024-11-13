@@ -36,7 +36,7 @@ func TestQuoteIdentifier(t *testing.T) {
 }
 
 func getOrderSchema() *internal.Schema {
-	buf, err := os.ReadFile("testdata/order_schema_b041c12fbf8d1103.json")
+	buf, err := os.ReadFile("../testdata/order_schema_b041c12fbf8d1103.json")
 	if err != nil {
 		panic(err)
 	}
