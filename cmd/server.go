@@ -52,7 +52,7 @@ func writeCredsToFile(data string, filename string) error {
 
 var errAlreadyRunning = errors.New("already running")
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*api.EdsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string, companyIds []string) (*api.EdsSession, error) {
 	var body api.SessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -76,6 +76,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Version = Version
 	body.OsInfo = osinfo
 	body.ServerID = edsServerId
+	body.CompanyIDs = companyIds
 
 	if driverUrl != "" {
 		driverMetadata, err := internal.GetDriverMetadataForURL(driverUrl)
@@ -936,13 +937,15 @@ var serverCmd = &cobra.Command{
 			}
 		}()
 
+		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
+
 		// main loop
 		var failures int
 		for {
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
+			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId, companyIds)
 			if err != nil {
 				if errors.Is(err, errAlreadyRunning) {
 					logger.Info("another eds server is already running for this server (id: %s). Retrying in 5 seconds", edsServerId)
@@ -968,6 +971,7 @@ var serverCmd = &cobra.Command{
 			logger.Trace("creds written to %s", credsFile)
 			if err := notificationConsumer.Start(credsFile); err != nil {
 				if strings.Contains(err.Error(), "error connecting to NATS") {
+					logger.Trace("error from nats:", err)
 					logger.Trace("nats not available, retrying in 5 seconds")
 					time.Sleep(time.Second * 5)
 					continue

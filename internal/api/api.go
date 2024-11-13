@@ -10,13 +10,14 @@ type DriverMeta struct {
 }
 
 type SessionStart struct {
-	Version   string      `json:"version"`
-	Hostname  string      `json:"hostname"`
-	IPAddress string      `json:"ipAddress"`
-	MachineId string      `json:"machineId"`
-	OsInfo    any         `json:"osinfo"`
-	Driver    *DriverMeta `json:"driver,omitempty"`
-	ServerID  string      `json:"serverId"`
+	Version    string      `json:"version"`
+	Hostname   string      `json:"hostname"`
+	IPAddress  string      `json:"ipAddress"`
+	MachineId  string      `json:"machineId"`
+	OsInfo     any         `json:"osinfo"`
+	Driver     *DriverMeta `json:"driver,omitempty"`
+	ServerID   string      `json:"serverId"`
+	CompanyIDs []string    `json:"companyIds,omitempty"`
 }
 
 type EdsSession struct {
