@@ -33,7 +33,7 @@ require (
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/shirou/gopsutil/v4 v4.24.11
 	github.com/shopmonkeyus/go-common v0.0.76
-	github.com/snowflakedb/gosnowflake v1.12.0
+	github.com/snowflakedb/gosnowflake v1.12.1
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
@@ -53,6 +53,7 @@ require (
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/ProtonMail/go-crypto v1.1.3 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
+	github.com/apache/arrow/go/v16 v16.0.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.7 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.21 // indirect
