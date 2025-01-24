@@ -73,7 +73,7 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 			event.MVCCTimestamp = fmt.Sprintf("%v", tv.UnixNano())
 			event.ID = util.Hash(filepath.Base(file))
 			event.ModelVersion = schema[table].ModelVersion
-			if err := dec.Decode(&event.After); err != nil {
+			if err := dec.Decode(&event); err != nil {
 				return fmt.Errorf("unable to decode JSON: %w", err)
 			}
 			event.Key = []string{event.GetPrimaryKey()}
