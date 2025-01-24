@@ -171,7 +171,11 @@ func (p *postgresqlDriver) Flush(logger logger.Logger) error {
 func (p *postgresqlDriver) CreateDatasource(schema internal.SchemaMap) error {
 	// create all the tables
 	for _, table := range p.importConfig.Tables {
-		data := schema[table]
+		data, ok := schema[table]
+		if !ok {
+			p.logger.Warn("table %s not found in schema", table)
+			continue
+		}
 		p.logger.Debug("creating table %s", table)
 		if err := p.executor(createSQL(data)); err != nil {
 			return fmt.Errorf("error creating table: %s. %w", table, err)

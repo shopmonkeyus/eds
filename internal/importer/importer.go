@@ -55,7 +55,8 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 		}
 		data := schema[table]
 		if data == nil {
-			return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, file)
+			continue
+			// return fmt.Errorf("unexpected table (%s) not found in schema but in import directory: %s", table, file)
 		}
 		logger.Debug("processing file: %s, table: %s", file, table)
 		dec, err := util.NewNDJSONDecoder(file)
@@ -73,19 +74,30 @@ func Run(logger logger.Logger, config internal.ImporterConfig, handler Handler) 
 			event.MVCCTimestamp = fmt.Sprintf("%v", tv.UnixNano())
 			event.ID = util.Hash(filepath.Base(file))
 			event.ModelVersion = schema[table].ModelVersion
+
 			if err := dec.Decode(&event); err != nil {
-				return fmt.Errorf("unable to decode JSON: %w", err)
+				logger.Debug("error decoding JSON for table %s: %v", table, err)
+				continue
 			}
-			event.Key = []string{event.GetPrimaryKey()}
+
 			o, err := event.GetObject()
 			if err != nil {
-				return fmt.Errorf("unable to get object: %w", err)
+				logger.Debug("error getting object for table %s: %v", table, err)
+				continue
 			}
+
+			if o == nil {
+				logger.Debug("skipping null object for table %s", table)
+				continue
+			}
+
+			event.Key = []string{event.GetPrimaryKey()}
+
 			if id, ok := o["locationId"].(string); ok {
 				event.LocationID = &id
 			}
 			if id, ok := o["companyId"].(string); ok {
-				event.LocationID = &id
+				event.CompanyID = &id
 			}
 			if id, ok := o["userId"].(string); ok {
 				event.UserID = &id
