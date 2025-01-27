@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-const maxBytesSizeInsert = 5_000_000
+const maxBytesSizeInsert = 5 * 5_000_000
 
 type postgresqlDriver struct {
 	ctx          context.Context
@@ -67,7 +68,7 @@ func (p *postgresqlDriver) connectToDB(ctx context.Context, url string) (*sql.DB
 	defer cancel()
 	if err := db.PingContext(pctx); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("unable to ping connection: %w", err)
 	}
 
 	if err := p.refreshSchema(ctx, db, false); err != nil {
@@ -153,8 +154,15 @@ func (p *postgresqlDriver) Flush(logger logger.Logger) error {
 			}
 		}()
 		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
-			logger.Error("offending sql: %s", p.pending.String())
-			return fmt.Errorf("unable to execute sql: %w", err)
+			sqlContent := p.pending.String()
+			filename := fmt.Sprintf("error_%d.sql", time.Now().Unix())
+			if writeErr := os.WriteFile(filename, []byte(sqlContent), 0644); writeErr != nil {
+				logger.Error("failed to write SQL to file %s: %v", filename, writeErr)
+				return fmt.Errorf("unable to execute sql: %w", writeErr)
+			} else {
+				logger.Error("wrote offending SQL to file: %s", filename)
+			}
+			logger.Error("offending sql file: %s", filename)
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("unable to commit transaction: %w", err)
@@ -197,8 +205,15 @@ func (p *postgresqlDriver) ImportEvent(event internal.DBChangeEvent, data *inter
 	p.size += len(sql)
 	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error("offending sql: %s", p.pending.String())
-			return fmt.Errorf("unable to execute sql: %w", err)
+			sqlContent := p.pending.String()
+			filename := fmt.Sprintf("error_%d.sql", time.Now().Unix())
+			if writeErr := os.WriteFile(filename, []byte(sqlContent), 0644); writeErr != nil {
+				p.logger.Error("failed to write SQL to file %s: %v", filename, writeErr)
+				return fmt.Errorf("unable to execute sql: %w", err)
+			} else {
+				p.logger.Error("wrote offending SQL to file: %s", filename)
+			}
+			p.logger.Error("offending sql: %s", sqlContent)
 		}
 		p.pending.Reset()
 		p.size = 0
