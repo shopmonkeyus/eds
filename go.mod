@@ -3,7 +3,7 @@ module github.com/shopmonkeyus/eds
 go 1.23
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.2.3
+	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.3.0
 	github.com/BurntSushi/toml v1.4.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/ProtonMail/gopenpgp/v3 v3.1.2
@@ -46,10 +46,10 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.2 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.13.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.16.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.4.0 // indirect
-	github.com/Azure/go-amqp v1.0.5 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.5.0 // indirect
+	github.com/Azure/go-amqp v1.3.0 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/ProtonMail/go-crypto v1.1.5 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
