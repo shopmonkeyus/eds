@@ -34,7 +34,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.25.1
 	github.com/shopmonkeyus/go-common v0.0.76
 	github.com/snowflakedb/gosnowflake v1.13.0
-	github.com/spf13/cobra v1.8.1
+	github.com/spf13/cobra v1.9.0
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/buntdb v1.3.2
@@ -136,7 +136,7 @@ require (
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tidwall/btree v1.7.0 // indirect
 	github.com/tidwall/gjson v1.17.1 // indirect
