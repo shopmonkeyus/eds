@@ -34,7 +34,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.25.1
 	github.com/shopmonkeyus/go-common v0.0.76
 	github.com/snowflakedb/gosnowflake v1.13.0
-	github.com/spf13/cobra v1.9.0
+	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/buntdb v1.3.2
