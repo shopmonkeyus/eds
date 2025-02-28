@@ -24,7 +24,7 @@ require (
 	github.com/microsoft/go-mssqldb v1.8.0
 	github.com/nats-io/jwt/v2 v2.7.3
 	github.com/nats-io/nats-server/v2 v2.10.25
-	github.com/nats-io/nats.go v1.39.0
+	github.com/nats-io/nats.go v1.39.1
 	github.com/nats-io/nkeys v0.4.10
 	github.com/prometheus/client_golang v1.21.0
 	github.com/prometheus/client_model v0.6.1
