@@ -34,7 +34,7 @@ require (
 	github.com/savsgio/gotils v0.0.0-20240704082632-aef3928b8a38
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/shirou/gopsutil/v4 v4.25.2
-	github.com/shopmonkeyus/go-common v0.0.76
+	github.com/shopmonkeyus/go-common v0.0.77
 	github.com/snowflakedb/gosnowflake v1.13.1
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.19.0
