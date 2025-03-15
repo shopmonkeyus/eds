@@ -46,7 +46,11 @@ jobs:
 
       - name: Get branch name
         id: branch-name
-        uses: tj-actions/branch-names@v8
+          env:
+            HEAD_REF: ${{ github.head_ref }}
+            REF_NAME: ${{ github.ref_name }}
+          run: |
+            echo "current_branch=${HEAD_REF:-${REF_NAME}}" >> $GITHUB_OUTPUT
 
       - name: Construct the tags
         id: construct_tags
