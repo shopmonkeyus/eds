@@ -37,7 +37,7 @@ require (
 	github.com/shopmonkeyus/go-common v0.0.77
 	github.com/snowflakedb/gosnowflake v1.13.1
 	github.com/spf13/cobra v1.9.1
-	github.com/spf13/viper v1.20.0
+	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/buntdb v1.3.2
 	github.com/vmihailenco/msgpack/v5 v5.4.1
