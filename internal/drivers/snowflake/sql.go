@@ -21,14 +21,9 @@ func quoteString(val string, fn string) string {
 	if val == "NULL" {
 		return val
 	}
-	var res string
-	if fn != "" || mustEscape.MatchString(val) {
-		// For Snowflake, handle multi-line strings or escaped characters with single quotes
-		// Snowflake doesn't support $$, so just use single quotes around the string
-		res = "'" + val + "'"
-	} else {
-		res = "'" + val + "'"
-	}
+	// For Snowflake, handle multi-line strings or escaped characters with single quotes
+	// Snowflake doesn't support $$, so just use single quotes around the string
+	res := "'" + val + "'"
 	if fn != "" {
 		return fn + "(" + res + ")"
 	}
