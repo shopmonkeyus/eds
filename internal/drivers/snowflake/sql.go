@@ -15,16 +15,18 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-var mustEscape = regexp.MustCompile(`['\n\r\t]`)
+var mustEscape = regexp.MustCompile(`['\n\r\t\\]`)
 
 func quoteString(val string, fn string) string {
 	if val == "NULL" {
 		return val
 	}
-	val = strings.ReplaceAll(val, "'", "''")
-	// For Snowflake, handle multi-line strings or escaped characters with single quotes
-	// Snowflake only supports $$ in the UI, so just use single quotes around the string
-	res := "'" + val + "'"
+	var res string
+	if fn != "" || mustEscape.MatchString(val) {
+		res = "$$" + val + "$$"
+	} else {
+		res = "'" + val + "'"
+	}
 	if fn != "" {
 		return fn + "(" + res + ")"
 	}
