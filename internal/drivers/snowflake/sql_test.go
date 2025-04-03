@@ -106,3 +106,71 @@ func TestAddNewColumnsSQLSkip(t *testing.T) {
 	sql := addNewColumnsSQL(logger, []string{"number", "internalNumber", "externalNumber"}, detail, internal.DatabaseSchema{"order": {"number": "VARCHAR(MAX)"}})
 	assert.Equal(t, []string{"ALTER TABLE \"order\" ADD COLUMN \"internalNumber\" STRING;", "ALTER TABLE \"order\" ADD COLUMN \"externalNumber\" STRING;"}, sql)
 }
+
+func TestQuoteValue(t *testing.T) {
+	// Test with a simple string
+	assert.Equal(t, "'simple string'", quoteValue("simple string", ""))
+
+	// Test with a string containing newlines
+	assert.Equal(t, "'Hi Mike,\nThis is a friendly reminder.'",
+		quoteValue("Hi Mike,\nThis is a friendly reminder.", ""))
+
+	// Test with a string containing special characters
+	assert.Equal(t, "'Hello ''world''!'", quoteValue("Hello 'world'!", ""))
+
+	// Test with a string containing multiple single quotes
+	assert.Equal(t, "'''''''''simple string'''''''''", quoteValue("''''simple string''''", ""))
+
+	// Test with a multi-line string containing multiple single quotes
+	assert.Equal(t, "'Hi Mike,\nThis is a multi-line string with ''multiple'' single quotes.'", quoteValue("Hi Mike,\nThis is a multi-line string with 'multiple' single quotes.", ""))
+
+	// Test with a string containing tabs and carriage returns
+	assert.Equal(t, "'Line1\tLine2\rLine3'", quoteValue("Line1\tLine2\rLine3", ""))
+
+	// Test with a NULL value
+	assert.Equal(t, "NULL", quoteValue(nil, ""))
+
+	// Test with a function applied to the string
+	assert.Equal(t, "UPPER('test string')", quoteValue("test string", "UPPER"))
+
+	// Test with a multiline string
+	multiline := `Hi Mike,
+This is a multi-line test appointment on March 22, 2025 at 8:00 AM.
+Location
+Multi-line of multiple lines
+9101 Multi line Drive, Suite Line, San Diego, CA 44236
+Vehicle:
+2030 Ram 9600 Power Wagon
+If you have questions about your appointment or need to reschedule, please contact us at: (123) 456-7809 or info@multiline.com.`
+
+	expected := `'Hi Mike,
+This is a multi-line test appointment on March 22, 2025 at 8:00 AM.
+Location
+Multi-line of multiple lines
+9101 Multi line Drive, Suite Line, San Diego, CA 44236
+Vehicle:
+2030 Ram 9600 Power Wagon
+If you have questions about your appointment or need to reschedule, please contact us at: (123) 456-7809 or info@multiline.com.'`
+	assert.Equal(t, expected, quoteValue(multiline, ""))
+
+	// Test with a multiline string with some random ' characters throughout
+	multilineApostrophe := `Hi Mike,
+This is a multi-line test appoi'ntment on March 22, 2025 at 8:00 AM. '
+Location
+Multi-line of multiple lines
+9101 Multi line Drive, Suite Line, San Diego, CA 44236
+Vehicle:
+2030 Ram 9600 Power Wagon
+If you have questions about your appointment or need to resch ' edule, please contact us at: (123) 456-7809 or info@multiline.com.'`
+
+	expectedApostrophe := `'Hi Mike,
+This is a multi-line test appoi''ntment on March 22, 2025 at 8:00 AM. ''
+Location
+Multi-line of multiple lines
+9101 Multi line Drive, Suite Line, San Diego, CA 44236
+Vehicle:
+2030 Ram 9600 Power Wagon
+If you have questions about your appointment or need to resch '' edule, please contact us at: (123) 456-7809 or info@multiline.com.'''`
+	assert.Equal(t, expectedApostrophe, quoteValue(multilineApostrophe, ""))
+
+}
