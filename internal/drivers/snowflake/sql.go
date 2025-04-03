@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,8 +13,6 @@ import (
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 )
-
-var mustEscape = regexp.MustCompile(`['\n\r\t\\]`)
 
 func quoteString(val string, fn string) string {
 	if val == "NULL" {
