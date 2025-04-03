@@ -21,12 +21,10 @@ func quoteString(val string, fn string) string {
 	if val == "NULL" {
 		return val
 	}
-	var res string
-	if fn != "" || mustEscape.MatchString(val) {
-		res = "$$" + val + "$$"
-	} else {
-		res = "'" + val + "'"
-	}
+	// Escape backslashes and single quotes
+	escapedVal := strings.ReplaceAll(val, "\\", "\\\\")
+	escapedVal = strings.ReplaceAll(escapedVal, "'", "''")
+	res := "'" + escapedVal + "'"
 	if fn != "" {
 		return fn + "(" + res + ")"
 	}
