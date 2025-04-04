@@ -109,7 +109,7 @@ jobs:
             VERSION=${{ steps.construct_tags.outputs.version }}
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v2
         with:
           subject-name: us-docker.pkg.dev/${{ env.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
