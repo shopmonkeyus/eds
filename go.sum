@@ -930,6 +930,8 @@ github.com/snowflakedb/gosnowflake v1.13.2 h1:78ovPH3fcxeHkVbOI1o98NuVWJmu0Lax10
 github.com/snowflakedb/gosnowflake v1.13.2/go.mod h1:tNf6gX01sgKaQUBo3De+KctsK6EwUtwmwp9wf6eYKPU=
 github.com/snowflakedb/gosnowflake v1.13.3 h1:udARwDZ+Eb7TnihuMno1CaNVUDbJnikWC+8p4RCJQBk=
 github.com/snowflakedb/gosnowflake v1.13.3/go.mod h1:NUxNYUdyPn9sRoYB/udq/fXBXuhLS3SBTPI2/OT79uc=
+github.com/snowflakedb/gosnowflake v1.14.0 h1:lP91Y47ho3dzpTxWr7wjpvDXteh+ZttsLaw1WXzHS34=
+github.com/snowflakedb/gosnowflake v1.14.0/go.mod h1:NUxNYUdyPn9sRoYB/udq/fXBXuhLS3SBTPI2/OT79uc=
 github.com/sourcegraph/conc v0.3.0 h1:OQTbbt6P72L20UqAkXXuLOj79LfEanQ+YQFNpLA9ySo=
 github.com/sourcegraph/conc v0.3.0/go.mod h1:Sdozi7LEKbFPqYX2/J+iBAM6HpqSLTASQIKqDmF7Mt0=
 github.com/spf13/afero v1.11.0 h1:WJQKhtpdm3v2IzqG8VMqrr6Rf3UYpEF239Jy9wNepM8=
