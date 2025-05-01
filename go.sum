@@ -912,6 +912,8 @@ github.com/shirou/gopsutil/v4 v4.25.2 h1:NMscG3l2CqtWFS86kj3vP7soOczqrQYIEhO/pMv
 github.com/shirou/gopsutil/v4 v4.25.2/go.mod h1:34gBYJzyqCDT11b6bMHP0XCvWeU3J61XRT7a2EmCRTA=
 github.com/shirou/gopsutil/v4 v4.25.3 h1:SeA68lsu8gLggyMbmCn8cmp97V1TI9ld9sVzAUcKcKE=
 github.com/shirou/gopsutil/v4 v4.25.3/go.mod h1:xbuxyoZj+UsgnZrENu3lQivsngRR5BdjbJwf2fv4szA=
+github.com/shirou/gopsutil/v4 v4.25.4 h1:cdtFO363VEOOFrUCjZRh4XVJkb548lyF0q0uTeMqYPw=
+github.com/shirou/gopsutil/v4 v4.25.4/go.mod h1:xbuxyoZj+UsgnZrENu3lQivsngRR5BdjbJwf2fv4szA=
 github.com/shopmonkeyus/go-common v0.0.76 h1:jJeg3iq1qYOu7r2jUMJz9scMELxcy646LRlWqOI9uIk=
 github.com/shopmonkeyus/go-common v0.0.76/go.mod h1:vRaWZaoqzWx6sKWm6zze9rQ+Y9UJORYsT0783yPLw8U=
 github.com/shopmonkeyus/go-common v0.0.77 h1:c8Escg9LC54jfSluB2RTSil0tIn6MAScCRG/HjKN4uI=
