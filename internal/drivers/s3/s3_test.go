@@ -171,13 +171,14 @@ func TestEventPathWithPrefix(t *testing.T) {
 	s3.prefix = prefix
 	s3.ch = make(chan job, 1)
 	ok, err := s3.Process(logger, internal.DBChangeEvent{
-		Table: "table",
-		Key:   []string{"pk"},
+		Table:     "table",
+		Key:       []string{"pk"},
+		Timestamp: 500000000,
 	})
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	job := <-s3.ch
-	assert.Equal(t, "withprefix/table/pk.json", job.key)
+	assert.Equal(t, "withprefix/table/500000-pk.json", job.key)
 }
 
 func TestEventPathNoPrefix(t *testing.T) {
@@ -185,11 +186,12 @@ func TestEventPathNoPrefix(t *testing.T) {
 	var s3 s3Driver
 	s3.ch = make(chan job, 1)
 	ok, err := s3.Process(logger, internal.DBChangeEvent{
-		Table: "table",
-		Key:   []string{"pk"},
+		Table:     "table",
+		Key:       []string{"pk"},
+		Timestamp: 2000,
 	})
 	assert.False(t, ok)
 	assert.NoError(t, err)
 	job := <-s3.ch
-	assert.Equal(t, "table/pk.json", job.key)
+	assert.Equal(t, "table/2-pk.json", job.key)
 }
