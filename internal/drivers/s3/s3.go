@@ -352,7 +352,7 @@ func (p *s3Driver) process(_ context.Context, logger logger.Logger, event intern
 	if event.SchemaValidatedPath != nil {
 		key = path.Join(p.prefix, *event.SchemaValidatedPath)
 	} else {
-		key = path.Join(p.prefix, event.Table, event.GetPrimaryKey()+".json")
+		key = path.Join(p.prefix, event.Table, fmt.Sprintf("%d-%s.json", time.UnixMilli(event.Timestamp).Unix(), event.GetPrimaryKey()))
 	}
 	if dryRun {
 		logger.Trace("would store %s:%s", p.bucket, key)

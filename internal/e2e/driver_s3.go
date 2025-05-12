@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -35,7 +36,7 @@ func (d *driverS3Test) Validate(logger logger.Logger, dir string, url string, ev
 	}
 	res, err := client.GetObject(context.Background(), &awss3.GetObjectInput{
 		Bucket: aws.String(dbname),
-		Key:    aws.String(fmt.Sprintf("%s/%s.json", event.Table, event.GetPrimaryKey())),
+		Key:    aws.String(fmt.Sprintf("%s/%d-%s.json", event.Table, time.UnixMilli(event.Timestamp).Unix(), event.GetPrimaryKey())),
 	})
 	if err != nil {
 		return fmt.Errorf("error getting object: %w", err)
