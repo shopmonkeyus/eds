@@ -9,7 +9,7 @@ ARG VERSION
 
 RUN go build -ldflags "-s -w -X main.version=$VERSION" -o eds
 
-FROM alpine:3.21
+FROM alpine:3.22
 
 ENV APP_HOME=/go/src/github.com/shopmonkeyus/eds
 RUN mkdir -p "$APP_HOME"
