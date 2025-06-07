@@ -2,7 +2,7 @@ module github.com/shopmonkeyus/eds
 
 go 1.23.0
 
-toolchain go1.24.3
+toolchain go1.24.4
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/messaging/azeventhubs v1.3.2
