@@ -33,7 +33,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/savsgio/gotils v0.0.0-20250408102913-196191ec6287
 	github.com/segmentio/kafka-go v0.4.48
-	github.com/shirou/gopsutil/v4 v4.25.5
+	github.com/shirou/gopsutil/v4 v4.25.6
 	github.com/shopmonkeyus/go-common v0.0.77
 	github.com/snowflakedb/gosnowflake v1.15.0
 	github.com/spf13/cobra v1.9.1
