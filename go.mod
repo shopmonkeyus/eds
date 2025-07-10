@@ -41,7 +41,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/buntdb v1.3.2
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	golang.org/x/sync v0.15.0
+	golang.org/x/sync v0.16.0
 )
 
 require (
