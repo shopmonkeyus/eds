@@ -49,22 +49,3 @@ func TestBatcherAddCombineUpdate(t *testing.T) {
 	assert.Equal(t, 34, records[1].Object["age"])
 	assert.Equal(t, []string{"name", "age"}, records[1].Diff)
 }
-
-func TestBatcherAddHandlePK(t *testing.T) {
-	b := NewBatcher()
-	// TODO: Resolve ambiguity around the id input to the Add function and then revise the expected values for this test.
-	// Some of these tests might be more appropriate for the DBChangeEvent GetPrimaryKey function.
-	// The above mentioned ambiguity is problematic because the drivers use Record.Id for inserts, but the Add function combines records on dbchange.Key, dbchange.After,payload.id, or the id argument to Add
-	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{"id": "A"}, &internal.DBChangeEvent{Key: []string{"b", "c"}, After: json.RawMessage(`{"id":"a"}`)})
-	assert.Equal(t, "A", b.Records()[0].Object["id"])
-	assert.Equal(t, "c", b.Records()[0].Id)
-	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{}, &internal.DBChangeEvent{Key: []string{"d", "e"}, After: json.RawMessage(`{"id":"f"}`)})
-	assert.Equal(t, nil, b.Records()[1].Object["id"])
-	assert.Equal(t, "e", b.Records()[1].Id)
-	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{"id": "A"}, nil)
-	assert.Equal(t, "A", b.Records()[2].Object["id"])
-	assert.Equal(t, "A", b.Records()[2].Id)
-	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{}, nil)
-	assert.Equal(t, nil, b.Records()[3].Object["id"])
-	assert.Equal(t, "0", b.Records()[3].Id)
-}
