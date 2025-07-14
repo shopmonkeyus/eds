@@ -1,23 +1,70 @@
 package util
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/shopmonkeyus/eds/internal"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestBatcher(t *testing.T) {
 	b := NewBatcher()
-	b.Add("user", "1", "INSERT", []string{"name"}, map[string]interface{}{"id": "1", "name": "John"}, nil)
+	b.Add("user", "1", "INSERT", []string{"name"}, map[string]interface{}{"id": "1", "name": "John", "age": 19, "salary": 9, "city": "New York"}, nil)
 	assert.NotEmpty(t, b.Records())
-	assert.Equal(t, `[{"table":"user","id":"1","operation":"INSERT","diff":["name"],"object":{"id":"1","name":"John"}}]`, JSONStringify(b.Records()))
-	b.Add("user", "1", "UPDATE", []string{"name", "age"}, map[string]interface{}{"id": "1", "age": 21, "name": "Foo"}, nil)
+	insertRecord := `{"table":"user","id":"1","operation":"INSERT","diff":["name"],"object":{"age":19,"city":"New York","id":"1","name":"John","salary":9}}`
+	assert.Equal(t, "["+insertRecord+"]", JSONStringify(b.Records()))
+	b.Add("user", "2", "UPDATE", []string{"name", "age"}, map[string]interface{}{"id": "1", "age": 21, "name": "Foo"}, nil)
+	updateRecord := `{"table":"user","id":"1","operation":"UPDATE","diff":["name","age"],"object":{"age":21,"id":"1","name":"Foo"}}`
 	assert.NotEmpty(t, b.Records())
-	assert.Equal(t, `[{"table":"user","id":"1","operation":"UPDATE","diff":["name","age"],"object":{"age":21,"id":"1","name":"Foo"}}]`, JSONStringify(b.Records()))
-	b.Add("user", "1", "UPDATE", []string{"salary"}, map[string]interface{}{"id": "1", "salary": 10, "age": 21, "name": "Foo"}, nil)
+	assert.Equal(t, "["+insertRecord+","+updateRecord+"]", JSONStringify(b.Records())) // insert should not be combined with update
+	b.Add("user", "3", "UPDATE", []string{"salary"}, map[string]interface{}{"id": "1", "salary": 10}, nil)
 	assert.NotEmpty(t, b.Records())
-	assert.Equal(t, `[{"table":"user","id":"1","operation":"UPDATE","diff":["name","age","salary"],"object":{"age":21,"id":"1","name":"Foo","salary":10}}]`, JSONStringify(b.Records()))
-	b.Add("user", "1", "DELETE", nil, nil, nil)
-	assert.Equal(t, `[{"table":"user","id":"1","operation":"DELETE","diff":null,"object":null}]`, JSONStringify(b.Records()))
+	mergedUpdateRecord := `{"table":"user","id":"1","operation":"UPDATE","diff":["name","age","salary"],"object":{"age":21,"id":"1","name":"Foo","salary":10}}`
+	assert.Equal(t, "["+insertRecord+","+mergedUpdateRecord+"]", JSONStringify(b.Records())) // update is merged and contains data from both updates
+	b.Add("user", "4", "DELETE", nil, map[string]interface{}{"id": "1"}, nil)
+	deleteRecord := `{"table":"user","id":"1","operation":"DELETE","diff":null,"object":null}`
+	assert.Equal(t, "["+insertRecord+","+deleteRecord+"]", JSONStringify(b.Records())) // In case of delete, the previous insert record is removed
 	assert.NotEmpty(t, b.Records())
+}
+
+func TestBatcherAddDontCombineInsert(t *testing.T) {
+	b := NewBatcher()
+	b.Add("user", "0", "INSERT", []string{"name"}, map[string]interface{}{"name": "John"}, nil)
+	b.Add("user", "0", "UPDATE", []string{"name"}, map[string]interface{}{"name": "Bob"}, nil)
+	assert.Equal(t, 2, b.Len())
+	records := b.Records()
+	assert.Equal(t, "INSERT", records[0].Operation)
+}
+
+func TestBatcherAddCombineUpdate(t *testing.T) {
+	b := NewBatcher()
+	b.Add("user", "0", "INSERT", []string{}, map[string]interface{}{"name": "Lucy", "age": 35}, nil)
+	b.Add("user", "0", "UPDATE", []string{"name"}, map[string]interface{}{"name": "Sally"}, &internal.DBChangeEvent{After: json.RawMessage(`{"name":"Sally","age":35}`)})
+	b.Add("user", "0", "UPDATE", []string{"age"}, map[string]interface{}{"age": 34}, &internal.DBChangeEvent{After: json.RawMessage(`{"name":"Sally","age":34}`)})
+	assert.Equal(t, 2, b.Len())
+	records := b.Records()
+	assert.Equal(t, "UPDATE", records[1].Operation)
+	assert.Equal(t, "Sally", records[1].Object["name"])
+	assert.Equal(t, 34, records[1].Object["age"])
+	assert.Equal(t, []string{"name", "age"}, records[1].Diff)
+}
+
+func TestBatcherAddHandlePK(t *testing.T) {
+	b := NewBatcher()
+	// TODO: Resolve ambiguity around the id input to the Add function and then revise the expected values for this test.
+	// Some of these tests might be more appropriate for the DBChangeEvent GetPrimaryKey function.
+	// The above mentioned ambiguity is problematic because the drivers use Record.Id for inserts, but the Add function combines records on dbchange.Key, dbchange.After,payload.id, or the id argument to Add
+	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{"id": "A"}, &internal.DBChangeEvent{Key: []string{"b", "c"}, After: json.RawMessage(`{"id":"a"}`)})
+	assert.Equal(t, "A", b.Records()[0].Object["id"])
+	assert.Equal(t, "c", b.Records()[0].Id)
+	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{}, &internal.DBChangeEvent{Key: []string{"d", "e"}, After: json.RawMessage(`{"id":"f"}`)})
+	assert.Equal(t, nil, b.Records()[1].Object["id"])
+	assert.Equal(t, "e", b.Records()[1].Id)
+	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{"id": "A"}, nil)
+	assert.Equal(t, "A", b.Records()[2].Object["id"])
+	assert.Equal(t, "A", b.Records()[2].Id)
+	b.Add("user", "0", "UPDATE", []string{}, map[string]interface{}{}, nil)
+	assert.Equal(t, nil, b.Records()[3].Object["id"])
+	assert.Equal(t, "0", b.Records()[3].Id)
 }

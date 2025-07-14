@@ -1,6 +1,10 @@
 package util
 
-import "github.com/shopmonkeyus/eds/internal"
+import (
+	"maps"
+
+	"github.com/shopmonkeyus/eds/internal"
+)
 
 type Batcher struct {
 	records []*Record
@@ -39,6 +43,12 @@ func (b *Batcher) Add(table string, id string, operation string, diff []string, 
 	}
 	hashkey := table + primaryKey
 	index, found := b.pks[hashkey]
+
+	appendRecord := func() {
+		b.records = append(b.records, &Record{Table: table, Id: primaryKey, Operation: operation, Diff: diff, Object: payload, Event: event})
+		b.pks[hashkey] = uint(len(b.records) - 1)
+	}
+
 	if operation == "DELETE" {
 		if found {
 			// if found, remove the old record (could be insert or update)
@@ -50,22 +60,26 @@ func (b *Batcher) Add(table string, id string, operation string, diff []string, 
 	} else {
 		if found {
 			entry := b.records[index]
-			// merge the diff keys
-			for _, key := range diff {
-				if !SliceContains(entry.Diff, key) {
-					entry.Diff = append(entry.Diff, key)
+			if entry.Operation == "INSERT" {
+				// don't combine if previous entry was an insert
+				appendRecord()
+			} else {
+				//For UPDATE operations, merge the diff keys
+				for _, key := range diff {
+					if !SliceContains(entry.Diff, key) {
+						entry.Diff = append(entry.Diff, key)
+					}
 				}
+				if len(entry.Diff) == 0 {
+					entry.Diff = diff
+				}
+				entry.Event = event
+				entry.Operation = operation
+				maps.Copy(entry.Object, payload) // upsert the payload with the new update
 			}
-			if len(entry.Diff) == 0 {
-				entry.Diff = diff
-			}
-			entry.Event = event
-			entry.Operation = operation
-			entry.Object = payload // replace the payload with the new update
 		} else {
 			// not found just add it
-			b.records = append(b.records, &Record{Table: table, Id: primaryKey, Operation: operation, Diff: diff, Object: payload, Event: event})
-			b.pks[hashkey] = uint(len(b.records) - 1)
+			appendRecord()
 		}
 	}
 }
