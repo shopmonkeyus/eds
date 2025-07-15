@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -185,9 +186,10 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 			case "UPDATE":
 				// slight optimization to skip records that just have an updatedDate and nothing else
 				justUpdatedDate := len(record.Diff) == 1 && record.Diff[0] == "updatedDate"
+				justUpdatedMeta := len(record.Diff) == 2 && slices.Contains(record.Diff, "updatedDate") && slices.Contains(record.Diff, "meta")
 				noUpdates := len(record.Diff) == 0
-				if justUpdatedDate || noUpdates {
-					logger.Trace("skipping update because only updatedDate changed for %s/%s", record.Table, record.Id)
+				if justUpdatedDate || noUpdates || justUpdatedMeta {
+					logger.Trace("skipping update because only either updatedDate, meta and updatedDate, or nothing changed for %s/%s", record.Table, record.Id)
 					continue
 				}
 			case "DELETE":
