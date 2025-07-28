@@ -35,7 +35,7 @@ type DriverConfig struct {
 	// DataDir is the directory where the driver can store data.
 	DataDir string
 
-	// UpdateStrategy is the strategy to use for updating data. Blank or "standard" are default; "after" updates the whole record in case an out-of-order event is recieved
+	// UpdateStrategy is the strategy to use for updating data. Empty string or "standard" are default; "after" updates the whole record in case an out-of-order event is recieved
 	UpdateStrategy string
 }
 

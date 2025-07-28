@@ -31,9 +31,9 @@ type snowflakeDriver struct {
 	batcher        *util.Batcher
 	locker         sync.Mutex
 	sessionID      string
-	updateStrategy string
 	dbname         string
 	dbschema       internal.DatabaseSchema
+	updateStrategy string
 	profilingInfo  DriverProfilingInfo
 }
 
