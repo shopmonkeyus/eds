@@ -82,7 +82,8 @@ type ConfigureRequest struct {
 	URL string `json:"url" msgpack:"url"`
 	// Backfill is a flag to indicate if the driver should backfill data.
 	// Configure does not perform a backfill, it is returned in the response so the next action can perform the backfill.
-	Backfill bool `json:"backfill" msgpack:"backfill"`
+	Backfill       bool   `json:"backfill" msgpack:"backfill"`
+	UpdateStrategy string `json:"updateStrategy" msgpack:"updateStrategy"`
 }
 
 type ConfigureResponse struct {
@@ -361,6 +362,9 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 			req.URL = v
 		}
 		req.Backfill = getBool(notification.Data["backfill"])
+		if v, ok := notification.Data["updateStrategy"].(string); ok {
+			req.UpdateStrategy = v
+		}
 		c.configure(req, m)
 	case "import":
 		var req ImportRequest

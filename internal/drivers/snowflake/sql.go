@@ -141,13 +141,14 @@ func nullableValue(c internal.SchemaProperty, wrap bool) string {
 	}
 }
 
-func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, int) {
+func toSQL(record *util.Record, model *internal.Schema, exists bool, updateStrategy string) (string, int) {
 	var sql strings.Builder
 	var count int
 	if exists || record.Operation == "DELETE" {
 		sql.WriteString(toDeleteSQL(record))
 		count++
 	}
+	// TODO: What's with this logic
 	if record.Operation != "DELETE" {
 		if record.Operation == "INSERT" {
 			var columns []string
@@ -184,29 +185,87 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, in
 			sql.WriteString(";\n")
 		} else {
 			// update
-			var updateValues []string
-			for _, name := range record.Diff {
-				if !util.SliceContains(model.Columns(), name) {
-					continue
+			switch updateStrategy {
+			case "after":
+				// Apply the whole after field if the updated date is later than the existing updated date
+				// Use MERGE for upsert operations (insert if not exists, update if exists)
+				// TODO Switch this to use MSVCC timestamp? Possibly separate PR?
+				var updateValues []string
+				var insertColumns []string
+				var insertVals []string
+
+				for _, name := range model.Columns() {
+					insertColumns = append(insertColumns, util.QuoteIdentifier(name))
+					if val, ok := record.Object[name]; ok {
+						c := model.Properties[name]
+						var fn string
+						switch c.Type {
+						case "object":
+							fn = "PARSE_JSON"
+						case "array":
+							if c.Items != nil && (c.Items.Type == "object" || c.Items.Type == "string") {
+								fn = "PARSE_JSON"
+							} else {
+								fn = "TO_VARIANT"
+							}
+						}
+						v := quoteValue(val, fn)
+						updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
+						insertVals = append(insertVals, v)
+					} else {
+						// For missing values, use nullable defaults for insert
+						c := model.Properties[name]
+						v := nullableValue(c, true)
+						insertVals = append(insertVals, v)
+					}
 				}
-				if val, ok := record.Object[name]; ok {
-					v := quoteValue(val, "")
-					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
+
+				after, _ := record.Event.GetObject() // ignore error because we assume after is present in an update event
+
+				sql.WriteString("MERGE INTO ")
+				sql.WriteString(util.QuoteIdentifier(record.Table))
+				sql.WriteString(" AS target USING (SELECT ")
+				sql.WriteString(quoteValue(record.Id, ""))
+				sql.WriteString(" AS id, ")
+				sql.WriteString(quoteValue(after["updatedDate"], ""))
+				sql.WriteString(" AS updatedDate) AS source ON target.id = source.id ")
+
+				// WHEN MATCHED clause - update if updatedDate is newer
+				sql.WriteString("WHEN MATCHED AND source.updatedDate > target.updatedDate THEN UPDATE SET ")
+				sql.WriteString(strings.Join(updateValues, ","))
+
+				// WHEN NOT MATCHED clause - insert new record
+				sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
+				sql.WriteString(strings.Join(insertColumns, ","))
+				sql.WriteString(") VALUES (")
+				sql.WriteString(strings.Join(insertVals, ","))
+				sql.WriteString(");\n")
+			default: // "standard"
+				// Standard is applying just the diffs in the order they are received
+				var updateValues []string
+				for _, name := range record.Diff {
+					if !util.SliceContains(model.Columns(), name) {
+						continue
+					}
+					if val, ok := record.Object[name]; ok {
+						v := quoteValue(val, "")
+						updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
+					}
+					// else shouldn't be possible
 				}
-				// else shouldn't be possible
+				if len(updateValues) == 0 {
+					return sql.String(), count // in case we skipped, just return
+				}
+				sql.WriteString("UPDATE ")
+				sql.WriteString(util.QuoteIdentifier(record.Table))
+				sql.WriteString(" SET ")
+				sql.WriteString(strings.Join(updateValues, ","))
+				sql.WriteString(" WHERE ")
+				sql.WriteString(util.QuoteIdentifier("id"))
+				sql.WriteString("=")
+				sql.WriteString(quoteValue(record.Id, ""))
+				sql.WriteString(";\n")
 			}
-			if len(updateValues) == 0 {
-				return sql.String(), count // in case we skipped, just return
-			}
-			sql.WriteString("UPDATE ")
-			sql.WriteString(util.QuoteIdentifier(record.Table))
-			sql.WriteString(" SET ")
-			sql.WriteString(strings.Join(updateValues, ","))
-			sql.WriteString(" WHERE ")
-			sql.WriteString(util.QuoteIdentifier("id"))
-			sql.WriteString("=")
-			sql.WriteString(quoteValue(record.Id, ""))
-			sql.WriteString(";\n")
 		}
 		count++
 	}

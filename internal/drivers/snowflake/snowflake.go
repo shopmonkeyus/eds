@@ -21,18 +21,20 @@ import (
 const maxBatchSize = 200
 
 type snowflakeDriver struct {
-	config    internal.DriverConfig
-	logger    logger.Logger
-	db        *sql.DB
-	registry  internal.SchemaRegistry
-	waitGroup sync.WaitGroup
-	once      sync.Once
-	ctx       context.Context
-	batcher   *util.Batcher
-	locker    sync.Mutex
-	sessionID string
-	dbname    string
-	dbschema  internal.DatabaseSchema
+	config         internal.DriverConfig
+	ctx            context.Context
+	logger         logger.Logger
+	db             *sql.DB
+	registry       internal.SchemaRegistry
+	waitGroup      sync.WaitGroup
+	once           sync.Once
+	batcher        *util.Batcher
+	locker         sync.Mutex
+	sessionID      string
+	updateStrategy string
+	dbname         string
+	dbschema       internal.DatabaseSchema
+	profilingInfo  DriverProfilingInfo
 }
 
 var _ internal.Driver = (*snowflakeDriver)(nil)
@@ -89,12 +91,33 @@ func (p *snowflakeDriver) connectToDB(ctx context.Context, url string) (*sql.DB,
 	return db, nil
 }
 
+type DriverProfilingInfo struct {
+	recordsProcessedCount    int
+	lastExecutionDuration    time.Duration
+	averageExecutionDuration time.Duration
+}
+
+func (p *DriverProfilingInfo) String() string {
+	return fmt.Sprintf("records processed: %d, last batch duration: %v, average row execution duration: %v", p.recordsProcessedCount, p.lastExecutionDuration, p.averageExecutionDuration)
+}
+
+func (p *snowflakeDriver) addProfilingRecord(duration time.Duration, recordsProcessed int) {
+	p.profilingInfo.lastExecutionDuration = duration
+	oldCount := p.profilingInfo.recordsProcessedCount
+	newCount := oldCount + recordsProcessed
+	oldAverage := p.profilingInfo.averageExecutionDuration
+	newAverage := time.Duration((oldAverage.Nanoseconds()*int64(oldCount) + duration.Nanoseconds()) / int64(newCount))
+	p.profilingInfo.averageExecutionDuration = newAverage
+	p.profilingInfo.recordsProcessedCount = newCount
+}
+
 // Start the driver. This is called once at the beginning of the driver's lifecycle.
 func (p *snowflakeDriver) Start(config internal.DriverConfig) error {
 	p.config = config
 	p.ctx = config.Context
 	p.logger = config.Logger.WithPrefix("[snowflake]")
 	p.registry = config.SchemaRegistry
+	p.updateStrategy = config.UpdateStrategy
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return fmt.Errorf("unable to create connection: %w", err)
@@ -150,6 +173,7 @@ var sequence int64
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 func (p *snowflakeDriver) Flush(logger logger.Logger) error {
+	logger.Debug("Flush method called") // Add this line to see if Flush is being called
 	p.locker.Lock()
 	defer p.locker.Unlock()
 	if p.db == nil {
@@ -200,7 +224,7 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 			if err != nil {
 				return fmt.Errorf("unable to get schema for table: %s (%s). %w", record.Table, record.Event.ModelVersion, err)
 			}
-			sql, c := toSQL(record, schema, force)
+			sql, c := toSQL(record, schema, force, p.updateStrategy)
 			statementCount += c
 			logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i+1, count, strings.TrimRight(sql, "\n"))
 			query.WriteString(sql)
@@ -220,10 +244,15 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 				return fmt.Errorf("unable to run query: %s: %w", query.String(), err)
 			}
 			rows, _ := res.RowsAffected()
+			executionDuration := time.Since(ts)
+			p.addProfilingRecord(executionDuration, count)
+			// TODO: Diagnose incorrect statement count:
+			// TODO: The current after update strategy resulted in duplicate pks, so we're seeing two rows updated sometimes.
+			// TODO: Need to fix this. Possibly need to change inserts to merges for all strategies to avoid missing inserts
 			if rows != int64(statementCount) {
-				logger.Warn("executed query (%s/%d/%d) in %v (expected %d rows, was %d)", tag, statementCount, rows, time.Since(ts), statementCount, rows)
+				logger.Warn("executed query (%s/%d/%d) in %v (expected %d rows, was %d)", tag, statementCount, rows, executionDuration, statementCount, rows)
 			} else {
-				logger.Trace("executed query (%s/%d/%d) in %v", tag, statementCount, rows, time.Since(ts))
+				logger.Trace("executed query (%s/%d/%d) in %v", tag, statementCount, rows, executionDuration)
 			}
 		}
 		if len(cachekeys) > 0 {
@@ -238,6 +267,7 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 			}
 		}
 	}
+	logger.Debug("profiling info for session %s: %s", p.sessionID, p.profilingInfo.String())
 	return nil
 }
 
