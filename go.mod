@@ -10,8 +10,8 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/ProtonMail/gopenpgp/v3 v3.3.0
 	github.com/aws/aws-sdk-go-v2 v1.37.0
-	github.com/aws/aws-sdk-go-v2/config v1.30.0
-	github.com/aws/aws-sdk-go-v2/credentials v1.18.0
+	github.com/aws/aws-sdk-go-v2/config v1.30.1
+	github.com/aws/aws-sdk-go-v2/credentials v1.18.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.85.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/charmbracelet/huh v0.7.0
@@ -57,7 +57,7 @@ require (
 	github.com/apache/arrow-go/v18 v18.0.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.0 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.17.0 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.0 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.9 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.0 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.0 // indirect
