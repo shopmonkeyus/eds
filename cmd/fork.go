@@ -71,6 +71,7 @@ var forkCmd = &cobra.Command{
 
 		natsurl := mustFlagString(cmd, "server", true)
 		url := mustFlagString(cmd, "url", true)
+		updateStrategy, _ := cmd.Flags().GetString("update-strategy")
 		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
 		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
@@ -115,7 +116,7 @@ var forkCmd = &cobra.Command{
 		}
 
 		// note: don't use ctx here because we want the driver to continue running during shutdown so we can control the flush
-		driver, err := internal.NewDriver(context.Background(), logger, url, schemaRegistry, tracker, datadir)
+		driver, err := internal.NewDriver(context.Background(), logger, url, schemaRegistry, tracker, datadir, updateStrategy)
 		if err != nil {
 			logger.Error("error creating driver: %s", err)
 			os.Exit(exitCodeIncorrectUsage)
@@ -291,6 +292,7 @@ func init() {
 	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("url", "", "driver connection string")
+	forkCmd.Flags().String("update-strategy", "", "the update strategy to use")
 	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
 	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
