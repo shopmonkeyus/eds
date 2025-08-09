@@ -479,6 +479,7 @@ var serverCmd = &cobra.Command{
 		}
 		dataDir := getDataDir(cmd, logger)
 		driverURL := viper.GetString("url")
+		updateStrategy := viper.GetString("update_strategy")
 		server := mustFlagString(cmd, "server", false)
 		apikey := viper.GetString("token")
 		if apikey == "" {
@@ -488,6 +489,7 @@ var serverCmd = &cobra.Command{
 		verbose := mustFlagBool(cmd, "verbose", false)
 		noRestart := mustFlagBool(cmd, "no-restart", false)
 
+		// TODO: figure out why failing the empty import to Snowflake results in the fork remaining alive
 		// run the wrapper to handle the rest of the code from inside the wrapper
 		wrapper := mustFlagBool(cmd, "wrapper", false)
 		if !wrapper {
@@ -836,6 +838,7 @@ var serverCmd = &cobra.Command{
 			var maskedURL *string
 			if success && validated {
 				viper.Set("url", config.URL)
+				viper.Set("update_strategy", config.UpdateStrategy)
 				if err := viper.WriteConfig(); err != nil {
 					logger.Error("failed to write config: %s", err)
 				}
@@ -995,6 +998,7 @@ var serverCmd = &cobra.Command{
 				"--logs-dir", sessionLogsDir,
 				"--url", driverURL,
 				"--server", natsurl,
+				"--update-strategy", updateStrategy,
 			)
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
