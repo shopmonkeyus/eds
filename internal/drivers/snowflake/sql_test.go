@@ -203,3 +203,73 @@ func TestToMergeSQL(t *testing.T) {
 	sql := toMergeSQL(record, model)
 	assert.Equal(t, condensed, sql)
 }
+
+func TestGenerateInsertFunction(t *testing.T) {
+	tests := []struct {
+		name     string
+		property internal.SchemaProperty
+		expected string
+	}{
+		{
+			name: "object type returns PARSE_JSON",
+			property: internal.SchemaProperty{
+				Type: "object",
+			},
+			expected: "PARSE_JSON",
+		},
+		{
+			name: "array with object items returns PARSE_JSON",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "object",
+				},
+			},
+			expected: "PARSE_JSON",
+		},
+		{
+			name: "array with string items returns PARSE_JSON",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "string",
+				},
+			},
+			expected: "PARSE_JSON",
+		},
+		{
+			name: "array with number items returns TO_VARIANT",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "number",
+				},
+			},
+			expected: "TO_VARIANT",
+		},
+		{
+			name: "array with null items returns TO_VARIANT",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "null",
+				},
+			},
+			expected: "TO_VARIANT",
+		},
+		{
+			name: "string type returns empty string",
+			property: internal.SchemaProperty{
+				Type: "string",
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateInsertFunction(tt.property)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

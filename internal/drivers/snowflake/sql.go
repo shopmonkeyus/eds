@@ -116,6 +116,21 @@ func toDeleteSQL(record *util.Record) string {
 	return sql.String()
 }
 
+func generateInsertFunction(property internal.SchemaProperty) string {
+	var fn string
+	switch property.Type {
+	case "object":
+		fn = "PARSE_JSON"
+	case "array":
+		if property.Items != nil && (property.Items.Type == "object" || property.Items.Type == "string") {
+			fn = "PARSE_JSON"
+		} else {
+			fn = "TO_VARIANT"
+		}
+	}
+	return fn
+}
+
 func toMergeSQL(record *util.Record, model *internal.Schema) string {
 	var sql strings.Builder
 	// Apply the whole after field if the updated date is later than the existing updated date
@@ -127,26 +142,15 @@ func toMergeSQL(record *util.Record, model *internal.Schema) string {
 
 	for _, name := range model.Columns() {
 		insertColumns = append(insertColumns, util.QuoteIdentifier(name))
+		columnProperty := model.Properties[name]
 		if val, ok := record.Object[name]; ok {
-			c := model.Properties[name]
-			var fn string
-			switch c.Type {
-			case "object":
-				fn = "PARSE_JSON"
-			case "array":
-				if c.Items != nil && (c.Items.Type == "object" || c.Items.Type == "string") {
-					fn = "PARSE_JSON"
-				} else {
-					fn = "TO_VARIANT"
-				}
-			}
+			fn := generateInsertFunction(columnProperty)
 			v := quoteValue(val, fn)
 			updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
 			insertVals = append(insertVals, v)
 		} else {
 			// For missing values, use nullable defaults for insert
-			c := model.Properties[name]
-			v := nullableValue(c, true)
+			v := nullableValue(columnProperty, true)
 			insertVals = append(insertVals, v)
 		}
 	}
@@ -226,23 +230,13 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool, updateStrat
 			}
 			var insertVals []string
 			for _, name := range model.Columns() {
-				c := model.Properties[name]
+				columnProperty := model.Properties[name]
 				if val, ok := record.Object[name]; ok {
-					var fn string
-					switch c.Type {
-					case "object":
-						fn = "PARSE_JSON"
-					case "array":
-						if c.Items != nil && (c.Items.Type == "object" || c.Items.Type == "string") {
-							fn = "PARSE_JSON"
-						} else {
-							fn = "TO_VARIANT"
-						}
-					}
+					fn := generateInsertFunction(columnProperty)
 					v := quoteValue(val, fn)
 					insertVals = append(insertVals, v)
 				} else {
-					insertVals = append(insertVals, nullableValue(c, true))
+					insertVals = append(insertVals, nullableValue(columnProperty, true))
 				}
 			}
 			sql.WriteString("INSERT INTO ")
