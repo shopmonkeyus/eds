@@ -3,6 +3,7 @@ package snowflake
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -27,12 +28,12 @@ func TestDBChanges(t *testing.T) {
 	batcher.Add(dbChange.Table, dbChange.ID, dbChange.Operation, dbChange.Diff, object, nil)
 	schema, err := registery.GetLatestSchema()
 	assert.NoError(t, err)
-	sql, count := toSQL(batcher.Records()[0], schema["order"], false)
+	sql, count := toSQL(batcher.Records()[0], schema["order"], false, "")
 	assert.Equal(t, 1, count)
 	assert.Equal(t, `UPDATE "order" SET "updatedDate"='2024-07-11T21:16:51.70856Z' WHERE "id"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';
 `, sql)
 
-	sql, count = toSQL(batcher.Records()[0], schema["order"], true)
+	sql, count = toSQL(batcher.Records()[0], schema["order"], true, "")
 	assert.Equal(t, 2, count)
 	assert.Equal(t, `DELETE FROM "order" WHERE "id"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';
 UPDATE "order" SET "updatedDate"='2024-07-11T21:16:51.70856Z' WHERE "id"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';
@@ -45,7 +46,7 @@ UPDATE "order" SET "updatedDate"='2024-07-11T21:16:51.70856Z' WHERE "id"='zzdb46
 	object, err = dbChange.GetObject()
 	assert.NoError(t, err)
 	batcher.Add(dbChange.Table, dbChange.ID, dbChange.Operation, dbChange.Diff, object, nil)
-	sql, count = toSQL(batcher.Records()[0], schema["order"], false)
+	sql, count = toSQL(batcher.Records()[0], schema["order"], false, "")
 	assert.Equal(t, 1, count)
 	assert.Equal(t, "DELETE FROM \"order\" WHERE \"id\"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';\n", sql)
 }
@@ -173,4 +174,102 @@ Vehicle:
 If you have questions about your appointment or need to resch '' edule, please contact us at: (123) 456-7809 or info@multiline.com.'''`
 	assert.Equal(t, expectedApostrophe, quoteValue(multilineApostrophe, ""))
 
+}
+
+func TestToMergeSQL(t *testing.T) {
+	expected := `MERGE INTO "order" 
+					AS target USING (SELECT '1' AS "id", '2024-07-11T21:16:51.70856Z' AS "updatedDate") AS source 
+					ON target."id" = source."id" 
+					WHEN MATCHED AND source."updatedDate" > target."updatedDate" 
+					THEN UPDATE SET  "firstName"='Jim',"id"='1',"updatedDate"='2024-07-11T21:16:51.70856Z'
+					WHEN NOT MATCHED THEN INSERT ("firstName","id","updatedDate") VALUES ('Jim','1','2024-07-11T21:16:51.70856Z');`
+	fields := strings.Fields(expected)
+	condensed := strings.Join(fields, " ")
+	condensed = condensed + "\n" // get rid of the pretty printing so it matches the expected output
+	record := &util.Record{
+		Table:  "order",
+		Id:     "1",
+		Event:  &internal.DBChangeEvent{After: json.RawMessage(`{"id":"1","updatedDate":"2024-07-11T21:16:51.70856Z","firstName":"Jim"}`)},
+		Object: map[string]any{"id": "1", "updatedDate": "2024-07-11T21:16:51.70856Z", "firstName": "Jim"},
+	}
+	model := &internal.Schema{
+		Table: "order",
+		Properties: map[string]internal.SchemaProperty{
+			"id":          {Type: "string"},
+			"updatedDate": {Type: "string"},
+			"firstName":   {Type: "string"},
+		},
+	}
+	sql := toMergeSQL(record, model)
+	assert.Equal(t, condensed, sql)
+}
+
+func TestGenerateInsertFunction(t *testing.T) {
+	tests := []struct {
+		name     string
+		property internal.SchemaProperty
+		expected string
+	}{
+		{
+			name: "object type returns PARSE_JSON",
+			property: internal.SchemaProperty{
+				Type: "object",
+			},
+			expected: "PARSE_JSON",
+		},
+		{
+			name: "array with object items returns PARSE_JSON",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "object",
+				},
+			},
+			expected: "PARSE_JSON",
+		},
+		{
+			name: "array with string items returns PARSE_JSON",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "string",
+				},
+			},
+			expected: "PARSE_JSON",
+		},
+		{
+			name: "array with number items returns TO_VARIANT",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "number",
+				},
+			},
+			expected: "TO_VARIANT",
+		},
+		{
+			name: "array with null items returns TO_VARIANT",
+			property: internal.SchemaProperty{
+				Type: "array",
+				Items: &internal.ItemsType{
+					Type: "null",
+				},
+			},
+			expected: "TO_VARIANT",
+		},
+		{
+			name: "string type returns empty string",
+			property: internal.SchemaProperty{
+				Type: "string",
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateInsertFunction(tt.property)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

@@ -34,6 +34,9 @@ type DriverConfig struct {
 
 	// DataDir is the directory where the driver can store data.
 	DataDir string
+
+	// UpdateStrategy is the strategy to use for updating data. Empty string or "standard" are default; "after" updates the whole record in case an out-of-order event is recieved
+	UpdateStrategy string
 }
 
 // DriverSessionHandler is for drivers that want to receive the session id
@@ -229,7 +232,7 @@ func RegisterDriver(protocol string, driver Driver) {
 }
 
 // NewDriver creates a new driver for the given URL.
-func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry, tracker *tracker.Tracker, datadir string) (Driver, error) {
+func NewDriver(ctx context.Context, logger logger.Logger, urlString string, registry SchemaRegistry, tracker *tracker.Tracker, datadir string, updateStrategy string) (Driver, error) {
 	u, err := url.Parse(urlString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
@@ -254,6 +257,7 @@ func NewDriver(ctx context.Context, logger logger.Logger, urlString string, regi
 			SchemaRegistry: registry,
 			Tracker:        tracker,
 			DataDir:        datadir,
+			UpdateStrategy: updateStrategy,
 		}); err != nil {
 			return nil, err
 		}

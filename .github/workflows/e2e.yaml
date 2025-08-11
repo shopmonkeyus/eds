@@ -27,6 +27,8 @@ jobs:
       - name: Show Kafka output
         run: docker logs eds-init-kafka-1
       - name: Run tests
+        env:
+          SM_SNOWFLAKE_PASSWORD: ${{ secrets.SM_SNOWFLAKE_PASSWORD }}
         run: make e2e
       - name: Stop containers
         run: docker compose down

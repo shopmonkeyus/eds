@@ -116,6 +116,80 @@ func toDeleteSQL(record *util.Record) string {
 	return sql.String()
 }
 
+func generateInsertFunction(property internal.SchemaProperty) string {
+	var fn string
+	switch property.Type {
+	case "object":
+		fn = "PARSE_JSON"
+	case "array":
+		if property.Items != nil && (property.Items.Type == "object" || property.Items.Type == "string") {
+			fn = "PARSE_JSON"
+		} else {
+			fn = "TO_VARIANT"
+		}
+	}
+	return fn
+}
+
+func toMergeSQL(record *util.Record, model *internal.Schema) string {
+	var sql strings.Builder
+	// Apply the whole after field if the updated date is later than the existing updated date
+	// Use MERGE for upsert operations (insert if not exists, update if exists)
+	// TODO Switch this to use MSVCC timestamp? Possibly separate PR?
+	var updateValues []string
+	var insertColumns []string
+	var insertVals []string
+
+	for _, name := range model.Columns() {
+		insertColumns = append(insertColumns, util.QuoteIdentifier(name))
+		columnProperty := model.Properties[name]
+		if val, ok := record.Object[name]; ok {
+			fn := generateInsertFunction(columnProperty)
+			v := quoteValue(val, fn)
+			updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
+			insertVals = append(insertVals, v)
+		} else {
+			// For missing values, use nullable defaults for insert
+			v := nullableValue(columnProperty, true)
+			insertVals = append(insertVals, v)
+		}
+	}
+
+	after, _ := record.Event.GetObject() // ignore error because we assume after is present in an update event
+
+	sql.WriteString("MERGE INTO ")
+	sql.WriteString(util.QuoteIdentifier(record.Table))
+	sql.WriteString(" AS target USING (SELECT ")
+	sql.WriteString(quoteValue(record.Id, ""))
+	sql.WriteString(" AS ")
+	sql.WriteString(util.QuoteIdentifier("id"))
+	sql.WriteString(", ")
+	sql.WriteString(quoteValue(after["updatedDate"], ""))
+	sql.WriteString(" AS ")
+	sql.WriteString(util.QuoteIdentifier("updatedDate"))
+	sql.WriteString(") AS source ON target.")
+	sql.WriteString(util.QuoteIdentifier("id"))
+	sql.WriteString(" = source.")
+	sql.WriteString(util.QuoteIdentifier("id"))
+	sql.WriteString(" ")
+
+	// WHEN MATCHED clause - update if updatedDate is newer
+	sql.WriteString("WHEN MATCHED AND source.")
+	sql.WriteString(util.QuoteIdentifier("updatedDate"))
+	sql.WriteString(" > target.")
+	sql.WriteString(util.QuoteIdentifier("updatedDate"))
+	sql.WriteString(" THEN UPDATE SET ")
+	sql.WriteString(strings.Join(updateValues, ","))
+
+	// WHEN NOT MATCHED clause - insert new record
+	sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
+	sql.WriteString(strings.Join(insertColumns, ","))
+	sql.WriteString(") VALUES (")
+	sql.WriteString(strings.Join(insertVals, ","))
+	sql.WriteString(");\n")
+	return sql.String()
+}
+
 func nullableValue(c internal.SchemaProperty, wrap bool) string {
 	if c.Nullable {
 		return "NULL"
@@ -141,7 +215,7 @@ func nullableValue(c internal.SchemaProperty, wrap bool) string {
 	}
 }
 
-func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, int) {
+func toSQL(record *util.Record, model *internal.Schema, exists bool, updateStrategy string) (string, int) {
 	var sql strings.Builder
 	var count int
 	if exists || record.Operation == "DELETE" {
@@ -156,23 +230,13 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, in
 			}
 			var insertVals []string
 			for _, name := range model.Columns() {
-				c := model.Properties[name]
+				columnProperty := model.Properties[name]
 				if val, ok := record.Object[name]; ok {
-					var fn string
-					switch c.Type {
-					case "object":
-						fn = "PARSE_JSON"
-					case "array":
-						if c.Items != nil && (c.Items.Type == "object" || c.Items.Type == "string") {
-							fn = "PARSE_JSON"
-						} else {
-							fn = "TO_VARIANT"
-						}
-					}
+					fn := generateInsertFunction(columnProperty)
 					v := quoteValue(val, fn)
 					insertVals = append(insertVals, v)
 				} else {
-					insertVals = append(insertVals, nullableValue(c, true))
+					insertVals = append(insertVals, nullableValue(columnProperty, true))
 				}
 			}
 			sql.WriteString("INSERT INTO ")
@@ -184,29 +248,35 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, in
 			sql.WriteString(";\n")
 		} else {
 			// update
-			var updateValues []string
-			for _, name := range record.Diff {
-				if !util.SliceContains(model.Columns(), name) {
-					continue
+			switch updateStrategy {
+			case "after":
+				sql.WriteString(toMergeSQL(record, model))
+			default: // "standard"
+				// Standard is applying just the diffs in the order they are received
+				var updateValues []string
+				for _, name := range record.Diff {
+					if !util.SliceContains(model.Columns(), name) {
+						continue
+					}
+					if val, ok := record.Object[name]; ok {
+						v := quoteValue(val, "")
+						updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
+					}
+					// else shouldn't be possible
 				}
-				if val, ok := record.Object[name]; ok {
-					v := quoteValue(val, "")
-					updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
+				if len(updateValues) == 0 {
+					return sql.String(), count // in case we skipped, just return
 				}
-				// else shouldn't be possible
+				sql.WriteString("UPDATE ")
+				sql.WriteString(util.QuoteIdentifier(record.Table))
+				sql.WriteString(" SET ")
+				sql.WriteString(strings.Join(updateValues, ","))
+				sql.WriteString(" WHERE ")
+				sql.WriteString(util.QuoteIdentifier("id"))
+				sql.WriteString("=")
+				sql.WriteString(quoteValue(record.Id, ""))
+				sql.WriteString(";\n")
 			}
-			if len(updateValues) == 0 {
-				return sql.String(), count // in case we skipped, just return
-			}
-			sql.WriteString("UPDATE ")
-			sql.WriteString(util.QuoteIdentifier(record.Table))
-			sql.WriteString(" SET ")
-			sql.WriteString(strings.Join(updateValues, ","))
-			sql.WriteString(" WHERE ")
-			sql.WriteString(util.QuoteIdentifier("id"))
-			sql.WriteString("=")
-			sql.WriteString(quoteValue(record.Id, ""))
-			sql.WriteString(";\n")
 		}
 		count++
 	}
