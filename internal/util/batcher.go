@@ -103,6 +103,11 @@ func (b *Batcher) Add(logger logger.Logger, table string, id string, operation s
 		previousRecord.Operation = operation
 		if previousRecord.Id != payload["id"].(string) {
 			logger.Error("id mismatch! record with id %s and payload id %s", previousRecord.Id, payload["id"].(string))
+			logger.Error("current event key: %v. Previous event key: %v", event.Key, previousRecord.Event.Key)
+			logger.Error("current table from event: %s. Previous table from event: %s", event.Table, previousRecord.Event.Table)
+			logger.Error("current table from record: %s. Previous table from record: %s", table, previousRecord.Table)
+			logger.Error("current hashkey: %s", hashkey)
+			logger.Error("hashkey array: %v", b.pks)
 			logger.Error("previous record payload: %s", JSONStringify(previousRecord.Object))
 			logger.Error("new payload: %s", JSONStringify(payload))
 		}
