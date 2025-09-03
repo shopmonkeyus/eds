@@ -91,16 +91,6 @@ func (b *Batcher) Add(logger logger.Logger, table string, id string, operation s
 	case withoutBatch:
 		appendRecord()
 	case updateWithBatch:
-		for _, key := range diff {
-			if !SliceContains(previousRecord.Diff, key) {
-				previousRecord.Diff = append(previousRecord.Diff, key)
-			}
-		}
-		if len(previousRecord.Diff) == 0 {
-			previousRecord.Diff = diff
-		}
-		previousRecord.Event = event
-		previousRecord.Operation = operation
 		if previousRecord.Id != payload["id"].(string) {
 			logger.Error("id mismatch! record with id %s and payload id %s", previousRecord.Id, payload["id"].(string))
 			logger.Error("current event key: %v. Previous event key: %v", event.Key, previousRecord.Event.Key)
@@ -113,11 +103,22 @@ func (b *Batcher) Add(logger logger.Logger, table string, id string, operation s
 			logger.Error("previous event raw: %s", JSONStringify(previousRecord.Event))
 			logger.Error("new event raw: %s", JSONStringify(event))
 		}
+		for _, key := range diff {
+			if !SliceContains(previousRecord.Diff, key) {
+				previousRecord.Diff = append(previousRecord.Diff, key)
+			}
+		}
+		if len(previousRecord.Diff) == 0 {
+			previousRecord.Diff = diff
+		}
+		previousRecord.Event = event
+		previousRecord.Operation = operation
 		maps.Copy(previousRecord.Object, payload) // upsert the payload with the new update
 		logger.Debug("combined update with id %s into record with id %s", primaryKey, previousRecord.Id)
 	case deleteWithBatch:
 		b.records = append(b.records[:index], b.records[index+1:]...)
 		delete(b.pks, hashkey)
+		clear(b.pks)
 		appendDeleteRecord()
 	case deleteWithoutBatch:
 		appendDeleteRecord()
