@@ -4,6 +4,7 @@ import (
 	"maps"
 
 	"github.com/shopmonkeyus/eds/internal"
+	"github.com/shopmonkeyus/go-common/logger"
 )
 
 type Batcher struct {
@@ -30,7 +31,7 @@ func (b *Batcher) Records() []*Record {
 }
 
 // Add will add a record to the batcher.
-func (b *Batcher) Add(table string, id string, operation string, diff []string, payload map[string]any, event *internal.DBChangeEvent) {
+func (b *Batcher) Add(logger logger.Logger, table string, id string, operation string, diff []string, payload map[string]any, event *internal.DBChangeEvent) {
 	var primaryKey string
 	if event != nil {
 		primaryKey = event.GetPrimaryKey()
@@ -100,7 +101,13 @@ func (b *Batcher) Add(table string, id string, operation string, diff []string, 
 		}
 		previousRecord.Event = event
 		previousRecord.Operation = operation
+		if previousRecord.Id != payload["id"].(string) {
+			logger.Error("id mismatch! record with id %s and payload id %s", previousRecord.Id, payload["id"].(string))
+			logger.Error("previous record payload: %s", JSONStringify(previousRecord.Object))
+			logger.Error("new payload: %s", JSONStringify(payload))
+		}
 		maps.Copy(previousRecord.Object, payload) // upsert the payload with the new update
+		logger.Debug("combined update with id %s into record with id %s", primaryKey, previousRecord.Id)
 	case deleteWithBatch:
 		b.records = append(b.records[:index], b.records[index+1:]...)
 		delete(b.pks, hashkey)

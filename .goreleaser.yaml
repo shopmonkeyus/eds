@@ -24,7 +24,7 @@ builds:
           env:
             - QUILL_LOG_FILE=./quill-{{ .Target }}.log
 archives:
-  - formats: ['tar.gz']
+  - formats: ["tar.gz"]
     # this name template makes the OS and Arch compatible with the results of uname.
     name_template: >-
       {{ .ProjectName }}_
@@ -36,7 +36,7 @@ archives:
     # use zip for windows archives
     format_overrides:
       - goos: windows
-        formats: ['zip']
+        formats: ["zip"]
 checksum:
   name_template: "checksums.txt"
 snapshot:
@@ -52,7 +52,7 @@ signs:
     args:
       [
         "-u",
-        "FECFF4915E7BF492",
+        "3C246E2D0C4F9134",
         "--output",
         "${signature}",
         "--detach-sign",
