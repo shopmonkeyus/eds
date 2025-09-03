@@ -110,6 +110,8 @@ func (b *Batcher) Add(logger logger.Logger, table string, id string, operation s
 			logger.Error("hashkey array: %v", b.pks)
 			logger.Error("previous record payload: %s", JSONStringify(previousRecord.Object))
 			logger.Error("new payload: %s", JSONStringify(payload))
+			logger.Error("previous event raw: %s", JSONStringify(previousRecord.Event))
+			logger.Error("new event raw: %s", JSONStringify(event))
 		}
 		maps.Copy(previousRecord.Object, payload) // upsert the payload with the new update
 		logger.Debug("combined update with id %s into record with id %s", primaryKey, previousRecord.Id)

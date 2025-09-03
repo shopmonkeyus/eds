@@ -369,6 +369,7 @@ func (c *Consumer) bufferer() {
 			buf := msg.Data()
 			md, _ := msg.Metadata()
 			var evt internal.DBChangeEvent
+			log.Debug("unmarshalling event: %s", string(buf))
 			if err := json.Unmarshal(buf, &evt); err != nil {
 				internal.PendingEvents.Dec()
 				log.Error("error unmarshalling: %s (seq:%d): %s", string(buf), md.Sequence.Consumer, err)
