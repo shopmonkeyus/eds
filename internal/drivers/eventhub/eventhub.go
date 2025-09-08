@@ -114,7 +114,7 @@ func (p *eventHubDriver) Process(logger logger.Logger, event internal.DBChangeEv
 	if err != nil {
 		return false, fmt.Errorf("error getting json object: %w", err)
 	}
-	p.batcher.Add(logger, event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
+	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
 	return false, nil
 }
 
@@ -232,7 +232,7 @@ func (p *eventHubDriver) ImportEvent(event internal.DBChangeEvent, schema *inter
 	if err != nil {
 		return fmt.Errorf("error getting json object: %w", err)
 	}
-	p.batcher.Add(p.logger, event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
+	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
 
 	if p.batcher.Len() >= maxImportBatchSize {
 		return p.Flush(p.logger)

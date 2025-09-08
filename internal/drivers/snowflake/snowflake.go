@@ -165,7 +165,7 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 	if err != nil {
 		return false, fmt.Errorf("error getting json object: %w", err)
 	}
-	p.batcher.Add(logger, event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
+	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
 	return false, nil
 }
 

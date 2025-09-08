@@ -49,3 +49,21 @@ func TestBatcherAddCombineUpdate(t *testing.T) {
 	assert.Equal(t, 34, records[1].Object["age"])
 	assert.Equal(t, []string{"name", "age"}, records[1].Diff)
 }
+
+func TestBatcherAddBatchDelete(t *testing.T) {
+	b := NewBatcher()
+	b.Add("user", "u0", "INSERT", []string{}, map[string]interface{}{"name": "Lucy", "age": 35}, nil)
+	b.Add("user", "u1", "INSERT", []string{}, map[string]interface{}{"name": "Sally", "age": 50}, nil)
+	b.Add("vehicle", "v0", "INSERT", []string{}, map[string]interface{}{"type": "truck", "mileage": 99999}, nil)
+	b.Add("user", "u2", "UPDATE", []string{"age"}, map[string]interface{}{"age": 7}, &internal.DBChangeEvent{After: json.RawMessage(`{"id":"u2","age":7}`)})
+	b.Add("user", "u0", "DELETE", nil, map[string]interface{}{"id": "u0"}, nil)
+	b.Add("user", "u1", "UPDATE", []string{"age"}, map[string]interface{}{"age": 60}, &internal.DBChangeEvent{After: json.RawMessage(`{"id":"u1","name":"Sally","age":60}`)})
+	b.Add("vehicle", "v0", "UPDATE", []string{"age"}, map[string]interface{}{"mileage": 11111}, &internal.DBChangeEvent{After: json.RawMessage(`{"id":"v0","mileage":11111}`)})
+
+	for _, record := range b.records {
+		_, hasMileage := record.Object["mileage"]
+		_, hasName := record.Object["name"]
+		dataIsBad := (record.Table == "user" && hasMileage) || (record.Table == "vehicle" && hasName)
+		assert.False(t, dataIsBad, "record object contains incorrect data. failure when combining records in batch")
+	}
+}
