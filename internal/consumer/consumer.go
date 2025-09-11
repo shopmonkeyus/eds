@@ -317,13 +317,13 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 				}
 			}
 			logger.Info("migrated table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
+
+			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
+				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			}
 			return true, nil
 		} else {
 			logger.Info("new table: %s with different model version: %s but no new columns added", event.Table, event.ModelVersion)
-		}
-		// we want to bring the table up to the new version in all cases
-		if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
-			return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 		}
 	}
 	return false, nil
