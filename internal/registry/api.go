@@ -133,11 +133,35 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 	}
 
 	// we have to now fallback to the API to get the data
+	schema, err := r.getSchemaFromAPI(table, version)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching schema from API: %s", err)
+	}
+
+	// save it in the cache and tracker
+	if err := r.cache.Set(key, &schema, defaultCacheDuration); err != nil {
+		return nil, fmt.Errorf("error setting key %s in cache: %s", key, err)
+	}
+	if r.tracker != nil {
+		if err := r.tracker.SetKey(key, util.JSONStringify(schema), 0); err != nil {
+			return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
+		}
+	}
+
+	r.logger.Trace("get schema returned")
+	return schema, nil
+}
+
+func (r *APIRegistry) getSchemaFromAPI(table string, version string) (*internal.Schema, error) {
 	object := r.objects[table]
 	if object == "" {
 		object = table
 	}
-	req, err := http.NewRequest("GET", r.apiURL+"/v3/schema/"+object+"/"+version, nil)
+	url := r.apiURL + "/v3/schema/" + object
+	if version != "" {
+		url += "/" + version
+	}
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
@@ -157,18 +181,15 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 		return nil, fmt.Errorf("error decoding schema for table: %s, modelVersion: %s: %s", table, version, err)
 	}
 
-	// save it in the cache and tracker
-	if err := r.cache.Set(key, &schema, defaultCacheDuration); err != nil {
-		return nil, fmt.Errorf("error setting key %s in cache: %s", key, err)
-	}
-	if r.tracker != nil {
-		if err := r.tracker.SetKey(key, util.JSONStringify(schema), 0); err != nil {
-			return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
-		}
-	}
-	r.logger.Trace("get schema returned")
-
 	return &schema, nil
+}
+
+func (r *APIRegistry) GetLatestModelVersion(table string) (string, error) {
+	schema, err := r.getSchemaFromAPI(table, "")
+	if err != nil {
+		return "", fmt.Errorf("error fetching schema: %s", err)
+	}
+	return schema.ModelVersion, nil
 }
 
 type errorResponse struct {

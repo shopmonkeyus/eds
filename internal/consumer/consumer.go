@@ -272,12 +272,12 @@ func (c *Consumer) Error() <-chan error {
 }
 
 func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Logger, event *internal.DBChangeEvent) (bool, error) {
-	found, version, err := c.registry.GetTableVersion(event.Table)
+	found, versionFromCache, err := c.registry.GetTableVersion(event.Table)
 	if err != nil {
 		return false, fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 	}
-	if !found || version != event.ModelVersion {
-		logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, version, event.ModelVersion)
+	if !found || versionFromCache != event.ModelVersion {
+		logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, versionFromCache, event.ModelVersion)
 		newschema, err := c.registry.GetSchema(event.Table, event.ModelVersion)
 		if err != nil {
 			return false, fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
@@ -294,9 +294,9 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 			}
 			return true, nil
 		}
-		oldschema, err := c.registry.GetSchema(event.Table, version)
+		oldschema, err := c.registry.GetSchema(event.Table, versionFromCache)
 		if err != nil {
-			return false, fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
+			return false, fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, versionFromCache, err)
 		}
 		// figure out which columns are new
 		var columns []string
@@ -324,6 +324,17 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 			return true, nil
 		} else {
 			logger.Info("new table: %s with different model version: %s but no new columns added", event.Table, event.ModelVersion)
+
+			// if no columns are updated, we don't really know which model version is the latest, so check the api
+			latestModelVersion, err := c.registry.GetLatestModelVersion(event.Table)
+			if err != nil {
+				return false, fmt.Errorf("error getting latest model version for table: %s: %w", event.Table, err)
+			}
+			if versionFromCache != latestModelVersion {
+				if err := c.registry.SetTableVersion(event.Table, latestModelVersion); err != nil {
+					return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, latestModelVersion, err)
+				}
+			}
 		}
 	}
 	return false, nil

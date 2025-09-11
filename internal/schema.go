@@ -85,6 +85,9 @@ type SchemaRegistry interface {
 	// SetTableVersion sets the version of a table to a specific version.
 	SetTableVersion(table string, version string) error
 
+	// GetLatestModelVersion returns the latest model version for a table.
+	GetLatestModelVersion(table string) (string, error)
+
 	// Close will shutdown the schema optionally flushing any caches.
 	Close() error
 }
