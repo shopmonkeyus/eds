@@ -149,10 +149,10 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 	}
 
 	r.logger.Trace("get schema returned")
-	return schema, nil
+	return &schema, nil
 }
 
-func (r *APIRegistry) getSchemaFromAPI(table string, version string) (*internal.Schema, error) {
+func (r *APIRegistry) getSchemaFromAPI(table string, version string) (internal.Schema, error) {
 	object := r.objects[table]
 	if object == "" {
 		object = table
@@ -163,25 +163,25 @@ func (r *APIRegistry) getSchemaFromAPI(table string, version string) (*internal.
 	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %s", err)
+		return internal.Schema{}, fmt.Errorf("error creating request: %s", err)
 	}
 	req.Header.Set("User-Agent", r.userAgent)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching schema: %s", err)
+		return internal.Schema{}, fmt.Errorf("error fetching schema: %s", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("error fetching schema for table: %s, modelVersion: %s. status code was: %d, %s", table, version, resp.StatusCode, string(buf))
+		return internal.Schema{}, fmt.Errorf("error fetching schema for table: %s, modelVersion: %s. status code was: %d, %s", table, version, resp.StatusCode, string(buf))
 	}
 	var schema internal.Schema
 	dec := json.NewDecoder(resp.Body)
 	if err := dec.Decode(&schema); err != nil {
-		return nil, fmt.Errorf("error decoding schema for table: %s, modelVersion: %s: %s", table, version, err)
+		return internal.Schema{}, fmt.Errorf("error decoding schema for table: %s, modelVersion: %s: %s", table, version, err)
 	}
 
-	return &schema, nil
+	return schema, nil
 }
 
 func (r *APIRegistry) GetLatestModelVersion(table string) (string, error) {
