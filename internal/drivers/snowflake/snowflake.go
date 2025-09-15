@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,20 +22,21 @@ import (
 const maxBatchSize = 200
 
 type snowflakeDriver struct {
-	config         internal.DriverConfig
-	ctx            context.Context
-	logger         logger.Logger
-	db             *sql.DB
-	registry       internal.SchemaRegistry
-	waitGroup      sync.WaitGroup
-	once           sync.Once
-	batcher        *util.Batcher
-	locker         sync.Mutex
-	sessionID      string
-	dbname         string
-	dbschema       internal.DatabaseSchema
-	updateStrategy string
-	profilingInfo  DriverProfilingInfo
+	config                  internal.DriverConfig
+	ctx                     context.Context
+	logger                  logger.Logger
+	db                      *sql.DB
+	registry                internal.SchemaRegistry
+	waitGroup               sync.WaitGroup
+	once                    sync.Once
+	batcher                 *util.Batcher
+	locker                  sync.Mutex
+	sessionID               string
+	dbname                  string
+	dbschema                internal.DatabaseSchema
+	updateStrategy          string
+	profilingInfo           DriverProfilingInfo
+	bulkRecordModifications []func([]*util.Record)
 }
 
 var _ internal.Driver = (*snowflakeDriver)(nil)
@@ -118,6 +120,7 @@ func (p *snowflakeDriver) Start(config internal.DriverConfig) error {
 	p.logger = config.Logger.WithPrefix("[snowflake]")
 	p.registry = config.SchemaRegistry
 	p.updateStrategy = config.UpdateStrategy
+	p.bulkRecordModifications = snowflakeBulkRecordModifications
 	db, err := p.connectToDB(config.Context, config.URL)
 	if err != nil {
 		return fmt.Errorf("unable to create connection: %w", err)
@@ -171,6 +174,27 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 
 var sequence int64
 
+func sortRecordsByMSVCC(records []*util.Record) {
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].Event.MVCCTimestamp < records[j].Event.MVCCTimestamp
+	})
+}
+
+func combineRecordsWithSamePrimaryKey(records []*util.Record) {
+	return
+}
+
+var snowflakeBulkRecordModifications = []func([]*util.Record){
+	sortRecordsByMSVCC,
+	combineRecordsWithSamePrimaryKey,
+}
+
+func (p *snowflakeDriver) runBulkRecordModifications(records []*util.Record) {
+	for i := range p.bulkRecordModifications {
+		p.bulkRecordModifications[i](records)
+	}
+}
+
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
 func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 	logger.Debug("Flush method called") // Add this line to see if Flush is being called
@@ -187,6 +211,7 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 	if count > 0 {
 		logger.Debug("flush: %d / %d", count, sequence+1)
 		sequence++
+		p.runBulkRecordModifications(records)
 		tag := fmt.Sprintf("eds-%s/%d/%d", p.sessionID, sequence, count)
 		ctx := sf.WithQueryTag(context.Background(), tag)
 		var query strings.Builder
