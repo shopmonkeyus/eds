@@ -760,11 +760,10 @@ func (m *mockDriverWithMigration) MigrateNewColumns(ctx context.Context, logger 
 }
 
 type mockRegistry struct {
-	latestSchema          internal.SchemaMap
-	getSchema             func(table string, version string) (*internal.Schema, error)
-	getTableVersion       func(table string) (bool, string, error)
-	setTableVersion       func(table string, version string) error
-	getLatestModelVersion func(table string) (string, error)
+	latestSchema    internal.SchemaMap
+	getSchema       func(table string, version string) (*internal.Schema, error)
+	getTableVersion func(table string) (bool, string, error)
+	setTableVersion func(table string, version string) error
 }
 
 // GetLatestSchema returns the latest schema for all tables.
@@ -794,14 +793,6 @@ func (r *mockRegistry) SetTableVersion(table string, version string) error {
 		return r.setTableVersion(table, version)
 	}
 	return nil
-}
-
-// GetLatestModelVersion returns the latest model version for a table.
-func (r *mockRegistry) GetLatestModelVersion(table string) (string, error) {
-	if r.getLatestModelVersion != nil {
-		return r.getLatestModelVersion(table)
-	}
-	return "", nil
 }
 
 // Close will shutdown the schema optionally flushing any caches.

@@ -272,22 +272,12 @@ func (c *Consumer) Error() <-chan error {
 }
 
 func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Logger, event *internal.DBChangeEvent) (bool, error) {
-	found, versionFromCache, err := c.registry.GetTableVersion(event.Table)
+	found, version, err := c.registry.GetTableVersion(event.Table)
 	if err != nil {
 		return false, fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 	}
-	if !found || versionFromCache != event.ModelVersion {
-		// set the cache to the latest model version no matter what
-		latestModelVersion, err := c.registry.GetLatestModelVersion(event.Table)
-		if err != nil {
-			return false, fmt.Errorf("error getting latest model version for table: %s: %w", event.Table, err)
-		}
-		if versionFromCache != latestModelVersion {
-			if err := c.registry.SetTableVersion(event.Table, latestModelVersion); err != nil {
-				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, latestModelVersion, err)
-			}
-		}
-		logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, versionFromCache, event.ModelVersion)
+	if !found || version != event.ModelVersion {
+		logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, version, event.ModelVersion)
 		newschema, err := c.registry.GetSchema(event.Table, event.ModelVersion)
 		if err != nil {
 			return false, fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
@@ -298,12 +288,15 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 			if err := migration.MigrateNewTable(ctx, logger, newschema); err != nil {
 				return false, fmt.Errorf("error migrating new table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
+			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
+				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			}
 			logger.Info("migrated new table: %s, model version: %s", event.Table, event.ModelVersion)
 			return true, nil
 		}
-		oldschema, err := c.registry.GetSchema(event.Table, versionFromCache)
+		oldschema, err := c.registry.GetSchema(event.Table, version)
 		if err != nil {
-			return false, fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, versionFromCache, err)
+			return false, fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
 		}
 		// figure out which columns are new
 		var columns []string
@@ -322,6 +315,9 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 				if !util.SliceContains(event.Diff, col) {
 					event.Diff = append(event.Diff, col) // add these new columns to the diff so that we can update them as part of the changeset
 				}
+			}
+			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
+				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
 			logger.Info("migrated table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
 			return true, nil

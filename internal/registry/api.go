@@ -133,9 +133,28 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 	}
 
 	// we have to now fallback to the API to get the data
-	schema, err := r.getSchemaFromAPI(table, version)
+	object := r.objects[table]
+	if object == "" {
+		object = table
+	}
+	req, err := http.NewRequest("GET", r.apiURL+"/v3/schema/"+object+"/"+version, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching schema from API: %s", err)
+		return nil, fmt.Errorf("error creating request: %s", err)
+	}
+	req.Header.Set("User-Agent", r.userAgent)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching schema: %s", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		buf, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("error fetching schema for table: %s, modelVersion: %s. status code was: %d, %s", table, version, resp.StatusCode, string(buf))
+	}
+	var schema internal.Schema
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&schema); err != nil {
+		return nil, fmt.Errorf("error decoding schema for table: %s, modelVersion: %s: %s", table, version, err)
 	}
 
 	// save it in the cache and tracker
@@ -147,49 +166,9 @@ func (r *APIRegistry) GetSchema(table string, version string) (*internal.Schema,
 			return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
 		}
 	}
-
 	r.logger.Trace("get schema returned")
+
 	return &schema, nil
-}
-
-func (r *APIRegistry) getSchemaFromAPI(table string, version string) (internal.Schema, error) {
-	object := r.objects[table]
-	if object == "" {
-		object = table
-	}
-	url := r.apiURL + "/v3/schema/" + object
-	if version != "" {
-		url += "/" + version
-	}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return internal.Schema{}, fmt.Errorf("error creating request: %s", err)
-	}
-	req.Header.Set("User-Agent", r.userAgent)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return internal.Schema{}, fmt.Errorf("error fetching schema: %s", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		buf, _ := io.ReadAll(resp.Body)
-		return internal.Schema{}, fmt.Errorf("error fetching schema for table: %s, modelVersion: %s. status code was: %d, %s", table, version, resp.StatusCode, string(buf))
-	}
-	var schema internal.Schema
-	dec := json.NewDecoder(resp.Body)
-	if err := dec.Decode(&schema); err != nil {
-		return internal.Schema{}, fmt.Errorf("error decoding schema for table: %s, modelVersion: %s: %s", table, version, err)
-	}
-
-	return schema, nil
-}
-
-func (r *APIRegistry) GetLatestModelVersion(table string) (string, error) {
-	schema, err := r.getSchemaFromAPI(table, "")
-	if err != nil {
-		return "", fmt.Errorf("error fetching schema: %s", err)
-	}
-	return schema.ModelVersion, nil
 }
 
 type errorResponse struct {
@@ -233,9 +212,13 @@ func NewAPIRegistry(ctx context.Context, logger logger.Logger, apiURL string, ed
 	// save all the data into the tracker and cache the latest
 	for _, schema := range registry.schema {
 		key := registry.getSchemaCacheKey(schema.Table, schema.ModelVersion)
+		versionKey := registry.getVersionCacheKey(schema.Table)
 		if tracker != nil {
 			if err := tracker.SetKey(key, util.JSONStringify(schema), 0); err != nil {
 				return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
+			}
+			if err := tracker.SetKey(versionKey, schema.ModelVersion, 0); err != nil {
+				return nil, fmt.Errorf("error setting key %s in tracker: %s", versionKey, err)
 			}
 		}
 		if err := registry.cache.Set(key, schema, 0); err != nil {
