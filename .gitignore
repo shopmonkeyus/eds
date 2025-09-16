@@ -16,3 +16,5 @@
 /shopmonkey.key.asc
 /data-*
 /quill-*.log
+/.vscode/
+eds-debug
