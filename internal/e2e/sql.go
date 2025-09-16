@@ -21,7 +21,9 @@ type sqlDriverTransform interface {
 type columnFormat func(string) string
 
 func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format sqlDriverTransform) error {
-	kv, err := event.GetObject()
+	currentSchemaVersion := currentSchemaVersion[tableName(event.Table)]
+	currentSchema := schemaMap[event.Table][currentSchemaVersion]
+	eventObject, err := event.GetObject()
 	if err != nil {
 		return fmt.Errorf("error getting object: %w", err)
 	}
@@ -60,16 +62,21 @@ func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver
 			} else {
 				v = val
 			}
-			if ev, ok := kv[col]; ok {
+			if ev, ok := eventObject[col]; ok {
 				if util.JSONStringify(ev) != util.JSONStringify(v) {
 					return fmt.Errorf("%s value does not match, was: %v, expected: %v", col, v, ev)
 				}
 			} else {
-				return fmt.Errorf("%s value %v was returned from db but was not expected", col, v)
+				currentSchemaDoesnotContainColumn := !util.SliceContains(currentSchema.Columns(), col)
+				columnIsNotNullable := !currentSchema.Properties[col].Nullable
+				valueIsNull := v == nil
+				if currentSchemaDoesnotContainColumn || (valueIsNull && columnIsNotNullable) {
+					return fmt.Errorf("%s value %v was returned from db but was not expected", col, v)
+				}
 			}
 			row[col] = v
 		}
-		for k := range kv {
+		for k := range currentSchema.Properties {
 			if _, ok := row[k]; !ok {
 				return fmt.Errorf("column %s was expected but not returned from db", k)
 			}

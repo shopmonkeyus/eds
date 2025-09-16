@@ -54,6 +54,10 @@ type e2eTestDisabled interface {
 	Disabled() bool
 }
 
+type tableName string
+
+var currentSchemaVersion = make(map[tableName]string)
+
 var tests = make([]e2eTest, 0)
 
 func registerTest(t e2eTest) {
@@ -131,6 +135,7 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 
 func runDBChangeNewTableTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion, defaultPayload)
+	currentSchemaVersion["customer"] = modelVersion
 	if err != nil {
 		return err
 	}
@@ -140,6 +145,7 @@ func runDBChangeNewTableTest(logger logger.Logger, _ *nats.Conn, js jetstream.Je
 
 func runDBChangeNewTableTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload)
+	currentSchemaVersion["customer"] = modelVersion2
 	if err != nil {
 		return err
 	}
@@ -149,6 +155,7 @@ func runDBChangeNewTableTest2(logger logger.Logger, _ *nats.Conn, js jetstream.J
 
 func runDBChangeNewColumnTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion2, defaultPayload2)
+	currentSchemaVersion["order"] = modelVersion2
 	if err != nil {
 		return err
 	}
@@ -158,6 +165,7 @@ func runDBChangeNewColumnTest(logger logger.Logger, _ *nats.Conn, js jetstream.J
 
 func runDBChangeNewColumnTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion3, defaultPayload2)
+	currentSchemaVersion["order"] = modelVersion3
 	if err != nil {
 		return err
 	}
@@ -176,6 +184,7 @@ func runDBChangeOldModelVersionTest(logger logger.Logger, _ *nats.Conn, js jetst
 
 func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion, defaultPayload)
+	currentSchemaVersion["order"] = modelVersion
 	if err != nil {
 		return err
 	}
@@ -185,6 +194,7 @@ func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetS
 
 func runDBChangeInsertTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload)
+	currentSchemaVersion["customer"] = modelVersion2
 	if err != nil {
 		return err
 	}

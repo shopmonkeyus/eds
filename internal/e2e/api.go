@@ -16,7 +16,6 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-// schemaMap contains schema definitions for all model versions used in e2e tests
 var schemaMap = map[string]map[string]internal.Schema{
 	"order": {
 		"fff000111": {
@@ -43,10 +42,12 @@ var schemaMap = map[string]map[string]internal.Schema{
 					Type: "string",
 				},
 				"age": {
-					Type: "number",
+					Type:     "number",
+					Nullable: false,
 				},
 			},
 			PrimaryKeys: []string{"id"},
+			Required:    []string{"age"},
 		},
 		"fff000113-update": {
 			Table:        "order",
@@ -59,10 +60,12 @@ var schemaMap = map[string]map[string]internal.Schema{
 					Type: "string",
 				},
 				"age": {
-					Type: "number",
+					Type:     "number",
+					Nullable: false,
 				},
 			},
 			PrimaryKeys: []string{"id"},
+			Required:    []string{"age"},
 		},
 	},
 	"customer": {
