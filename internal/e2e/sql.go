@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -19,6 +20,10 @@ type sqlDriverTransform interface {
 }
 
 type columnFormat func(string) string
+
+var (
+	ErrUnexpectedNonNullColumn = errors.New("unexpected non-null column value returned from database")
+)
 
 func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format sqlDriverTransform) error {
 	kv, err := event.GetObject()
@@ -65,7 +70,16 @@ func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver
 					return fmt.Errorf("%s value does not match, was: %v, expected: %v", col, v, ev)
 				}
 			} else {
-				return fmt.Errorf("%s value %v was returned from db but was not expected", col, v)
+				// This column exists in the database but not in the expected payload
+				// This happens when using an old model version with a newer schema
+				if driver == "snowflake" {
+					// For Snowflake, this should be treated as an error because it means
+					// the system tried to insert NULL into a non-nullable field
+					return fmt.Errorf("snowflake constraint violation: %s value %v was returned from db but was not expected (likely NULL in non-nullable field)", col, v)
+				} else {
+					// For other databases, this is expected behavior for old model versions
+					return fmt.Errorf("%s value %v was returned from db but was not expected: %w", col, v, ErrUnexpectedNonNullColumn)
+				}
 			}
 			row[col] = v
 		}

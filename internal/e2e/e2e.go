@@ -6,6 +6,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -39,6 +40,7 @@ const (
 	apikey            = "apikey"
 	defaultPayload    = `{"id":"12345","name":"test"}`
 	defaultPayload2   = `{"id":"12345","name":"test","age":1}`
+	oldModelPayload   = `{"id":"23456","name":"oldmodel"}`
 	defaultPayload3   = `{"id":"12345","name":"test","foo":1}`
 	eventDeliverDelay = time.Millisecond * 150
 )
@@ -98,7 +100,11 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 	event.ID = util.Hash(time.Now())
 	event.Operation = operation
 	event.Table = table
-	event.Key = []string{"gcp-us-central1", "12345"}
+	var payloadMap map[string]any
+	if err := json.Unmarshal([]byte(payload), &payloadMap); err != nil {
+		return nil, fmt.Errorf("error unmarshalling payload: %w", err)
+	}
+	event.Key = []string{"gcp-us-central1", payloadMap["id"].(string)}
 	event.ModelVersion = modelVersion
 	event.Timestamp = time.Now().UnixMilli()
 	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().Nanosecond())
@@ -153,6 +159,15 @@ func runDBChangeNewColumnTest(logger logger.Logger, _ *nats.Conn, js jetstream.J
 
 func runDBChangeNewColumnTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion3, defaultPayload2)
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeOldModelVersionTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion, oldModelPayload)
 	if err != nil {
 		return err
 	}
@@ -347,6 +362,22 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 				} else {
 					atomic.AddUint32(&pass, 1)
 					logger.Info("✅ dbchange new column (#2) test: %s succeeded in %s", name, time.Since(testStarted))
+				}
+				testStarted = time.Now()
+				if err := runDBChangeOldModelVersionTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					if errors.Is(err, ErrUnexpectedNonNullColumn) {
+						atomic.AddUint32(&pass, 1)
+						logger.Info("expected error from db: %s", err)
+						logger.Info("✅ dbchange old model version test: %s handled expected error in %s", name, time.Since(testStarted))
+					} else {
+						atomic.AddUint32(&fail, 1)
+						logger.Error("🔴 dbchange old model version test: %s failed: %s", name, err)
+					}
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange old model version test: %s succeeded in %s", name, time.Since(testStarted))
 				}
 				testStarted = time.Now()
 				if err := runDBChangeInsertTest2(logger, nc, js, func(event internal.DBChangeEvent) error {
