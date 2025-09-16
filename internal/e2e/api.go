@@ -16,6 +16,98 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
+// schemaMap contains schema definitions for all model versions used in e2e tests
+var schemaMap = map[string]map[string]internal.Schema{
+	"order": {
+		"fff000111": {
+			Table:        "order",
+			ModelVersion: "fff000111",
+			Properties: map[string]internal.SchemaProperty{
+				"id": {
+					Type: "string",
+				},
+				"name": {
+					Type: "string",
+				},
+			},
+			PrimaryKeys: []string{"id"},
+		},
+		"fff000112-update": {
+			Table:        "order",
+			ModelVersion: "fff000112-update",
+			Properties: map[string]internal.SchemaProperty{
+				"id": {
+					Type: "string",
+				},
+				"name": {
+					Type: "string",
+				},
+				"age": {
+					Type: "number",
+				},
+			},
+			PrimaryKeys: []string{"id"},
+		},
+		"fff000113-update": {
+			Table:        "order",
+			ModelVersion: "fff000113-update",
+			Properties: map[string]internal.SchemaProperty{
+				"id": {
+					Type: "string",
+				},
+				"name": {
+					Type: "string",
+				},
+				"age": {
+					Type: "number",
+				},
+			},
+			PrimaryKeys: []string{"id"},
+		},
+	},
+	"customer": {
+		"fff000111": {
+			Table:        "customer",
+			ModelVersion: "fff000111",
+			Properties: map[string]internal.SchemaProperty{
+				"id": {
+					Type: "string",
+				},
+				"name": {
+					Type: "string",
+				},
+			},
+			PrimaryKeys: []string{"id"},
+		},
+		"fff000112-update": {
+			Table:        "customer",
+			ModelVersion: "fff000112-update",
+			Properties: map[string]internal.SchemaProperty{
+				"id": {
+					Type: "string",
+				},
+				"name": {
+					Type: "string",
+				},
+			},
+			PrimaryKeys: []string{"id"},
+		},
+		"fff000113-update": {
+			Table:        "customer",
+			ModelVersion: "fff000113-update",
+			Properties: map[string]internal.SchemaProperty{
+				"id": {
+					Type: "string",
+				},
+				"name": {
+					Type: "string",
+				},
+			},
+			PrimaryKeys: []string{"id"},
+		},
+	},
+}
+
 type ShutdownFunc func()
 
 func setupServer(logger logger.Logger, creds string) (int, ShutdownFunc) {
@@ -64,43 +156,17 @@ func setupServer(logger logger.Logger, creds string) (int, ShutdownFunc) {
 	})
 
 	http.HandleFunc("/v3/schema/{object}/{version}", func(w http.ResponseWriter, r *http.Request) {
-		var resp internal.Schema
 		object := r.PathValue("object")
 		version := r.PathValue("version")
 		logger.Info("schema request received for %s %s", object, version)
-		switch object {
-		case "order":
-			resp = internal.Schema{
-				Table:        "order",
-				ModelVersion: version,
-				Properties: map[string]internal.SchemaProperty{
-					"id": {
-						Type: "string",
-					},
-					"name": {
-						Type: "string",
-					},
-					"age": {
-						Type: "number",
-					},
-				},
-				PrimaryKeys: []string{"id"},
-			}
-		case "customer":
-			resp = internal.Schema{
-				Table:        "customer",
-				ModelVersion: version,
-				Properties: map[string]internal.SchemaProperty{
-					"id": {
-						Type: "string",
-					},
-					"name": {
-						Type: "string",
-					},
-				},
-				PrimaryKeys: []string{"id"},
+
+		var resp internal.Schema
+		if objectSchemas, exists := schemaMap[object]; exists {
+			if schema, versionExists := objectSchemas[version]; versionExists {
+				resp = schema
 			}
 		}
+
 		logger.Info("schema fetched for %s %s", object, version)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
