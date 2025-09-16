@@ -121,9 +121,13 @@ func (p *sqlserverDriver) Process(logger logger.Logger, event internal.DBChangeE
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	schema, err := p.registry.GetSchema(event.Table, event.ModelVersion)
+	_, version, err := p.registry.GetTableVersion(event.Table)
 	if err != nil {
-		return false, fmt.Errorf("unable to get schema for table: %s (%s). %w", event.Table, event.ModelVersion, err)
+		return false, fmt.Errorf("unable to get table version for table: %s: %w", event.Table, err)
+	}
+	schema, err := p.registry.GetSchema(event.Table, version)
+	if err != nil {
+		return false, fmt.Errorf("unable to get schema for table: %s (%s). %w", event.Table, version, err)
 	}
 	sql, err := toSQL(event, schema)
 	if err != nil {
