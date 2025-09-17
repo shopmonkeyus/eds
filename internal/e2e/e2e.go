@@ -39,6 +39,7 @@ const (
 	apikey            = "apikey"
 	defaultPayload    = `{"id":"12345","name":"test"}`
 	defaultPayload2   = `{"id":"12345","name":"test","age":1}`
+	oldModelPayload   = `{"id":"23456","name":"oldmodel"}`
 	defaultPayload3   = `{"id":"12345","name":"test","foo":1}`
 	eventDeliverDelay = time.Millisecond * 150
 )
@@ -52,6 +53,10 @@ type e2eTest interface {
 type e2eTestDisabled interface {
 	Disabled() bool
 }
+
+type tableName string
+
+var currentSchemaVersion = make(map[tableName]string)
 
 var tests = make([]e2eTest, 0)
 
@@ -98,7 +103,11 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 	event.ID = util.Hash(time.Now())
 	event.Operation = operation
 	event.Table = table
-	event.Key = []string{"gcp-us-central1", "12345"}
+	var payloadMap map[string]any
+	if err := json.Unmarshal([]byte(payload), &payloadMap); err != nil {
+		return nil, fmt.Errorf("error unmarshalling payload: %w", err)
+	}
+	event.Key = []string{"gcp-us-central1", payloadMap["id"].(string)}
 	event.ModelVersion = modelVersion
 	event.Timestamp = time.Now().UnixMilli()
 	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().Nanosecond())
@@ -126,6 +135,7 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 
 func runDBChangeNewTableTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion, defaultPayload)
+	currentSchemaVersion["customer"] = modelVersion
 	if err != nil {
 		return err
 	}
@@ -135,6 +145,7 @@ func runDBChangeNewTableTest(logger logger.Logger, _ *nats.Conn, js jetstream.Je
 
 func runDBChangeNewTableTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload)
+	currentSchemaVersion["customer"] = modelVersion2
 	if err != nil {
 		return err
 	}
@@ -144,6 +155,7 @@ func runDBChangeNewTableTest2(logger logger.Logger, _ *nats.Conn, js jetstream.J
 
 func runDBChangeNewColumnTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion2, defaultPayload2)
+	currentSchemaVersion["order"] = modelVersion2
 	if err != nil {
 		return err
 	}
@@ -153,6 +165,16 @@ func runDBChangeNewColumnTest(logger logger.Logger, _ *nats.Conn, js jetstream.J
 
 func runDBChangeNewColumnTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "UPDATE", modelVersion3, defaultPayload2)
+	currentSchemaVersion["order"] = modelVersion3
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*event)
+}
+
+func runDBChangeOldModelVersionTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion, oldModelPayload)
 	if err != nil {
 		return err
 	}
@@ -162,6 +184,7 @@ func runDBChangeNewColumnTest2(logger logger.Logger, _ *nats.Conn, js jetstream.
 
 func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "order", "INSERT", modelVersion, defaultPayload)
+	currentSchemaVersion["order"] = modelVersion
 	if err != nil {
 		return err
 	}
@@ -171,6 +194,7 @@ func runDBChangeInsertTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetS
 
 func runDBChangeInsertTest2(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	event, err := publishDBChangeEvent(logger, js, "customer", "INSERT", modelVersion2, defaultPayload)
+	currentSchemaVersion["customer"] = modelVersion2
 	if err != nil {
 		return err
 	}
@@ -347,6 +371,16 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 				} else {
 					atomic.AddUint32(&pass, 1)
 					logger.Info("✅ dbchange new column (#2) test: %s succeeded in %s", name, time.Since(testStarted))
+				}
+				testStarted = time.Now()
+				if err := runDBChangeOldModelVersionTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+					return test.Validate(_logger, tmpdir, url, event)
+				}); err != nil {
+					atomic.AddUint32(&fail, 1)
+					logger.Error("🔴 dbchange old model version test: %s failed: %s", name, err)
+				} else {
+					atomic.AddUint32(&pass, 1)
+					logger.Info("✅ dbchange old model version test: %s succeeded in %s", name, time.Since(testStarted))
 				}
 				testStarted = time.Now()
 				if err := runDBChangeInsertTest2(logger, nc, js, func(event internal.DBChangeEvent) error {

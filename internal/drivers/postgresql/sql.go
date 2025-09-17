@@ -307,6 +307,9 @@ func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema
 		sql.WriteString(quoteIdentifier(column))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop))
+		if util.SliceContains(s.Required, column) && !prop.Nullable {
+			sql.WriteString(" NOT NULL")
+		}
 		sql.WriteString(";")
 		res = append(res, sql.String())
 	}
