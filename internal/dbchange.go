@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -81,4 +82,26 @@ func (c *DBChangeEvent) GetObject() (map[string]any, error) {
 		return c.object, nil
 	}
 	return nil, nil
+}
+
+func DBChangeEventFromMessage(msg jetstream.Msg) (DBChangeEvent, error) {
+	var evt DBChangeEvent
+	buffer := msg.Data()
+	md, _ := msg.Metadata()
+	if err := json.Unmarshal(buffer, &evt); err != nil {
+		return evt, fmt.Errorf("error unmarshalling message into DBChangeEvent: %s (seq:%d) raw message:\n%s", err, md.Sequence.Consumer, string(buffer))
+	}
+
+	if _, err := evt.GetObject(); err != nil {
+		return evt, fmt.Errorf("error getting object (before/after is malformed): %s (seq:%d) raw message:\n%s", err, md.Sequence.Consumer, string(buffer))
+	}
+
+	pk := evt.GetPrimaryKey()
+	if pk == "" {
+		return evt, fmt.Errorf("primary key is empty: %s (seq:%d) raw message:\n%s", evt.ID, md.Sequence.Consumer, string(buffer))
+	}
+
+	evt.NatsMsg = msg // in case the driver wants to get specific information from it for logging, etc
+
+	return evt, nil
 }
