@@ -3,7 +3,6 @@ package consumer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -366,13 +365,10 @@ func (c *Consumer) bufferer() {
 				return
 			}
 			c.sequence = m.Sequence.Consumer
-			buf := msg.Data()
-			md, _ := msg.Metadata()
-			var evt internal.DBChangeEvent
-			log.Debug("unmarshalling event: %s", string(buf))
-			if err := json.Unmarshal(buf, &evt); err != nil {
+			evt, err := internal.DBChangeEventFromMessage(msg)
+			if err != nil {
 				internal.PendingEvents.Dec()
-				log.Error("error unmarshalling: %s (seq:%d): %s", string(buf), md.Sequence.Consumer, err)
+				log.Error("error getting event from message: %s", err)
 				c.handleError(err)
 				return
 			}
@@ -392,7 +388,6 @@ func (c *Consumer) bufferer() {
 				internal.PendingEvents.Dec()
 				continue
 			}
-			evt.NatsMsg = msg // in case the driver wants to get specific information from it for logging, etc
 
 			var forceFlushAfterMigration bool
 
@@ -453,6 +448,7 @@ func (c *Consumer) bufferer() {
 				ts := time.Now()
 				c.pendingStarted = &ts
 			}
+			md, _ := msg.Metadata()
 			if md.NumPending > uint64(c.max) && time.Since(*c.pendingStarted) < c.maxPendingLatency*2 {
 				continue // if we have a large number, just keep going to try and catchup
 			}
