@@ -288,10 +288,10 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 			if err := migration.MigrateNewTable(ctx, logger, newschema); err != nil {
 				return false, fmt.Errorf("error migrating new table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
-			logger.Info("migrated new table: %s, model version: %s", event.Table, event.ModelVersion)
 			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
 				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
+			logger.Info("migrated new table: %s, model version: %s", event.Table, event.ModelVersion)
 			return true, nil
 		}
 		oldschema, err := c.registry.GetSchema(event.Table, version)
@@ -316,14 +316,13 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 					event.Diff = append(event.Diff, col) // add these new columns to the diff so that we can update them as part of the changeset
 				}
 			}
+			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
+				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			}
 			logger.Info("migrated table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
 			return true, nil
 		} else {
 			logger.Info("new table: %s with different model version: %s but no new columns added", event.Table, event.ModelVersion)
-		}
-		// we want to bring the table up to the new version in all cases
-		if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
-			return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 		}
 	}
 	return false, nil

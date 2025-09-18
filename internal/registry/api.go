@@ -212,9 +212,13 @@ func NewAPIRegistry(ctx context.Context, logger logger.Logger, apiURL string, ed
 	// save all the data into the tracker and cache the latest
 	for _, schema := range registry.schema {
 		key := registry.getSchemaCacheKey(schema.Table, schema.ModelVersion)
+		versionKey := registry.getVersionCacheKey(schema.Table)
 		if tracker != nil {
 			if err := tracker.SetKey(key, util.JSONStringify(schema), 0); err != nil {
 				return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
+			}
+			if err := tracker.SetKey(versionKey, schema.ModelVersion, 0); err != nil {
+				return nil, fmt.Errorf("error setting key %s in tracker: %s", versionKey, err)
 			}
 		}
 		if err := registry.cache.Set(key, schema, 0); err != nil {

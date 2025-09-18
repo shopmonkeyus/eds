@@ -220,9 +220,13 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 				key = fmt.Sprintf("snowflake:%s:%s", record.Table, record.Id)
 				deletekeys = append(deletekeys, key)
 			}
-			schema, err := p.registry.GetSchema(record.Table, record.Event.ModelVersion)
+			_, version, err := p.registry.GetTableVersion(record.Table)
 			if err != nil {
-				return fmt.Errorf("unable to get schema for table: %s (%s). %w", record.Table, record.Event.ModelVersion, err)
+				return fmt.Errorf("unable to get table version for table: %s: %w", record.Table, err)
+			}
+			schema, err := p.registry.GetSchema(record.Table, version)
+			if err != nil {
+				return fmt.Errorf("unable to get schema for table: %s (%s). %w", record.Table, version, err)
 			}
 			sql, c := toSQL(record, schema, force, p.updateStrategy)
 			statementCount += c
