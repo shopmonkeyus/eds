@@ -119,6 +119,7 @@ func TestSingleMessage(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -168,6 +169,7 @@ func TestSingleMessageWithFlush(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -217,6 +219,7 @@ func TestMultipleMessagesWithFlushAndMaxBatchSize(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.1.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -265,6 +268,7 @@ func TestMultipleMessagesWithFlushUsingProcess(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.1.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -316,6 +320,7 @@ func TestMultipleMessagesWithMaxAckPending(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		for i := 0; i < max; i++ {
 			_, err = js.Publish(context.Background(), fmt.Sprintf("dbchange.order.INSERT.CID.%d.PUBLIC.1", i+1), []byte(util.JSONStringify(sendEvent)))
@@ -390,6 +395,7 @@ func TestHeartbeats(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.1.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -454,6 +460,7 @@ func TestMultipleMessagesWithMultipleBatches(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		for i := 0; i < max; i++ {
 			_, err = js.Publish(context.Background(), fmt.Sprintf("dbchange.order.INSERT.CID.%d.PUBLIC.1", i+1), []byte(util.JSONStringify(sendEvent)))
@@ -506,6 +513,7 @@ func TestMultipleMessagesWithIdleDelayFlush(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		for i := 0; i < max; i++ {
 			_, err = js.Publish(context.Background(), fmt.Sprintf("dbchange.order.INSERT.CID.%d.PUBLIC.1", i+1), []byte(util.JSONStringify(sendEvent)))
@@ -556,6 +564,7 @@ func TestPause(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -614,6 +623,7 @@ func TestTableSkipOldEvents(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = oldtv.UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", oldtv.UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -697,6 +707,7 @@ func TestTableSchemaValidator(t *testing.T) {
 		sendEvent.Operation = "INSERT"
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -841,6 +852,7 @@ func TestTableSchemaMigrationNewTable(t *testing.T) {
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
 		sendEvent.ModelVersion = "1"
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -916,6 +928,7 @@ func TestTableSchemaMigrationNewColumns(t *testing.T) {
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
 		sendEvent.ModelVersion = "2"
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
@@ -999,6 +1012,7 @@ func TestTableSchemaMigrationNoNewColumns(t *testing.T) {
 		sendEvent.Timestamp = time.Now().UnixMilli()
 		sendEvent.MVCCTimestamp = fmt.Sprintf("%v", time.Now().UnixNano())
 		sendEvent.ModelVersion = "2"
+		sendEvent.Key = []string{"12345"}
 
 		_, err = js.Publish(context.Background(), "dbchange.order.INSERT.CID.LID.PUBLIC.1", []byte(util.JSONStringify(sendEvent)))
 		assert.NoError(t, err)
