@@ -30,17 +30,13 @@ func (b *Batcher) Records() []*Record {
 }
 
 // Add will add a record to the batcher.
-func (b *Batcher) Add(table string, id string, operation string, diff []string, payload map[string]any, event *internal.DBChangeEvent) {
-	var primaryKey string
-	if event != nil {
-		primaryKey = event.GetPrimaryKey()
-	} else {
-		if val, ok := payload["id"].(string); ok {
-			primaryKey = val
-		} else {
-			primaryKey = id
-		}
-	}
+func (b *Batcher) Add(event *internal.DBChangeEvent) {
+	table := event.Table
+	primaryKey := event.GetPrimaryKey()
+	operation := event.Operation
+	diff := event.Diff
+	payload, _ := event.GetObject()
+
 	hashkey := table + primaryKey
 	index, previousEventFound := b.pks[hashkey]
 

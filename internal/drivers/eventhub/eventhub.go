@@ -110,11 +110,7 @@ var contentType = "application/json"
 func (p *eventHubDriver) Process(logger logger.Logger, event internal.DBChangeEvent) (bool, error) {
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	object, err := event.GetObject()
-	if err != nil {
-		return false, fmt.Errorf("error getting json object: %w", err)
-	}
-	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
+	p.batcher.Add(&event)
 	return false, nil
 }
 
@@ -228,12 +224,7 @@ func (p *eventHubDriver) CreateDatasource(schema internal.SchemaMap) error {
 
 // ImportEvent allows the handler to process the event.
 func (p *eventHubDriver) ImportEvent(event internal.DBChangeEvent, schema *internal.Schema) error {
-	object, err := event.GetObject()
-	if err != nil {
-		return fmt.Errorf("error getting json object: %w", err)
-	}
-	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
-
+	p.batcher.Add(&event)
 	if p.batcher.Len() >= maxImportBatchSize {
 		return p.Flush(p.logger)
 	}

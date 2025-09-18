@@ -161,11 +161,7 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	object, err := event.GetObject()
-	if err != nil {
-		return false, fmt.Errorf("error getting json object: %w", err)
-	}
-	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
+	p.batcher.Add(&event)
 	return false, nil
 }
 
