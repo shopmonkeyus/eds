@@ -36,7 +36,7 @@ type snowflakeDriver struct {
 	dbschema                internal.DatabaseSchema
 	updateStrategy          string
 	profilingInfo           DriverProfilingInfo
-	bulkRecordModifications []func([]*util.Record)
+	bulkRecordModifications []func([]*util.Record) []*util.Record
 }
 
 var _ internal.Driver = (*snowflakeDriver)(nil)
@@ -164,35 +164,29 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 	logger.Trace("processing event: %s", event.String())
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	object, err := event.GetObject()
-	if err != nil {
-		return false, fmt.Errorf("error getting json object: %w", err)
-	}
-	p.batcher.Add(event.Table, event.GetPrimaryKey(), event.Operation, event.Diff, object, &event)
+	p.batcher.Add(&event)
 	return false, nil
 }
 
 var sequence int64
 
-func sortRecordsByMSVCC(records []*util.Record) {
+func sortRecordsByMSVCC(records []*util.Record) []*util.Record {
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].Event.MVCCTimestamp < records[j].Event.MVCCTimestamp
 	})
+	return records
 }
 
-func combineRecordsWithSamePrimaryKey(records []*util.Record) {
-	return
-}
-
-var snowflakeBulkRecordModifications = []func([]*util.Record){
+var snowflakeBulkRecordModifications = []func([]*util.Record) []*util.Record{
 	sortRecordsByMSVCC,
-	combineRecordsWithSamePrimaryKey,
+	util.CombineRecordsWithSamePrimaryKey,
 }
 
-func (p *snowflakeDriver) runBulkRecordModifications(records []*util.Record) {
+func (p *snowflakeDriver) runBulkRecordModifications(records []*util.Record) []*util.Record {
 	for i := range p.bulkRecordModifications {
-		p.bulkRecordModifications[i](records)
+		records = p.bulkRecordModifications[i](records)
 	}
+	return records
 }
 
 // Flush is called to commit any pending events. It should return an error if the flush fails. If the flush fails, the driver will NAK all pending events.
@@ -211,7 +205,7 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 	if count > 0 {
 		logger.Debug("flush: %d / %d", count, sequence+1)
 		sequence++
-		p.runBulkRecordModifications(records)
+		records = p.runBulkRecordModifications(records)
 		tag := fmt.Sprintf("eds-%s/%d/%d", p.sessionID, sequence, count)
 		ctx := sf.WithQueryTag(context.Background(), tag)
 		var query strings.Builder
