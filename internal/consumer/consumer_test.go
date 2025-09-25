@@ -229,8 +229,8 @@ func TestMultipleMessagesWithFlushAndMaxBatchSize(t *testing.T) {
 
 		time.Sleep(time.Millisecond * 100)
 
-		assert.Len(t, testEvents, 2)
-		assert.Equal(t, 1, flushed)
+		assert.Len(t, testEvents, 2, "Should have processed 2 events")
+		assert.Equal(t, 1, flushed, "Should have flushed 1 time")
 
 		assert.NoError(t, consumer.Stop())
 	})
@@ -278,8 +278,8 @@ func TestMultipleMessagesWithFlushUsingProcess(t *testing.T) {
 
 		time.Sleep(time.Millisecond * 100)
 
-		assert.Len(t, testEvents, 2)
-		assert.Equal(t, 1, flushed)
+		assert.Len(t, testEvents, 2, "Should have processed 2 events")
+		assert.Equal(t, 1, flushed, "Should have flushed 1 time")
 
 		assert.NoError(t, consumer.Stop())
 	})
@@ -467,10 +467,10 @@ func TestMultipleMessagesWithMultipleBatches(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Millisecond * 200) // 100ms was short enough that it failed occasionally
 
-		assert.Len(t, testEvents, max)
-		assert.Equal(t, 10, flushed)
+		assert.Len(t, testEvents, max, "Should have processed %d events", max)
+		assert.Equal(t, 10, flushed, "Should have flushed 10 times")
 
 		assert.NoError(t, consumer.Stop())
 	})
@@ -525,8 +525,8 @@ func TestMultipleMessagesWithIdleDelayFlush(t *testing.T) {
 
 		time.Sleep(time.Millisecond * 500)
 
-		assert.Len(t, testEvents, max)
-		assert.Equal(t, 3, flushed)
+		assert.Len(t, testEvents, max, "Should have processed 6 events")
+		assert.Equal(t, 3, flushed, "Should have flushed 3 times")
 
 		assert.NoError(t, consumer.Stop())
 	})
