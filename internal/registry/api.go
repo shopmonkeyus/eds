@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -175,11 +176,24 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-// NewAPIRegistry creates a new schema registry from the API. This implementation doesn't support versioning.
 func NewAPIRegistry(ctx context.Context, logger logger.Logger, apiURL string, edsVersion string, tracker *tracker.Tracker) (internal.SchemaRegistry, error) {
+	return newAPIRegistryModified(ctx, logger, apiURL, edsVersion, tracker, "")
+}
+
+func NewAPIRegistryPrivate(ctx context.Context, logger logger.Logger, apiURL string, edsVersion string, tracker *tracker.Tracker) (internal.SchemaRegistry, error) {
+	apikey := os.Getenv("SM_API_PRIVATE_SCHEMA_KEY")
+	if apikey == "" {
+		return nil, fmt.Errorf("SM_API_PRIVATE_SCHEMA_KEY is not set; see the backend for details")
+	}
+	modifier := "/private?apikey=" + apikey
+	return newAPIRegistryModified(ctx, logger, apiURL, edsVersion, tracker, modifier)
+}
+
+// NewAPIRegistry creates a new schema registry from the API. This implementation doesn't support versioning.
+func newAPIRegistryModified(ctx context.Context, logger logger.Logger, apiURL string, edsVersion string, tracker *tracker.Tracker, urlModifier string) (internal.SchemaRegistry, error) {
 	var registry APIRegistry
 	registry.userAgent = "Shopmonkey EDS Server/" + edsVersion
-	req, err := http.NewRequest("GET", apiURL+"/v3/schema", nil)
+	req, err := http.NewRequest("GET", apiURL+"/v3/schema"+urlModifier, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %s", err)
 	}
@@ -217,8 +231,13 @@ func NewAPIRegistry(ctx context.Context, logger logger.Logger, apiURL string, ed
 			if err := tracker.SetKey(key, util.JSONStringify(schema), 0); err != nil {
 				return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
 			}
-			if err := tracker.SetKey(versionKey, schema.ModelVersion, 0); err != nil {
-				return nil, fmt.Errorf("error setting key %s in tracker: %s", versionKey, err)
+			if found, _, err := tracker.GetKey(versionKey); err != nil {
+				return nil, fmt.Errorf("error getting key %s in tracker: %s", versionKey, err)
+			} else if found {
+				// only set the version key if it already exists; otherwise EDS won't migrate new tables properly
+				if err := tracker.SetKey(versionKey, schema.ModelVersion, 0); err != nil {
+					return nil, fmt.Errorf("error setting key %s in tracker: %s", versionKey, err)
+				}
 			}
 		}
 		if err := registry.cache.Set(key, schema, 0); err != nil {

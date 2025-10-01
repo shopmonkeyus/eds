@@ -146,7 +146,14 @@ func (c *Consumer) Stop() error {
 		c.lock.Lock()
 		c.stopping = true
 		c.lock.Unlock()
+		if c.subscriber != nil {
+			c.logger.Debug("draining subscriber")
+			c.subscriber.Drain()
+			<-c.subscriber.Closed()
+			c.logger.Debug("drained subscriber")
+		}
 		c.flush(c.logger)
+
 		c.cancel()
 		c.logger.Debug("waiting on bufferer")
 		c.waitGroup.Wait()
@@ -155,12 +162,6 @@ func (c *Consumer) Stop() error {
 		// once we get here, the bufferer should be done and its safe to start shutting down
 
 		c.nackEverything() // just be safe
-
-		if c.subscriber != nil {
-			c.logger.Debug("stopping subscriber")
-			c.subscriber.Stop()
-			c.logger.Debug("stopped subscriber")
-		}
 		if c.conn != nil {
 			c.logger.Debug("stopping nats connection")
 			c.conn.Close()
@@ -209,6 +210,8 @@ func (c *Consumer) flush(logger logger.Logger) bool {
 	}
 	var count float64
 	for _, m := range c.pending {
+		c.logger.Trace("acknowledged message %s", m.Headers().Get(nats.MsgIdHdr))
+
 		if err := m.Ack(); err != nil {
 			internal.PendingEvents.Dec()
 			logger.Error("error acking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
@@ -428,10 +431,7 @@ func (c *Consumer) bufferer() {
 				c.handleError(err)
 				return
 			}
-			maxsize := c.driver.MaxBatchSize()
-			if maxsize <= 0 {
-				maxsize = c.max
-			}
+			maxsize := c.max
 			if traceLogNatsProcessDetail {
 				log.Trace("process returned. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
 			}
@@ -488,6 +488,8 @@ func (c *Consumer) bufferer() {
 }
 
 func (c *Consumer) process(msg jetstream.Msg) {
+	c.logger.Trace("message received from queue: %s", msg.Headers())
+
 	internal.PendingEvents.Inc()
 	internal.TotalEvents.Inc()
 	c.buffer <- msg
@@ -617,7 +619,7 @@ func (c *Consumer) Unpause() error {
 		jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, err error) {
 			c.logger.Warn("consumer error: %s", err)
 		}),
-		jetstream.PullExpiry(time.Minute),
+		jetstream.PullExpiry(30*time.Second),
 		jetstream.PullMaxMessages(4_096),
 	)
 	if err != nil {
@@ -671,11 +673,17 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	started := time.Now()
 	consumer.logger = config.Logger.WithPrefix("[consumer]")
 	consumer.started = &started
-	consumer.max = config.MaxAckPending
 	consumer.ctx = ctx
 	consumer.cancel = cancel
 	consumer.conn = nc
 	consumer.driver = config.Driver
+	consumer.max = config.MaxAckPending
+	if consumer.driver != nil {
+		driverMaxSize := consumer.driver.MaxBatchSize()
+		if driverMaxSize > 0 && driverMaxSize < consumer.max {
+			consumer.max = driverMaxSize
+		}
+	}
 	consumer.buffer = make(chan jetstream.Msg, config.MaxAckPending)
 	consumer.pending = make([]jetstream.Msg, 0)
 	consumer.subError = make(chan error, 10)
@@ -769,7 +777,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	jsConfig := jetstream.ConsumerConfig{
 		Durable:           name,
-		MaxAckPending:     config.MaxAckPending,
+		MaxAckPending:     consumer.max,
 		MaxDeliver:        20,
 		AckWait:           time.Minute * 5,
 		MaxRequestBatch:   config.MaxPendingBuffer,
