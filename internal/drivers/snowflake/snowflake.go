@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -170,15 +169,7 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 
 var sequence int64
 
-func sortRecordsByMSVCC(records []*util.Record) []*util.Record {
-	sort.Slice(records, func(i, j int) bool {
-		return records[i].Event.MVCCTimestamp < records[j].Event.MVCCTimestamp
-	})
-	return records
-}
-
 var snowflakeBulkRecordModifications = []func([]*util.Record) []*util.Record{
-	sortRecordsByMSVCC,
 	util.CombineRecordsWithSamePrimaryKey,
 }
 
