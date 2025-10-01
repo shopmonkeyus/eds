@@ -146,7 +146,14 @@ func (c *Consumer) Stop() error {
 		c.lock.Lock()
 		c.stopping = true
 		c.lock.Unlock()
+		if c.subscriber != nil {
+			c.logger.Debug("draining subscriber")
+			c.subscriber.Drain()
+			<-c.subscriber.Closed()
+			c.logger.Debug("drained subscriber")
+		}
 		c.flush(c.logger)
+
 		c.cancel()
 		c.logger.Debug("waiting on bufferer")
 		c.waitGroup.Wait()
@@ -155,12 +162,6 @@ func (c *Consumer) Stop() error {
 		// once we get here, the bufferer should be done and its safe to start shutting down
 
 		c.nackEverything() // just be safe
-
-		if c.subscriber != nil {
-			c.logger.Debug("stopping subscriber")
-			c.subscriber.Stop()
-			c.logger.Debug("stopped subscriber")
-		}
 		if c.conn != nil {
 			c.logger.Debug("stopping nats connection")
 			c.conn.Close()
