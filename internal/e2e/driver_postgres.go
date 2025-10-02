@@ -21,7 +21,7 @@ func (d *driverPostgresTest) Name() string {
 }
 
 func (d *driverPostgresTest) URL(dir string) string {
-	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:15432/%s?sslmode=disable", dbuser, dbpass, dbname)
+	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:15433/%s?sslmode=disable", dbuser, dbpass, dbname)
 }
 
 func (d *driverPostgresTest) QuoteTable(table string) string {
