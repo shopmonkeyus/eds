@@ -18,3 +18,4 @@
 /quill-*.log
 /.vscode/
 eds-debug
+/datamodel
