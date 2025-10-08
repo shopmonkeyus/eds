@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -35,12 +34,12 @@ func getPublicTables(log logger.Logger) []string {
 	return publicTables
 }
 
-// increase timestamp to today to keep working with recent EDS servers
+// increase timestamp to tomorrow to keep working with recent EDS servers
 func makeEventTimestampRecent(timestamp int64) int64 {
 	daysInMillis := int64(86400000)
 	originalDays := timestamp / daysInMillis
-	todayDays := time.Now().UnixMilli() / daysInMillis
-	daysDiff := todayDays - originalDays
+	tomorrowDays := time.Now().UnixMilli()/daysInMillis + 1 //make it tomorrow so all the messages can be delivered today
+	daysDiff := tomorrowDays - originalDays
 	return timestamp + daysDiff*daysInMillis
 }
 
@@ -104,7 +103,7 @@ func (t *TestDataGenerator) NextEvent() *internal.DBChangeEvent {
 		if err := json.Unmarshal(t.scanner.Bytes(), &event); err != nil {
 			panic(err)
 		}
-		if !slice.Contains(t.publicTables, strings.ToLower(event.Table)) {
+		if !slice.Contains(t.publicTables, event.Table) {
 			continue
 		}
 
@@ -145,14 +144,14 @@ func NatsMessageFromEvent(event *internal.DBChangeEvent) natsMessage {
 	if err != nil {
 		panic(err)
 	}
-	subject := fmt.Sprintf("dbchange.customer.UPDATE.%s.1.PUBLIC.2", *event.CompanyID)
+	subject := fmt.Sprintf("dbchange.%s.UPDATE.%s.1.PUBLIC.2", event.Table, *event.CompanyID)
 	msgID := util.Hash(event)
 	return natsMessage{Message: buf, Subject: subject, MsgID: msgID}
 }
 
 func PublishTestData(path string, count int, js jetstream.JetStream, log logger.Logger) int {
 	publicTables := getPublicTables(log)
-	testDataGenerator := NewTestDataGenerator("../eds_test_data/output.jsonl.tar.gz", publicTables)
+	testDataGenerator := NewTestDataGenerator(path, publicTables)
 	defer testDataGenerator.Close()
 
 	delivered := 0
@@ -165,7 +164,10 @@ func PublishTestData(path string, count int, js jetstream.JetStream, log logger.
 			break
 		}
 		message := NatsMessageFromEvent(event)
-		js.Publish(context.Background(), message.Subject, message.Message, jetstream.WithMsgID(message.MsgID))
+		_, err := js.Publish(context.Background(), message.Subject, message.Message, jetstream.WithMsgID(message.MsgID))
+		if err != nil {
+			panic(err)
+		}
 
 		log.Info("sent message with id: %s", message.MsgID)
 

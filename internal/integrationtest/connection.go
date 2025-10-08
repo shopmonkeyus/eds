@@ -1,12 +1,6 @@
 package integrationtest
 
 import (
-<<<<<<< HEAD
-=======
-	"database/sql"
-
-	"github.com/lib/pq"
->>>>>>> e034a66 (integration testing staging branch)
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -89,28 +83,3 @@ func (c *JetstreamConnection) Close() {
 func (c *JetstreamConnection) Get() jetstream.JetStream {
 	return c.js
 }
-<<<<<<< HEAD
-=======
-
-type CRDBConnection struct {
-	db *sql.DB
-}
-
-func (c *CRDBConnection) Connect() {
-	base, err := pq.NewConnector("postgres://root@localhost:26257/defaultdb?sslmode=disable")
-	if err != nil {
-		panic(err)
-	}
-	c.db = sql.OpenDB(base)
-}
-
-func (c *CRDBConnection) Close() {
-	if c.db != nil {
-		c.db.Close()
-	}
-}
-
-func (c *CRDBConnection) Get() *sql.DB {
-	return c.db
-}
->>>>>>> e034a66 (integration testing staging branch)
