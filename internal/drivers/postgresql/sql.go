@@ -211,7 +211,7 @@ func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 		sql.WriteString(" WHERE ")
 		var predicate []string
 		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[1+i])))
+			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
 		}
 		sql.WriteString(strings.Join(predicate, " AND "))
 		sql.WriteString(";\n")
