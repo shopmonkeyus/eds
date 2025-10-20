@@ -98,7 +98,7 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 	event.ID = util.Hash(time.Now())
 	event.Operation = operation
 	event.Table = table
-	event.Key = []string{"gcp-us-central1", "12345"}
+	event.Key = []string{"12345"}
 	event.ModelVersion = modelVersion
 	event.Timestamp = time.Now().UnixMilli()
 	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().Nanosecond())
