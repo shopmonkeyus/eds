@@ -54,11 +54,12 @@ var publishFileDataCmd = &cobra.Command{
 	Long:  "Publishes dbchange events from JSON file to NATS\nTest data should be at path '..eds_test_data/output.jsonl.tar.gz'\n@jdavenport for details",
 	Run: RunWithLogAndRecover(func(cmd *cobra.Command, args []string, log logger.Logger) {
 		count, _ := cmd.Flags().GetInt("count")
+		singleRegion, _ := cmd.Flags().GetBool("single-region")
 
 		js := integrationtest.NewConnection(&integrationtest.JetstreamConnection{})
 
 		path := "../eds_test_data/output.jsonl.tar.gz"
-		delivered := integrationtest.PublishTestData(path, count, js, log)
+		delivered := integrationtest.PublishTestData(path, count, js, log, map[string]any{"stripRegion": singleRegion})
 
 		log.Info("sent %d messages", delivered)
 	}),
@@ -68,6 +69,7 @@ func init() {
 	loadTestRandomCmd.Flags().Int("count", 1, "Number of customer messages to send (default: 1)")
 
 	publishFileDataCmd.Flags().Int("count", 1, "Number of messages to send (default: 1)")
+	publishFileDataCmd.Flags().Bool("single-region", false, "Strip region from the dbchange key array") // needed if test data precedes single region switch (around 2025-10-12)
 
 	integrationtestCmd.AddCommand(loadTestRandomCmd)
 	integrationtestCmd.AddCommand(publishFileDataCmd)
