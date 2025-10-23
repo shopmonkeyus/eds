@@ -730,11 +730,12 @@ func TestTableSchemaValidator(t *testing.T) {
 }
 
 type mockDriverWithMigration struct {
-	maxBatchSize   int
-	flush          func(logger logger.Logger) error
-	process        func(logger logger.Logger, event internal.DBChangeEvent) (bool, error)
-	migrateTable   func(ctx context.Context, logger logger.Logger, schema *internal.Schema) error
-	migrateColumns func(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error
+	maxBatchSize         int
+	flush                func(logger logger.Logger) error
+	process              func(logger logger.Logger, event internal.DBChangeEvent) (bool, error)
+	migrateTable         func(ctx context.Context, logger logger.Logger, schema *internal.Schema) error
+	migrateColumns       func(ctx context.Context, logger logger.Logger, schema *internal.Schema, columns []string) error
+	getDestinationSchema func(ctx context.Context, logger logger.Logger) internal.DatabaseSchema
 }
 
 func (m *mockDriverWithMigration) Flush(logger logger.Logger) error {
@@ -768,6 +769,13 @@ func (m *mockDriverWithMigration) MigrateNewColumns(ctx context.Context, logger 
 		return m.migrateColumns(ctx, logger, schema, columns)
 	}
 	return nil
+}
+
+func (m *mockDriverWithMigration) GetDestinationSchema(ctx context.Context, logger logger.Logger) internal.DatabaseSchema {
+	if m.getDestinationSchema != nil {
+		return m.getDestinationSchema(ctx, logger)
+	}
+	return make(internal.DatabaseSchema)
 }
 
 type mockRegistry struct {
@@ -1097,12 +1105,14 @@ func TestTableSchemaMismatch(t *testing.T) {
 func TestDisconnectedHandler(t *testing.T) {
 	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
 		mockDriver := &mockDriverWithMigration{}
+		mockRegistry := &mockRegistry{}
 
 		consumer, err := NewConsumer(ConsumerConfig{
-			Context: context.Background(),
-			Logger:  logger.NewConsoleLogger(),
-			Driver:  mockDriver,
-			URL:     natsurl,
+			Context:  context.Background(),
+			Logger:   logger.NewConsoleLogger(),
+			Driver:   mockDriver,
+			URL:      natsurl,
+			Registry: mockRegistry,
 		})
 
 		assert.NoError(t, err)
