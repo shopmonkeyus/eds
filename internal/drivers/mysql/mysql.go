@@ -311,6 +311,10 @@ func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logge
 	return p.refreshSchema(ctx, p.db, true)
 }
 
+func (p *mysqlDriver) GetDestinationSchema(ctx context.Context, logger logger.Logger) internal.DatabaseSchema {
+	return p.dbschema
+}
+
 func init() {
 	internal.RegisterDriver("mysql", &mysqlDriver{})
 	internal.RegisterImporter("mysql", &mysqlDriver{})

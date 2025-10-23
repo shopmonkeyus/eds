@@ -720,6 +720,12 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		}
 	}
 
+	if consumer.supportsMigration {
+		if err := internal.UpdateDestinationSchema(ctx, consumer.logger, consumer.registry, config.Driver.(internal.DriverMigration)); err != nil {
+			return nil, fmt.Errorf("error updating destination schema: %w", err)
+		}
+	}
+
 	// set company ID overrides
 	if len(config.CompanyIDs) > 0 {
 		var newCompanyIDs []string

@@ -475,6 +475,10 @@ func (p *snowflakeDriver) MigrateNewColumns(ctx context.Context, logger logger.L
 	return p.refreshSchema(ctx, p.db, true)
 }
 
+func (p *snowflakeDriver) GetDestinationSchema(ctx context.Context, logger logger.Logger) internal.DatabaseSchema {
+	return p.dbschema
+}
+
 func init() {
 	internal.RegisterDriver("snowflake", &snowflakeDriver{})
 	internal.RegisterImporter("snowflake", &snowflakeDriver{})

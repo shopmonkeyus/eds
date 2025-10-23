@@ -315,6 +315,10 @@ func (p *sqlserverDriver) MigrateNewColumns(ctx context.Context, logger logger.L
 	return p.refreshSchema(ctx, p.db, true)
 }
 
+func (p *sqlserverDriver) GetDestinationSchema(ctx context.Context, logger logger.Logger) internal.DatabaseSchema {
+	return p.dbschema
+}
+
 func init() {
 	internal.RegisterDriver("sqlserver", &sqlserverDriver{})
 	internal.RegisterImporter("sqlserver", &sqlserverDriver{})
