@@ -132,6 +132,12 @@ func UpdateDestinationSchema(ctx context.Context, logger logger.Logger, registry
 	destinationSchema := driver.GetDestinationSchema(ctx, logger)
 
 	for table, schema := range schema {
+		found, version, err := registry.GetTableVersion(table)
+		if err != nil || !found {
+			return fmt.Errorf("error getting table version for table: %s: %w", table, err)
+		}
+		logger.Trace("updating destination schema for table: %s, version: %s", table, version)
+
 		_, tableExistsInDestination := destinationSchema[table]
 		if !tableExistsInDestination {
 			if err := driver.MigrateNewTable(ctx, logger, schema); err != nil {
@@ -147,6 +153,10 @@ func UpdateDestinationSchema(ctx context.Context, logger logger.Logger, registry
 			if !columnExistsInDestination {
 				newColumns = append(newColumns, sourceColumn)
 			}
+		}
+		if len(newColumns) == 0 {
+			logger.Trace("no new columns to migrate for table: %s", table)
+			continue
 		}
 		if err := driver.MigrateNewColumns(ctx, logger, schema, newColumns); err != nil {
 			return fmt.Errorf("error migrating new columns: %w", err)

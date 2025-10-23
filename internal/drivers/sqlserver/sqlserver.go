@@ -38,6 +38,7 @@ var _ internal.DriverLifecycle = (*sqlserverDriver)(nil)
 var _ internal.Importer = (*sqlserverDriver)(nil)
 var _ internal.DriverHelp = (*sqlserverDriver)(nil)
 var _ importer.Handler = (*sqlserverDriver)(nil)
+var _ internal.DriverMigration = (*sqlserverDriver)(nil)
 
 func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
