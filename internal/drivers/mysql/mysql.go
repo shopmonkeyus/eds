@@ -38,6 +38,7 @@ var _ internal.DriverLifecycle = (*mysqlDriver)(nil)
 var _ internal.Importer = (*mysqlDriver)(nil)
 var _ internal.DriverHelp = (*mysqlDriver)(nil)
 var _ importer.Handler = (*mysqlDriver)(nil)
+var _ internal.DriverMigration = (*mysqlDriver)(nil)
 
 func (p *mysqlDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
