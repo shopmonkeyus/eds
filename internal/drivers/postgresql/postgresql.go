@@ -316,6 +316,10 @@ func (p *postgresqlDriver) MigrateNewColumns(ctx context.Context, logger logger.
 	return p.refreshSchema(ctx, p.db, true)
 }
 
+func (p *postgresqlDriver) GetDestinationSchema(ctx context.Context, logger logger.Logger) internal.DatabaseSchema {
+	return p.dbschema
+}
+
 func init() {
 	internal.RegisterDriver("postgres", &postgresqlDriver{})
 	internal.RegisterImporter("postgres", &postgresqlDriver{})

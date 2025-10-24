@@ -14,4 +14,6 @@ type DriverMigration interface {
 
 	// MigrateNewColumns is called when one or more new columns are detected with the appropriate information for the driver to perform the migration.
 	MigrateNewColumns(ctx context.Context, logger logger.Logger, schema *Schema, columns []string) error
+
+	GetDestinationSchema(ctx context.Context, logger logger.Logger) DatabaseSchema
 }

@@ -43,6 +43,7 @@ var _ internal.DriverLifecycle = (*snowflakeDriver)(nil)
 var _ internal.Importer = (*snowflakeDriver)(nil)
 var _ internal.DriverSessionHandler = (*snowflakeDriver)(nil)
 var _ internal.DriverHelp = (*snowflakeDriver)(nil)
+var _ internal.DriverMigration = (*snowflakeDriver)(nil)
 
 var uuidRegexp = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 
@@ -473,6 +474,10 @@ func (p *snowflakeDriver) MigrateNewColumns(ctx context.Context, logger logger.L
 		logger.Debug("migrated new columns: %s", sql)
 	}
 	return p.refreshSchema(ctx, p.db, true)
+}
+
+func (p *snowflakeDriver) GetDestinationSchema(ctx context.Context, logger logger.Logger) internal.DatabaseSchema {
+	return p.dbschema
 }
 
 func init() {

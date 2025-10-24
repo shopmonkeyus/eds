@@ -1,7 +1,11 @@
 package internal
 
 import (
+	"context"
+	"fmt"
 	"sort"
+
+	"github.com/shopmonkeyus/go-common/logger"
 )
 
 type ItemsType struct {
@@ -117,4 +121,46 @@ func (d DatabaseSchema) GetType(table string, column string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+// Update the destination database with tables and columns from the source schema API
+func UpdateDestinationSchema(ctx context.Context, logger logger.Logger, registry SchemaRegistry, driver DriverMigration) error {
+	schema, err := registry.GetLatestSchema()
+	if err != nil {
+		return fmt.Errorf("error getting latest schema: %w", err)
+	}
+	destinationSchema := driver.GetDestinationSchema(ctx, logger)
+
+	for table, schema := range schema {
+		found, version, err := registry.GetTableVersion(table)
+		if err != nil || !found {
+			return fmt.Errorf("error getting table version for table: %s: %w", table, err)
+		}
+		logger.Trace("updating destination schema for table: %s, version: %s", table, version)
+
+		_, tableExistsInDestination := destinationSchema[table]
+		if !tableExistsInDestination {
+			if err := driver.MigrateNewTable(ctx, logger, schema); err != nil {
+				return fmt.Errorf("error migrating new table: %w", err)
+			}
+			continue
+		}
+
+		sourceColumns := schema.Columns()
+		var newColumns []string
+		for _, sourceColumn := range sourceColumns {
+			_, columnExistsInDestination := destinationSchema[table][sourceColumn]
+			if !columnExistsInDestination {
+				newColumns = append(newColumns, sourceColumn)
+			}
+		}
+		if len(newColumns) == 0 {
+			logger.Trace("no new columns to migrate for table: %s", table)
+			continue
+		}
+		if err := driver.MigrateNewColumns(ctx, logger, schema, newColumns); err != nil {
+			return fmt.Errorf("error migrating new columns: %w", err)
+		}
+	}
+	return nil
 }

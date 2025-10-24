@@ -38,6 +38,7 @@ var _ internal.DriverLifecycle = (*mysqlDriver)(nil)
 var _ internal.Importer = (*mysqlDriver)(nil)
 var _ internal.DriverHelp = (*mysqlDriver)(nil)
 var _ importer.Handler = (*mysqlDriver)(nil)
+var _ internal.DriverMigration = (*mysqlDriver)(nil)
 
 func (p *mysqlDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
@@ -309,6 +310,10 @@ func (p *mysqlDriver) MigrateNewColumns(ctx context.Context, logger logger.Logge
 		logger.Debug("migrated new columns: %s", sql)
 	}
 	return p.refreshSchema(ctx, p.db, true)
+}
+
+func (p *mysqlDriver) GetDestinationSchema(ctx context.Context, logger logger.Logger) internal.DatabaseSchema {
+	return p.dbschema
 }
 
 func init() {

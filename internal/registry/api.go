@@ -231,13 +231,9 @@ func newAPIRegistryModified(ctx context.Context, logger logger.Logger, apiURL st
 			if err := tracker.SetKey(key, util.JSONStringify(schema), 0); err != nil {
 				return nil, fmt.Errorf("error setting key %s in tracker: %s", key, err)
 			}
-			if found, _, err := tracker.GetKey(versionKey); err != nil {
-				return nil, fmt.Errorf("error getting key %s in tracker: %s", versionKey, err)
-			} else if found {
-				// only set the version key if it already exists; otherwise EDS won't migrate new tables properly
-				if err := tracker.SetKey(versionKey, schema.ModelVersion, 0); err != nil {
-					return nil, fmt.Errorf("error setting key %s in tracker: %s", versionKey, err)
-				}
+			// set the version key in all cases: we can do this because the destination schema will be updated on startup to match the source schema
+			if err := tracker.SetKey(versionKey, schema.ModelVersion, 0); err != nil {
+				return nil, fmt.Errorf("error setting key %s in tracker: %s", versionKey, err)
 			}
 		}
 		if err := registry.cache.Set(key, schema, 0); err != nil {
