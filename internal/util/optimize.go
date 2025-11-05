@@ -3,6 +3,7 @@ package util
 import (
 	"maps"
 	"slices"
+	"strconv"
 )
 
 func CombineRecordsWithSamePrimaryKey(records []*Record) []*Record {
@@ -66,4 +67,27 @@ func CombineRecordsWithSamePrimaryKey(records []*Record) []*Record {
 	}
 
 	return processedRecords
+}
+
+func SortRecordsByMVCCTimestamp(records []*Record) []*Record {
+	slices.SortFunc(
+		records,
+		func(a, b *Record) int {
+			var timestampA, timestampB float64
+			if a.Event != nil {
+				timestampA, _ = strconv.ParseFloat(a.Event.MVCCTimestamp, 64)
+			}
+			if b.Event != nil {
+				timestampB, _ = strconv.ParseFloat(b.Event.MVCCTimestamp, 64)
+			}
+			if timestampA < timestampB {
+				return -1
+			}
+			if timestampA > timestampB {
+				return 1
+			}
+			return 0
+		},
+	)
+	return records
 }
