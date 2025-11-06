@@ -17,9 +17,21 @@ func TestCombineRecordsUpdate(t *testing.T) {
 	records = append(records, &Record{Table: "user", Id: "0", Operation: "UPDATE", Diff: []string{"age"}, Object: map[string]interface{}{"age": 33}})
 	records = CombineRecordsWithSamePrimaryKey(records)
 
-	recordSally := records[0]
-	recordBob := records[1]
 	assert.Equal(t, 2, len(records))
+
+	// CombineRecordsWithSamePrimaryKey doesn't guarantee the order of the records, so we need to find the records by Id.
+	var recordSally, recordBob *Record
+	for _, record := range records {
+		switch record.Id {
+		case "0":
+			recordSally = record
+		case "1":
+			recordBob = record
+		}
+	}
+
+	assert.NotNil(t, recordSally, "record with Id '0' should exist")
+	assert.NotNil(t, recordBob, "record with Id '1' should exist")
 
 	assert.Equal(t, "UPDATE", recordSally.Operation)
 	assert.Equal(t, "Sally", recordSally.Object["name"])
