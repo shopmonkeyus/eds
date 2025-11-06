@@ -17,9 +17,21 @@ func TestCombineRecordsUpdate(t *testing.T) {
 	records = append(records, &Record{Table: "user", Id: "0", Operation: "UPDATE", Diff: []string{"age"}, Object: map[string]interface{}{"age": 33}})
 	records = CombineRecordsWithSamePrimaryKey(records)
 
-	recordSally := records[0]
-	recordBob := records[1]
 	assert.Equal(t, 2, len(records))
+
+	// CombineRecordsWithSamePrimaryKey doesn't guarantee the order of the records, so we need to find the records by Id.
+	var recordSally, recordBob *Record
+	for _, record := range records {
+		switch record.Id {
+		case "0":
+			recordSally = record
+		case "1":
+			recordBob = record
+		}
+	}
+
+	assert.NotNil(t, recordSally, "record with Id '0' should exist")
+	assert.NotNil(t, recordBob, "record with Id '1' should exist")
 
 	assert.Equal(t, "UPDATE", recordSally.Operation)
 	assert.Equal(t, "Sally", recordSally.Object["name"])
@@ -66,4 +78,15 @@ func TestCombineRecordsDeleteEdgeCase(t *testing.T) {
 		dataIsBad := (record.Table == "user" && hasMileage) || (record.Table == "vehicle" && hasName)
 		assert.False(t, dataIsBad, "record object contains incorrect data. failure when combining records in batch")
 	}
+}
+
+func TestSortRecordsByMVCCTimestamp(t *testing.T) {
+	records := []*Record{}
+	records = append(records, &Record{Table: "user", Id: "A", Operation: "INSERT", Diff: []string{}, Object: map[string]interface{}{"name": "John"}, Event: &internal.DBChangeEvent{MVCCTimestamp: "1.0"}})
+	records = append(records, &Record{Table: "user", Id: "B", Operation: "INSERT", Diff: []string{}, Object: map[string]interface{}{"name": "Sally"}, Event: &internal.DBChangeEvent{MVCCTimestamp: "3.0"}})
+	records = append(records, &Record{Table: "user", Id: "C", Operation: "INSERT", Diff: []string{}, Object: map[string]interface{}{"name": "Tim"}, Event: &internal.DBChangeEvent{MVCCTimestamp: "2.0"}})
+	records = SortRecordsByMVCCTimestamp(records)
+	assert.Equal(t, "John", records[0].Object["name"])
+	assert.Equal(t, "Tim", records[1].Object["name"])
+	assert.Equal(t, "Sally", records[2].Object["name"])
 }

@@ -171,6 +171,7 @@ func (p *snowflakeDriver) Process(logger logger.Logger, event internal.DBChangeE
 var sequence int64
 
 var snowflakeBulkRecordModifications = []func([]*util.Record) []*util.Record{
+	util.SortRecordsByMVCCTimestamp,
 	util.CombineRecordsWithSamePrimaryKey,
 }
 

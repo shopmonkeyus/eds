@@ -53,6 +53,10 @@ type e2eTestDisabled interface {
 	Disabled() bool
 }
 
+type e2eTestReady interface {
+	WaitForReady(timeout time.Duration) error
+}
+
 var tests = make([]e2eTest, 0)
 
 func registerTest(t e2eTest) {
@@ -215,6 +219,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+
 	var pass, fail, skipped uint32
 	runNatsTestServer(func(nc *nats.Conn, js jetstream.JetStream, srv *server.Server, userCreds string) {
 		logger.Trace("creds: %s", userCreds)
@@ -233,6 +238,13 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 				skipped++
 				logger.Warn("skipping test: %s", test.Name())
 				continue
+			}
+			if testReady, ok := test.(e2eTestReady); ok {
+				if err := testReady.WaitForReady(2 * time.Second); err != nil {
+					logger.Error("%s readiness check failed: %s", test.Name(), err)
+					atomic.AddUint32(&fail, 1)
+					continue
+				}
 			}
 			os.Remove(filepath.Join(tmpdir, "eds-data.db"))
 			var wg sync.WaitGroup

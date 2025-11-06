@@ -18,6 +18,7 @@ type driverKafkaTest struct {
 }
 
 var _ e2eTest = (*driverKafkaTest)(nil)
+var _ e2eTestReady = (*driverKafkaTest)(nil)
 
 func (d *driverKafkaTest) Name() string {
 	return "kafka"
@@ -25,6 +26,20 @@ func (d *driverKafkaTest) Name() string {
 
 func (d *driverKafkaTest) URL(dir string) string {
 	return fmt.Sprintf("kafka://127.0.0.1:29092/%s", dbname)
+}
+
+func (d *driverKafkaTest) WaitForReady(timeout time.Duration) error {
+	started := time.Now()
+	for time.Since(started) < timeout {
+		conn, err := gokafka.Dial("tcp", "127.0.0.1:29092")
+		if err == nil {
+			_ = conn.Broker() // verify broker info is available
+			conn.Close()
+			return nil
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return fmt.Errorf("kafka not ready within %v", timeout)
 }
 
 func (d *driverKafkaTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
