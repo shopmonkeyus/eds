@@ -67,3 +67,14 @@ func TestCombineRecordsDeleteEdgeCase(t *testing.T) {
 		assert.False(t, dataIsBad, "record object contains incorrect data. failure when combining records in batch")
 	}
 }
+
+func TestSortRecordsByMVCCTimestamp(t *testing.T) {
+	records := []*Record{}
+	records = append(records, &Record{Table: "user", Id: "A", Operation: "INSERT", Diff: []string{}, Object: map[string]interface{}{"name": "John"}, Event: &internal.DBChangeEvent{MVCCTimestamp: "1.0"}})
+	records = append(records, &Record{Table: "user", Id: "B", Operation: "INSERT", Diff: []string{}, Object: map[string]interface{}{"name": "Sally"}, Event: &internal.DBChangeEvent{MVCCTimestamp: "3.0"}})
+	records = append(records, &Record{Table: "user", Id: "C", Operation: "INSERT", Diff: []string{}, Object: map[string]interface{}{"name": "Tim"}, Event: &internal.DBChangeEvent{MVCCTimestamp: "2.0"}})
+	records = SortRecordsByMVCCTimestamp(records)
+	assert.Equal(t, "John", records[0].Object["name"])
+	assert.Equal(t, "Tim", records[1].Object["name"])
+	assert.Equal(t, "Sally", records[2].Object["name"])
+}
