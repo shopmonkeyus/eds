@@ -16,7 +16,7 @@ builds:
     hooks:
       post:
         - cmd: |
-            {{- if eq .Os "darwin" -}}
+            {{- if and (eq .Os "darwin") (not .Env.CI) -}}
             quill sign-and-notarize "{{ .Path }}" --dry-run={{ .IsSnapshot }} --ad-hoc={{ .IsSnapshot }} -vv
             {{- else -}}
             true
@@ -60,6 +60,7 @@ signs:
       ]
 release:
   prerelease: auto
+  draft: true
 # The lines beneath this are called `modelines`. See `:help modeline`
 # Feel free to remove those if you don't want/use them.
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
