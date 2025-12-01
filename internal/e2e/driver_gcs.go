@@ -4,14 +4,14 @@
 // Google Cloud Storage (GCS) end-to-end test using the S3-compatible API.
 //
 // This test requires GCS HMAC keys to be set as environment variables:
-//   - AWS_ACCESS_KEY_ID: Your GCS HMAC access key (starts with GOOG1...)
-//   - AWS_SECRET_ACCESS_KEY: Your GCS HMAC secret key
+//   - GCS_ACCESS_KEY_ID: Your GCS HMAC access key (starts with GOOG1...)
+//   - GCS_SECRET_ACCESS_KEY: Your GCS HMAC secret key
 //   - GCS_TEST_BUCKET (optional): Bucket name to use (defaults to "eds-test-upload")
-//   Use the credentials from the existing EDS GCS service account; ask a team member for the credentials.
+// Use the credentials from the existing EDS GCS service account; ask a team member for the credentials.
 //
 // To run this test:
-//   export AWS_ACCESS_KEY_ID=your_gcs_access_key
-//   export AWS_SECRET_ACCESS_KEY=your_gcs_secret_key
+//   export GCS_ACCESS_KEY_ID=your_gcs_access_key
+//   export GCS_SECRET_ACCESS_KEY=your_gcs_secret_key
 //   export GCS_TEST_BUCKET=your-bucket-name  # optional
 //   go run -tags e2e . e2e -v gcs
 //
@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -39,6 +40,12 @@ type driverGCSTest struct {
 var _ e2eTest = (*driverGCSTest)(nil)
 var _ e2eTestDisabled = (*driverGCSTest)(nil)
 
+func getGCSCredentials() (accessKeyID, secretAccessKey string) {
+	accessKeyID = os.Getenv("GCS_ACCESS_KEY_ID")
+	secretAccessKey = os.Getenv("GCS_SECRET_ACCESS_KEY")
+	return
+}
+
 func (d *driverGCSTest) Name() string {
 	return "gcs"
 }
@@ -49,9 +56,14 @@ func (d *driverGCSTest) URL(dir string) string {
 		bucket = "eds-test-upload"
 	}
 
-	// Build URL - credentials are read from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables
-	// These should be set to your GCS HMAC keys
-	return fmt.Sprintf("s3://storage.googleapis.com/%s", bucket)
+	accessKeyID, secretAccessKey := getGCSCredentials()
+
+	baseURL := fmt.Sprintf("s3://storage.googleapis.com/%s", bucket)
+	params := url.Values{}
+	params.Set("access-key-id", accessKeyID)
+	params.Set("secret-access-key", secretAccessKey)
+
+	return fmt.Sprintf("%s?%s", baseURL, params.Encode())
 }
 
 func (d *driverGCSTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
@@ -60,7 +72,6 @@ func (d *driverGCSTest) Validate(logger logger.Logger, dir string, url string, e
 		return fmt.Errorf("error creating gcs client: %w", err)
 	}
 
-	// Construct the key path matching the driver's output format
 	key := fmt.Sprintf("%s%s/%d-%s.json", prefix, event.Table, time.UnixMilli(event.Timestamp).Unix(), event.GetPrimaryKey())
 
 	res, err := client.GetObject(context.Background(), &awss3.GetObjectInput{
@@ -81,9 +92,7 @@ func (d *driverGCSTest) Validate(logger logger.Logger, dir string, url string, e
 }
 
 func (d *driverGCSTest) Disabled() bool {
-	// Check if GCS HMAC credentials are available in environment
-	accessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
-	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	accessKeyID, secretAccessKey := getGCSCredentials()
 	return accessKeyID == "" || secretAccessKey == ""
 }
 
