@@ -217,6 +217,7 @@ func NewS3Client(ctx context.Context, logger logger.Logger, urlString string) (*
 			provider)
 		if err == nil {
 			cfg.HTTPClient = &http.Client{Transport: &RecalculateV4Signature{http.DefaultTransport, v4.NewSigner(), cfg}}
+			cfg.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		}
 	} else {
 		cfg, err = config.LoadDefaultConfig(ctx,
