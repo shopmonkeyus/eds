@@ -12,6 +12,15 @@ concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PROJECT_ID: shopmonkey-v2
+  AR_REPO_LOCATION: us
+  AR_URL: us-docker.pkg.dev
+  AR_REPO: public
+  IMAGE_NAME: eds
+  SERVICE_ACCOUNT: github-actions-service-account@shopmonkey-v2.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/610736166417/locations/global/workloadIdentityPools/shopmonkeyv2-github/providers/shopmonkeyv2-github
+
 permissions:
   contents: read
   pages: write
@@ -32,13 +41,21 @@ jobs:
       - name: Configure Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        timeout-minutes: 2
+      - name: Google Auth
+        id: auth
+        uses: 'google-github-actions/auth@v3'
         with:
-          registry: us-docker.pkg.dev
-          username: _json_key
-          password: ${{ secrets.GCP_SA_KEY }}
+          token_format: 'access_token'
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Docker Auth
+        uses: 'docker/login-action@v3'
+        with:
+          username: "oauth2accesstoken"
+          password: ${{ steps.auth.outputs.access_token }}
+          registry: ${{ env.AR_URL }}
 
       - name: Get current date
         id: date
@@ -86,7 +103,7 @@ jobs:
           echo version=$VERSION >> $GITHUB_OUTPUT
 
           for TAG in $TAGS; do
-            TAG_LIST+="us-docker.pkg.dev/${{ env.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:$TAG,"
+            TAG_LIST+="${{ env.AR_URL }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:$TAG,"
           done
 
           # remove the trailing comma
@@ -111,6 +128,6 @@ jobs:
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: us-docker.pkg.dev/${{ env.PLATFORM_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}
+          subject-name: ${{ env.AR_URL }}/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
