@@ -46,6 +46,7 @@ jobs:
         uses: 'google-github-actions/auth@v3'
         with:
           token_format: 'access_token'
+          access_token_lifetime: 300s # 5 minute lifetime
           project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.SERVICE_ACCOUNT }}
