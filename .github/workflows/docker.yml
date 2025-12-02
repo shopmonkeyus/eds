@@ -18,7 +18,7 @@ env:
   AR_URL: us-docker.pkg.dev
   AR_REPO: public
   IMAGE_NAME: eds
-  SERVICE_ACCOUNT: github-actions-service-account@shopmonkey-v2.iam.gserviceaccount.com
+  SERVICE_ACCOUNT: eds-artifact-publisher@shopmonkey-v2.iam.gserviceaccount.com
   WORKLOAD_IDENTITY_PROVIDER: projects/610736166417/locations/global/workloadIdentityPools/shopmonkeyv2-github/providers/shopmonkeyv2-github
 
 permissions:
