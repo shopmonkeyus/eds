@@ -29,6 +29,9 @@ jobs:
       - name: Run tests
         env:
           SM_SNOWFLAKE_PASSWORD: ${{ secrets.SM_SNOWFLAKE_PASSWORD }}
+          GCS_ACCESS_KEY_ID: ${{ secrets.GCS_ACCESS_KEY_ID }}
+          GCS_SECRET_ACCESS_KEY: ${{ secrets.GCS_SECRET_ACCESS_KEY }}
+          GCS_TEST_BUCKET: ${{ vars.GCS_TEST_BUCKET }}
         run: make e2e
       - name: Stop containers
         run: docker compose down
