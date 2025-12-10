@@ -429,6 +429,9 @@ func (p *s3Driver) ImportEvent(event internal.DBChangeEvent, schema *internal.Sc
 
 // ImportCompleted is called when all events have been processed.
 func (p *s3Driver) ImportCompleted() error {
+	p.logger.Debug("waiting for uploads to complete")
+	p.jobWaitGroup.Wait()
+	p.logger.Debug("all uploads completed")
 	return nil
 }
 
