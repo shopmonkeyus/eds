@@ -429,8 +429,7 @@ func (p *s3Driver) ImportEvent(event internal.DBChangeEvent, schema *internal.Sc
 
 // ImportCompleted is called when all events have been processed.
 func (p *s3Driver) ImportCompleted() error {
-	p.Flush(p.logger)
-	return nil
+	return p.Flush(p.logger)
 }
 
 func (p *s3Driver) Import(config internal.ImporterConfig) error {
