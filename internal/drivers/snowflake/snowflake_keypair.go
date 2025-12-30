@@ -47,7 +47,7 @@ func (p *snowflakeKeyPairDriver) Configuration() []internal.DriverField {
 		internal.RequiredStringField("Database", "The database name including the schema, e.g. DBNAME/SCHEMA", &defaultDatabase),
 		internal.RequiredStringField("Username", "The username to use. Note the user must be associated with the public key", nil),
 		internal.RequiredStringField("Account", "The full Snowflake account identifier including the organization, e.g. abcdefg-ab12345", &defaultAccount),
-		internal.OptionalStringField("Secret", "Name of environment variable on the EDS server that contains the unencrypted private key", &defaultSecret),
+		internal.OptionalStringField("Secret", "Name of environment variable on the EDS server that contains the unencrypted PKCS#8 private key", &defaultSecret),
 	}
 }
 
