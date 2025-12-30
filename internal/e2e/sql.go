@@ -20,16 +20,11 @@ type sqlDriverTransform interface {
 
 type columnFormat func(string) string
 
-func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format sqlDriverTransform) error {
+func validateSQLEventWithDB(logger logger.Logger, event internal.DBChangeEvent, db *sql.DB, format sqlDriverTransform) error {
 	kv, err := event.GetObject()
 	if err != nil {
 		return fmt.Errorf("error getting object: %w", err)
 	}
-	db, err := sql.Open(driver, url)
-	if err != nil {
-		return fmt.Errorf("error opening database: %w", err)
-	}
-	defer db.Close()
 	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = %s", format.QuoteTable(event.Table), format.QuoteColumn("id"), format.QuoteValue(event.GetPrimaryKey()))
 	logger.Info("running query: %s", query)
 	rows, err := db.Query(query)
@@ -86,4 +81,13 @@ func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver
 		}
 	}
 	return nil
+}
+
+func validateSQLEvent(logger logger.Logger, event internal.DBChangeEvent, driver string, url string, format sqlDriverTransform) error {
+	db, err := sql.Open(driver, url)
+	if err != nil {
+		return fmt.Errorf("error opening database: %w", err)
+	}
+	defer db.Close()
+	return validateSQLEventWithDB(logger, event, db, format)
 }
