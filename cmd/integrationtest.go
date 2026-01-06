@@ -37,12 +37,13 @@ var loadTestRandomCmd = &cobra.Command{
 	Long:  "Send random messages to nats for integration testing. Currently sends customer update messages",
 	Run: RunWithLogAndRecover(func(cmd *cobra.Command, args []string, log logger.Logger) {
 		count, _ := cmd.Flags().GetInt("count")
+		delayMs, _ := cmd.Flags().GetInt("delay-ms")
 
 		js := integrationtest.NewConnection(&integrationtest.JetstreamConnection{})
 
 		log.Info("sending %d customer messages", count)
 
-		delivered := integrationtest.PublishRandomMessages(js, count, log)
+		delivered := integrationtest.PublishRandomMessages(js, count, delayMs, log)
 
 		log.Info("sent %d customer messages to NATS", delivered)
 	}),
@@ -66,6 +67,7 @@ var publishFileDataCmd = &cobra.Command{
 
 func init() {
 	loadTestRandomCmd.Flags().Int("count", 1, "Number of customer messages to send (default: 1)")
+	loadTestRandomCmd.Flags().Int("delay-ms", 100, "Delay between messages in milliseconds (default: 100)")
 
 	publishFileDataCmd.Flags().Int("count", 1, "Number of messages to send (default: 1)")
 
