@@ -412,7 +412,7 @@ func (p *snowflakeDriver) Name() string {
 
 // Description is the description of the driver.
 func (p *snowflakeDriver) Description() string {
-	return "This driver is provided for legacy support of Snowflake username/password authentication. New Snowflake connections should use the Snowflake-keypair driver."
+	return "This driver is provided for legacy support of Snowflake username/password authentication. New Snowflake connections should use the Snowflake Key Pair driver."
 }
 
 // ExampleURL should return an example URL for configuring the driver.
