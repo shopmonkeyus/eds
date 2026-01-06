@@ -38,6 +38,10 @@ func (p *snowflakeKeyPairDriver) Description() string {
 	return "Temporary driver for migrating to key-pair authentication for Snowflake"
 }
 
+func (p *snowflakeKeyPairDriver) ExampleURL() string {
+	return "snowflake-keypair://user@account/database/schema?secret-key=SECRET_ENV_VAR_NAME"
+}
+
 // Defines the fields shown in the frontend
 func (p *snowflakeKeyPairDriver) Configuration() []internal.DriverField {
 	defaultDatabase := "DBNAME/SCHEMA"
