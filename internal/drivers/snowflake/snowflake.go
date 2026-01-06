@@ -407,12 +407,12 @@ done:
 
 // Name is a unique name for the driver.
 func (p *snowflakeDriver) Name() string {
-	return "Snowflake"
+	return "Snowflake [DEPRECATED]"
 }
 
 // Description is the description of the driver.
 func (p *snowflakeDriver) Description() string {
-	return "Supports streaming EDS messages to a Snowflake database."
+	return "This driver is provided for legacy support of Snowflake username/password authentication. New Snowflake connections should use the Snowflake-keypair driver."
 }
 
 // ExampleURL should return an example URL for configuring the driver.
