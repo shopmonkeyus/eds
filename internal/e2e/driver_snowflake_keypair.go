@@ -48,7 +48,7 @@ func (d *driverSnowflakeKeypairTest) URL(dir string) string {
 
 func (d *driverSnowflakeKeypairTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	if d.db == nil {
-		db, err := snowflake.OpenSnowflakeWithKeyPair(snowflakeKeypairSecretKey, snowflakeUser, snowflakeHost, snowflakeDB, "PUBLIC")
+		db, err := snowflake.OpenSnowflakeWithKeyPair(snowflakeKeypairSecretKey, snowflakeUser, snowflakeHost, snowflakeDB, snowflakeSchema)
 		if err != nil {
 			return fmt.Errorf("error connecting with keypair: %w", err)
 		}
