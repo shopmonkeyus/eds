@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -378,6 +379,12 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 				return false
 			})
 			wg.Wait()
+			// if the test acquires a resource, close it
+			if closer, ok := test.(io.Closer); ok {
+				if err := closer.Close(); err != nil {
+					logger.Error("error closing test: %s: %s", name, err)
+				}
+			}
 			logger.Info("test: %s completed in %s", name, time.Since(ts))
 		}
 		logger.Info("shutting down server")

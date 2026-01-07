@@ -17,6 +17,7 @@ var (
 	snowflakeUser     = "EDS_E2E_TEST"
 	snowflakePassword = os.Getenv("SM_SNOWFLAKE_PASSWORD")
 	snowflakeDB       = "EDS_E2E"
+	snowflakeSchema   = "PUBLIC"
 	snowflakeHost     = "TFLXCJY-LU41015"
 )
 

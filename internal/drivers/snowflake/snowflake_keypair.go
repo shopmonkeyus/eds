@@ -55,27 +55,7 @@ func (p *snowflakeKeyPairDriver) Configuration() []internal.DriverField {
 	}
 }
 
-func (p *snowflakeKeyPairDriver) connectToDBWithKeyPair(ctx context.Context, urlString string) (*sql.DB, error) {
-	parsedURL, err := url.Parse(urlString)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %w", err)
-	}
-
-	username := parsedURL.User.Username()
-	account := parsedURL.Host
-
-	pathParts := strings.Split(strings.TrimPrefix(parsedURL.Path, "/"), "/")
-	if len(pathParts) < 2 {
-		return nil, fmt.Errorf("invalid URL path: expected /database/schema, got %s", parsedURL.Path)
-	}
-	database := pathParts[0]
-	schema := pathParts[1]
-
-	secret := os.Getenv(parsedURL.Query().Get(secretKey))
-	if secret == "" {
-		secret = os.Getenv("SNOWFLAKE_SECRET_ACCESS_KEY")
-	}
-
+func OpenSnowflakeWithKeyPair(secret string, username string, account string, database string, schema string) (*sql.DB, error) {
 	block, _ := pem.Decode([]byte(secret))
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode secret")
@@ -100,7 +80,34 @@ func (p *snowflakeKeyPairDriver) connectToDBWithKeyPair(ctx context.Context, url
 
 	connector := sf.NewConnector(sf.SnowflakeDriver{}, *cfg)
 
-	db := sql.OpenDB(connector)
+	return sql.OpenDB(connector), nil
+}
+
+func (p *snowflakeKeyPairDriver) connectToDBWithKeyPair(ctx context.Context, urlString string) (*sql.DB, error) {
+	parsedURL, err := url.Parse(urlString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	username := parsedURL.User.Username()
+	account := parsedURL.Host
+
+	pathParts := strings.Split(strings.TrimPrefix(parsedURL.Path, "/"), "/")
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invalid URL path: expected /database/schema, got %s", parsedURL.Path)
+	}
+	database := pathParts[0]
+	schema := pathParts[1]
+
+	secret := os.Getenv(parsedURL.Query().Get(secretKey))
+	if secret == "" {
+		secret = os.Getenv("SNOWFLAKE_SECRET_ACCESS_KEY")
+	}
+
+	db, err := OpenSnowflakeWithKeyPair(secret, username, account, database, schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open snowflake with keypair: %w", err)
+	}
 
 	row := db.QueryRowContext(ctx, "SELECT 1")
 	if err := row.Err(); err != nil {
