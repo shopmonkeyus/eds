@@ -24,6 +24,8 @@ var enrollCmd = &cobra.Command{
 		apiURL := mustFlagString(cmd, "api-url", false)
 		dataDir := getDataDir(cmd, logger)
 
+		logger.Info("what uuuuuuuup")
+
 		if apiURL == "" {
 			logger.Debug("Getting api from prefix")
 			firstLetter := code[0:1]
