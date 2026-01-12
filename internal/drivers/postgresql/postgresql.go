@@ -40,7 +40,7 @@ var _ internal.DriverMigration = (*postgresqlDriver)(nil)
 
 func (p *postgresqlDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
-		dbname, err := util.GetCurrentDatabase(ctx, db, "current_database()")
+		dbname, err := util.QuerySingleValue(ctx, db, "current_database()")
 		if err != nil {
 			return fmt.Errorf("error getting current database name: %w", err)
 		}

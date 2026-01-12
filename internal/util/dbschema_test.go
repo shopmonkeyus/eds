@@ -41,7 +41,7 @@ func TestGetCurrentDatabase(t *testing.T) {
 
 	mock.ExpectQuery("SELECT DATABASE\\(\\)").WithArgs().WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("test"))
 
-	res, err := GetCurrentDatabase(context.Background(), db, "DATABASE()")
+	res, err := QuerySingleValue(context.Background(), db, "DATABASE()")
 	assert.NoError(t, err)
 	assert.NotNil(t, res)
 	assert.Equal(t, "test", res)

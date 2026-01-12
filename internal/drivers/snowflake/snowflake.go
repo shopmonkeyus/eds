@@ -32,7 +32,8 @@ type snowflakeDriver struct {
 	locker                  sync.Mutex
 	sessionID               string
 	dbname                  string
-	dbschema                internal.DatabaseSchema
+	dbSnowflakeSchemaName   string                  // snowflake painfully overloads "schema" to be like a namespace in a database
+	dbschema                internal.DatabaseSchema // this is the information schema
 	updateStrategy          string
 	profilingInfo           DriverProfilingInfo
 	bulkRecordModifications []func([]*util.Record) []*util.Record
@@ -57,13 +58,21 @@ func (p *snowflakeDriver) SetSessionID(sessionID string) {
 
 func (p *snowflakeDriver) RefreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
-		dbname, err := util.GetCurrentDatabase(ctx, db, "CURRENT_DATABASE()")
+		dbname, err := util.QuerySingleValue(ctx, db, "CURRENT_DATABASE()")
 		if err != nil {
 			return fmt.Errorf("error getting current database name: %w", err)
 		}
 		p.dbname = dbname
 	}
-	schema, err := util.BuildDBSchemaFromInfoSchema(ctx, p.logger, db, "table_catalog", p.dbname, failIfEmpty)
+	if p.dbSnowflakeSchemaName == "" {
+		dbSnowflakeSchemaName, err := util.QuerySingleValue(ctx, db, "CURRENT_SCHEMA()")
+		if err != nil {
+			return fmt.Errorf("error getting current snowflake schema name: %w", err)
+		}
+		p.dbSnowflakeSchemaName = dbSnowflakeSchemaName
+	}
+	condition := util.QueryConditions{Column: "table_schema", Value: p.dbSnowflakeSchemaName}
+	schema, err := util.BuildDBSchemaFromInfoSchemaWithConditions(ctx, p.logger, db, "table_catalog", p.dbname, failIfEmpty, condition)
 	if err != nil {
 		return fmt.Errorf("error building database schema: %w", err)
 	}
