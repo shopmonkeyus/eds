@@ -24,7 +24,7 @@ var enrollCmd = &cobra.Command{
 		apiURL := mustFlagString(cmd, "api-url", false)
 		dataDir := getDataDir(cmd, logger)
 
-		logger.Info("what uuuuuuuup")
+		logger.Info("This message was emitted from an EDS branch")
 
 		if apiURL == "" {
 			logger.Debug("Getting api from prefix")
