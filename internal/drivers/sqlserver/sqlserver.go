@@ -42,7 +42,7 @@ var _ internal.DriverMigration = (*sqlserverDriver)(nil)
 
 func (p *sqlserverDriver) refreshSchema(ctx context.Context, db *sql.DB, failIfEmpty bool) error {
 	if p.dbname == "" {
-		dbname, err := util.GetCurrentDatabase(ctx, db, "DB_NAME()")
+		dbname, err := util.QuerySingleValue(ctx, db, "DB_NAME()")
 		if err != nil {
 			return fmt.Errorf("error getting current database name: %w", err)
 		}
