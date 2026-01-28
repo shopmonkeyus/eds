@@ -190,7 +190,7 @@ func generateRandomCustomer(companyID, locationID string, customerID string) map
 	return customer
 }
 
-func PublishRandomMessages(js jetstream.JetStream, count int, log logger.Logger) int {
+func PublishRandomMessages(js jetstream.JetStream, count int, delayMs int, log logger.Logger) int {
 	cid := "28a6712e-83a0-4ede-97cb-c3f5201068dc"
 	lid := "5b7a05d6-c971-4f77-8792-9c12744a811d"
 	uid := "test-user-789"
@@ -238,9 +238,10 @@ func PublishRandomMessages(js jetstream.JetStream, count int, log logger.Logger)
 
 		log.Info("Successfully published customer message %d/%d", i+1, count)
 
-		if i < count-1 {
-			time.Sleep(100 * time.Millisecond)
+		if delayMs > 0 {
+			time.Sleep(time.Duration(delayMs) * time.Millisecond)
 		}
+
 		delivered++
 	}
 	return delivered
