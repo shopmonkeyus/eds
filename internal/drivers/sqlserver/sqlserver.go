@@ -113,7 +113,6 @@ func (p *sqlserverDriver) Stop() error {
 }
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
-// Return -1 to indicate that there is no limit.
 func (p *sqlserverDriver) MaxBatchSize() int {
 	return maxBatchSize
 }
