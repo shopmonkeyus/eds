@@ -15,7 +15,7 @@ import (
 )
 
 const maxBytesSizeInsert = 5_000_000
-
+const maxBatchSize = 500
 type postgresqlDriver struct {
 	ctx          context.Context
 	logger       logger.Logger
@@ -110,9 +110,8 @@ func (p *postgresqlDriver) Stop() error {
 }
 
 // MaxBatchSize returns the maximum number of events that can be processed in a single call to Process and when Flush should be called.
-// Return -1 to indicate that there is no limit.
 func (p *postgresqlDriver) MaxBatchSize() int {
-	return -1
+	return maxBatchSize
 }
 
 // Process a single event. It returns a bool indicating whether Flush should be called. If an error is returned, the driver will NAK the event.
