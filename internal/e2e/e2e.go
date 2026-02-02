@@ -38,9 +38,9 @@ const (
 	dbpass            = "Asdf1234!"
 	dbname            = "eds"
 	apikey            = "apikey"
-	defaultPayload    = `{"id":"12345","name":"test"}`
-	defaultPayload2   = `{"id":"12345","name":"test","age":1}`
-	defaultPayload3   = `{"id":"12345","name":"test","foo":1}`
+	defaultPayload    = `{"id":"12345","name":"test", "updatedDate":"2026-02-02T12:00:00.000Z"}`
+	defaultPayload2   = `{"id":"12345","name":"test","age":1, "updatedDate":"2026-02-02T13:00:00.000Z"}`
+	defaultPayload3   = `{"id":"12345","name":"test","foo":1, "updatedDate":"2026-02-02T14:00:00.000Z"}`
 	eventDeliverDelay = time.Millisecond * 150
 )
 
