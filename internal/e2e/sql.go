@@ -6,6 +6,7 @@ package e2e
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
@@ -19,6 +20,37 @@ type sqlDriverTransform interface {
 }
 
 type columnFormat func(string) string
+
+// valueAsTime returns t if v can be interpreted as a time, otherwise zero, false.
+func valueAsTime(v interface{}) (time.Time, bool) {
+	if v == nil {
+		return time.Time{}, false
+	}
+	switch x := v.(type) {
+	case time.Time:
+		return x, true
+	case string:
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05.999999999Z07:00"} {
+			if t, err := time.Parse(layout, x); err == nil {
+				return t, true
+			}
+		}
+		return time.Time{}, false
+	default:
+		return time.Time{}, false
+	}
+}
+
+// valuesEqual compares expected (from event) and actual (from DB), normalizing date-time values.
+func valuesEqual(expected, actual interface{}) bool {
+	te, oke := valueAsTime(expected)
+	ta, oka := valueAsTime(actual)
+	if oke && oka {
+		return te.Truncate(time.Millisecond).Equal(ta.Truncate(time.Millisecond))
+	}
+	// Fall back to JSON stringify for non-time values (and when one side isn't a time)
+	return util.JSONStringify(expected) == util.JSONStringify(actual)
+}
 
 func validateSQLEventWithDB(logger logger.Logger, event internal.DBChangeEvent, db *sql.DB, format sqlDriverTransform) error {
 	kv, err := event.GetObject()
@@ -56,7 +88,7 @@ func validateSQLEventWithDB(logger logger.Logger, event internal.DBChangeEvent, 
 				v = val
 			}
 			if ev, ok := kv[col]; ok {
-				if util.JSONStringify(ev) != util.JSONStringify(v) {
+				if !valuesEqual(ev, v) {
 					return fmt.Errorf("%s value does not match, was: %v, expected: %v", col, v, ev)
 				}
 			} else {

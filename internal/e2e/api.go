@@ -101,6 +101,10 @@ func setupServer(logger logger.Logger, creds string) (int, ShutdownFunc) {
 					"name": {
 						Type: "string",
 					},
+					"updatedDate": {
+						Type:   "string",
+						Format: "date-time",
+					},
 				},
 				PrimaryKeys: []string{"id"},
 			}
