@@ -224,28 +224,7 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool, updateStrat
 	}
 	if record.Operation != "DELETE" {
 		if record.Operation == "INSERT" {
-			var columns []string
-			for _, name := range model.Columns() {
-				columns = append(columns, util.QuoteIdentifier(name))
-			}
-			var insertVals []string
-			for _, name := range model.Columns() {
-				columnProperty := model.Properties[name]
-				if val, ok := record.Object[name]; ok {
-					fn := generateInsertFunction(columnProperty)
-					v := quoteValue(val, fn)
-					insertVals = append(insertVals, v)
-				} else {
-					insertVals = append(insertVals, nullableValue(columnProperty, true))
-				}
-			}
-			sql.WriteString("INSERT INTO ")
-			sql.WriteString(util.QuoteIdentifier(record.Table))
-			sql.WriteString(" (")
-			sql.WriteString(strings.Join(columns, ","))
-			sql.WriteString(") SELECT ")
-			sql.WriteString(strings.Join(insertVals, ","))
-			sql.WriteString(";\n")
+			sql.WriteString(toMergeSQL(record, model))
 		} else {
 			// update
 			switch updateStrategy {
