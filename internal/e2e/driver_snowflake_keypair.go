@@ -15,6 +15,7 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
+var snowflakeUserKeypair = "EDS_E2E_TEST_KEYPAIR"
 var snowflakeKeypairSecretKey = os.Getenv("SNOWFLAKE_SECRET_ACCESS_KEY")
 
 type driverSnowflakeKeypairTest struct {
@@ -43,12 +44,12 @@ func (d *driverSnowflakeKeypairTest) Name() string {
 
 func (d *driverSnowflakeKeypairTest) URL(dir string) string {
 	return fmt.Sprintf("snowflake-keypair://%s@%s/%s/PUBLIC?secret-key=SNOWFLAKE_SECRET_ACCESS_KEY",
-		snowflakeUser, snowflakeHost, snowflakeDB)
+		snowflakeUserKeypair, snowflakeHost, snowflakeDB)
 }
 
 func (d *driverSnowflakeKeypairTest) Validate(logger logger.Logger, dir string, url string, event internal.DBChangeEvent) error {
 	if d.db == nil {
-		db, err := snowflake.OpenSnowflakeWithKeyPair(snowflakeKeypairSecretKey, snowflakeUser, snowflakeHost, snowflakeDB, snowflakeSchema)
+		db, err := snowflake.OpenSnowflakeWithKeyPair(snowflakeKeypairSecretKey, snowflakeUserKeypair, snowflakeHost, snowflakeDB, snowflakeSchema)
 		if err != nil {
 			return fmt.Errorf("error connecting with keypair: %w", err)
 		}
