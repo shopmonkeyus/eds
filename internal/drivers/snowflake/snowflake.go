@@ -258,7 +258,7 @@ func (p *snowflakeDriver) Flush(logger logger.Logger) error {
 			if err != nil {
 				return fmt.Errorf("unable to get schema for table: %s (%s). %w", record.Table, version, err)
 			}
-			sql, c := toSQL(record, schema, force, p.updateStrategy)
+			sql, c := toSQL(record, schema, force)
 			statementCount += c
 			logger.Trace("adding %d to %s sql (%d/%d): %s", c, tag, i+1, count, strings.TrimRight(sql, "\n"))
 			query.WriteString(sql)

@@ -215,7 +215,7 @@ func nullableValue(c internal.SchemaProperty, wrap bool) string {
 	}
 }
 
-func toSQL(record *util.Record, model *internal.Schema, exists bool, updateStrategy string) (string, int) {
+func toSQL(record *util.Record, model *internal.Schema, exists bool) (string, int) {
 	var sql strings.Builder
 	var count int
 	if exists || record.Operation == "DELETE" {
@@ -223,40 +223,7 @@ func toSQL(record *util.Record, model *internal.Schema, exists bool, updateStrat
 		count++
 	}
 	if record.Operation != "DELETE" {
-		if record.Operation == "INSERT" {
-			sql.WriteString(toMergeSQL(record, model))
-		} else {
-			// update
-			switch updateStrategy {
-			case "after":
-				sql.WriteString(toMergeSQL(record, model))
-			default: // "standard"
-				// Standard is applying just the diffs in the order they are received
-				var updateValues []string
-				for _, name := range record.Diff {
-					if !util.SliceContains(model.Columns(), name) {
-						continue
-					}
-					if val, ok := record.Object[name]; ok {
-						v := quoteValue(val, "")
-						updateValues = append(updateValues, fmt.Sprintf("%s=%s", util.QuoteIdentifier(name), v))
-					}
-					// else shouldn't be possible
-				}
-				if len(updateValues) == 0 {
-					return sql.String(), count // in case we skipped, just return
-				}
-				sql.WriteString("UPDATE ")
-				sql.WriteString(util.QuoteIdentifier(record.Table))
-				sql.WriteString(" SET ")
-				sql.WriteString(strings.Join(updateValues, ","))
-				sql.WriteString(" WHERE ")
-				sql.WriteString(util.QuoteIdentifier("id"))
-				sql.WriteString("=")
-				sql.WriteString(quoteValue(record.Id, ""))
-				sql.WriteString(";\n")
-			}
-		}
+		sql.WriteString(toMergeSQL(record, model))
 		count++
 	}
 	return sql.String(), count

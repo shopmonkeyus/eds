@@ -27,12 +27,12 @@ func TestDBChanges(t *testing.T) {
 	batcher.Add(&dbChange1)
 	schema, err := registery.GetLatestSchema()
 	assert.NoError(t, err)
-	sql, count := toSQL(batcher.Records()[0], schema["order"], false, "")
+	sql, count := toSQL(batcher.Records()[0], schema["order"], false)
 	assert.Equal(t, 1, count)
 	assert.Equal(t, `UPDATE "order" SET "updatedDate"='2024-07-11T21:16:51.70856Z' WHERE "id"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';
 `, sql)
 
-	sql, count = toSQL(batcher.Records()[0], schema["order"], true, "")
+	sql, count = toSQL(batcher.Records()[0], schema["order"], true)
 	assert.Equal(t, 2, count)
 	assert.Equal(t, `DELETE FROM "order" WHERE "id"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';
 UPDATE "order" SET "updatedDate"='2024-07-11T21:16:51.70856Z' WHERE "id"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';
@@ -45,7 +45,7 @@ UPDATE "order" SET "updatedDate"='2024-07-11T21:16:51.70856Z' WHERE "id"='zzdb46
 	batcher.Clear()
 	assert.NoError(t, err)
 	batcher.Add(&dbchange2)
-	sql, count = toSQL(batcher.Records()[0], schema["order"], false, "")
+	sql, count = toSQL(batcher.Records()[0], schema["order"], false)
 	assert.Equal(t, 1, count)
 	assert.Equal(t, "DELETE FROM \"order\" WHERE \"id\"='zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae';\n", sql)
 }
