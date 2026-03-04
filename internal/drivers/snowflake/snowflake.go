@@ -34,7 +34,6 @@ type snowflakeDriver struct {
 	dbname                  string
 	dbSnowflakeSchemaName   string                  // snowflake painfully overloads "schema" to be like a namespace in a database
 	dbschema                internal.DatabaseSchema // this is the information schema
-	updateStrategy          string
 	profilingInfo           DriverProfilingInfo
 	bulkRecordModifications []func([]*util.Record) []*util.Record
 	connectToDBFunc         func(ctx context.Context, url string) (*sql.DB, error)
@@ -137,7 +136,6 @@ func (p *snowflakeDriver) Start(config internal.DriverConfig) error {
 	p.ctx = config.Context
 	p.logger = config.Logger.WithPrefix("[snowflake]")
 	p.registry = config.SchemaRegistry
-	p.updateStrategy = config.UpdateStrategy
 	p.bulkRecordModifications = snowflakeBulkRecordModifications
 	db, err := p.getConnectFunc()(config.Context, config.URL)
 	if err != nil {
