@@ -12,6 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestQuoteIdentifier(t *testing.T) {
+	assert.Equal(t, "test", quoteIdentifier("test"))
+	assert.Equal(t, "`order`", quoteIdentifier("order"))
+	assert.Equal(t, "`current`", quoteIdentifier("current"))
+}
+
 func TestQuoteValue(t *testing.T) {
 	assert.Equal(t, "'test'", quoteValue("test"))
 	assert.Equal(t, "'test with a \\'hi\\''", quoteValue("test with a 'hi'"))
