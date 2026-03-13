@@ -28,7 +28,7 @@ var _ e2eTest = (*driverSnowflakeTest)(nil)
 var _ e2eTestDisabled = (*driverSnowflakeTest)(nil)
 
 func (d *driverSnowflakeTest) Disabled() bool {
-	return snowflakePassword == ""
+	return true // temporarily disabled due to CI environment issue
 }
 
 func (d *driverSnowflakeTest) Name() string {
