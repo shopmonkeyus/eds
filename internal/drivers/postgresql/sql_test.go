@@ -11,6 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestQuoteIdentifier(t *testing.T) {
+	assert.Equal(t, "test", quoteIdentifier("test"))
+	assert.Equal(t, `"order"`, quoteIdentifier("order"))
+	assert.Equal(t, `"current"`, quoteIdentifier("current"))
+}
+
 func getOrderSchema() *internal.Schema {
 	buf, err := os.ReadFile("../testdata/order_schema_b041c12fbf8d1103.json")
 	if err != nil {

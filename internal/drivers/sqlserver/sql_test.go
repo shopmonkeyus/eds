@@ -33,6 +33,8 @@ func TestQuoteIdentifier(t *testing.T) {
 	assert.Equal(t, "[test]", quoteIdentifier("test", true))
 	assert.Equal(t, "test", quoteIdentifier("test", false))
 	assert.Equal(t, `"order"`, quoteIdentifier("order", false))
+	assert.Equal(t, "[current]", quoteIdentifier("current", true))
+	assert.Equal(t, `"current"`, quoteIdentifier("current", false))
 }
 
 func getOrderSchema() *internal.Schema {
