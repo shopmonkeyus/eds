@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"fmt"
-	"log/slog"
 	"net/url"
 	"sort"
 	"strings"
@@ -13,9 +12,6 @@ import (
 )
 
 func quoteIdentifier(val string) string {
-	if strings.Contains(val, "`") {
-		slog.Warn("identifier contains backtick", "identifier", val)
-	}
 	return "`" + val + "`"
 }
 

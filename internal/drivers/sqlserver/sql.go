@@ -3,7 +3,6 @@ package sqlserver
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/url"
 	"sort"
 	"strings"
@@ -14,9 +13,6 @@ import (
 )
 
 func quoteIdentifier(val string) string {
-	if strings.Contains(val, "]") {
-		slog.Warn("identifier contains bracket", "identifier", val)
-	}
 	return "[" + val + "]"
 }
 
