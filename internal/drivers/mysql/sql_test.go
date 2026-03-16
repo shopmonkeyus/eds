@@ -16,6 +16,7 @@ func TestQuoteIdentifier(t *testing.T) {
 	assert.Equal(t, "`test`", quoteIdentifier("test"))
 	assert.Equal(t, "`order`", quoteIdentifier("order"))
 	assert.Equal(t, "`current`", quoteIdentifier("current"))
+	assert.Equal(t, "`foo``bar`", quoteIdentifier("foo`bar"))
 }
 
 func TestQuoteIdentifierAlwaysQuotes(t *testing.T) {

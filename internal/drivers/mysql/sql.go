@@ -15,6 +15,7 @@ import (
 func quoteIdentifier(val string) string {
 	if strings.Contains(val, "`") {
 		slog.Warn("identifier contains backtick", "identifier", val)
+		val = strings.ReplaceAll(val, "`", "``")
 	}
 	return "`" + val + "`"
 }

@@ -16,6 +16,7 @@ import (
 func quoteIdentifier(val string) string {
 	if strings.Contains(val, "]") {
 		slog.Warn("identifier contains bracket", "identifier", val)
+		val = strings.ReplaceAll(val, "]", "]]")
 	}
 	return "[" + val + "]"
 }
