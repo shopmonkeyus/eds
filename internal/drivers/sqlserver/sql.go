@@ -3,8 +3,8 @@ package sqlserver
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -13,17 +13,17 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-var needsQuote = regexp.MustCompile(`[A-Z0-9_\s]`)
-var keywords = regexp.MustCompile(`(?i)\b(USER|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|GROUP BY|ORDER BY|HAVING|AND|OR|CREATE|DROP|ALTER|TABLE|INDEX|ON|INTO|VALUES|SET|AS|DISTINCT|TYPE|DEFAULT|ORDER|GROUP|LIMIT|SUM|TOTAL|START|END|BEGIN|COMMIT|ROLLBACK|PRIMARY|PERCENT|AUTHORIZATION|CURRENT)\b`)
-
 func quoteIdentifier(val string, istable bool) string {
 	if istable {
+		if strings.Contains(val, "]") {
+			slog.Warn("table identifier contains bracket", "identifier", val)
+		}
 		return "[" + val + "]"
 	}
-	if needsQuote.MatchString(val) || keywords.MatchString(val) {
-		return `"` + val + `"`
+	if strings.Contains(val, `"`) {
+		slog.Warn("column identifier contains double quote", "identifier", val)
 	}
-	return val
+	return `"` + val + `"`
 }
 
 func toSQLFromObject(model *internal.Schema, table string, object map[string]any, diff []string) string {

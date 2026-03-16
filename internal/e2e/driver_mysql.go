@@ -29,7 +29,7 @@ func (d *driverMySQLTest) QuoteTable(table string) string {
 }
 
 func (d *driverMySQLTest) QuoteColumn(column string) string {
-	return fmt.Sprintf(`%s`, column)
+	return fmt.Sprintf("`%s`", column)
 }
 
 func (d *driverMySQLTest) QuoteValue(value string) string {

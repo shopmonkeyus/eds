@@ -127,14 +127,8 @@ func quoteValue(arg any) (str string) {
 	return str
 }
 
-var needsQuote = regexp.MustCompile(`[A-Z0-9_\s]`)
-var keywords = regexp.MustCompile(`(?i)\b(USER|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|GROUP BY|ORDER BY|HAVING|AND|OR|CREATE|DROP|ALTER|TABLE|INDEX|ON|INTO|VALUES|SET|AS|DISTINCT|TYPE|DEFAULT|ORDER|GROUP|LIMIT|SUM|TOTAL|START|END|BEGIN|COMMIT|ROLLBACK|PRIMARY|AUTHORIZATION|CURRENT)\b`)
-
 func quoteIdentifier(val string) string {
-	if needsQuote.MatchString(val) || keywords.MatchString(val) {
-		return pq.QuoteIdentifier(val)
-	}
-	return val
+	return pq.QuoteIdentifier(val)
 }
 
 func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string) string {
