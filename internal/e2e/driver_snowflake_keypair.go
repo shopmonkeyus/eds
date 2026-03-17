@@ -35,7 +35,7 @@ func (d *driverSnowflakeKeypairTest) Close() error {
 }
 
 func (d *driverSnowflakeKeypairTest) Disabled() bool {
-	return true // temporarily disabled due to CI environment issue
+	return snowflakeKeypairSecretKey == ""
 }
 
 func (d *driverSnowflakeKeypairTest) Name() string {
