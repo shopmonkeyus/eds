@@ -479,7 +479,6 @@ var serverCmd = &cobra.Command{
 		}
 		dataDir := getDataDir(cmd, logger)
 		driverURL := viper.GetString("url")
-		updateStrategy := viper.GetString("update_strategy")
 		server := mustFlagString(cmd, "server", false)
 		apikey := viper.GetString("token")
 		if apikey == "" {
@@ -838,7 +837,6 @@ var serverCmd = &cobra.Command{
 			var maskedURL *string
 			if success && validated {
 				viper.Set("url", config.URL)
-				viper.Set("update_strategy", config.UpdateStrategy)
 				if err := viper.WriteConfig(); err != nil {
 					logger.Error("failed to write config: %s", err)
 				}
@@ -998,7 +996,6 @@ var serverCmd = &cobra.Command{
 				"--logs-dir", sessionLogsDir,
 				"--url", driverURL,
 				"--server", natsurl,
-				"--update-strategy", updateStrategy,
 			)
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
