@@ -49,7 +49,8 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
 			} else {
-				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
+				value := handleSchemaProperty(model.Properties[name], "NULL")
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), value))
 			}
 		}
 	} else {
@@ -62,7 +63,8 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
 				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
 			} else {
-				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
+				value := handleSchemaProperty(model.Properties[name], "NULL")
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), value))
 			}
 		}
 	}
@@ -170,6 +172,10 @@ func handleSchemaProperty(prop internal.SchemaProperty, v string) string {
 		//Arrays are stored as varchar
 		if !prop.Nullable && v == "NULL" {
 			return "''"
+		}
+	case "number":
+		if !prop.Nullable {
+			return "0"
 		}
 	default:
 		return v

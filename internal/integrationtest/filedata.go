@@ -51,9 +51,10 @@ type TestDataGenerator struct {
 	locationId   string
 	userId       string
 	publicTables []string
+	stripRegion  bool
 }
 
-func NewTestDataGenerator(filename string, publicTables []string) *TestDataGenerator {
+func NewTestDataGenerator(filename string, publicTables []string, stripRegion bool) *TestDataGenerator {
 	var scanner *bufio.Scanner
 	var file *os.File
 	var gzr *gzip.Reader
@@ -91,6 +92,7 @@ func NewTestDataGenerator(filename string, publicTables []string) *TestDataGener
 		locationId:   lid,
 		userId:       uid,
 		publicTables: publicTables,
+		stripRegion:  stripRegion,
 	}
 }
 
@@ -105,6 +107,10 @@ func (t *TestDataGenerator) NextEvent() *internal.DBChangeEvent {
 		}
 		if !slice.Contains(t.publicTables, event.Table) {
 			continue
+		}
+
+		if t.stripRegion && len(event.Key) > 0 {
+			event.Key = event.Key[:len(event.Key)-1]
 		}
 
 		event.Timestamp = makeEventTimestampRecent(event.Timestamp)
@@ -149,9 +155,10 @@ func NatsMessageFromEvent(event *internal.DBChangeEvent) natsMessage {
 	return natsMessage{Message: buf, Subject: subject, MsgID: msgID}
 }
 
-func PublishTestData(path string, count int, js jetstream.JetStream, log logger.Logger) int {
+func PublishTestData(path string, count int, js jetstream.JetStream, log logger.Logger, options map[string]any) int {
+	stripRegion := options["stripRegion"].(bool)
 	publicTables := getPublicTables(log)
-	testDataGenerator := NewTestDataGenerator(path, publicTables)
+	testDataGenerator := NewTestDataGenerator(path, publicTables, stripRegion)
 	defer testDataGenerator.Close()
 
 	delivered := 0
@@ -164,12 +171,16 @@ func PublishTestData(path string, count int, js jetstream.JetStream, log logger.
 			break
 		}
 		message := NatsMessageFromEvent(event)
-		_, err := js.Publish(context.Background(), message.Subject, message.Message, jetstream.WithMsgID(message.MsgID))
+
+		// Generate unique message ID for testing to allow repeated testing
+		uniqueMsgID := fmt.Sprintf("%s-%d", message.MsgID, time.Now().UnixNano())
+
+		_, err := js.Publish(context.Background(), message.Subject, message.Message, jetstream.WithMsgID(uniqueMsgID))
 		if err != nil {
 			panic(err)
 		}
 
-		log.Info("sent message with id: %s", message.MsgID)
+		log.Info("sent message with id: %s", uniqueMsgID)
 
 		delivered++
 	}
