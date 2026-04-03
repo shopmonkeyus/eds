@@ -288,7 +288,7 @@ func (p *sqlserverDriver) MigrateNewTable(ctx context.Context, logger logger.Log
 	defer p.waitGroup.Done()
 	if _, ok := p.dbschema[schema.Table]; ok {
 		logger.Info("table already exists for: %s, dropping and recreating...", schema.Table)
-		if err := util.DropTable(ctx, logger, p.db, quoteIdentifier(schema.Table, true)); err != nil {
+		if err := util.DropTable(ctx, logger, p.db, quoteIdentifier(schema.Table)); err != nil {
 			return err
 		}
 	}

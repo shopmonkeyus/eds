@@ -29,7 +29,7 @@ func (d *driverSQLServerTest) QuoteTable(table string) string {
 }
 
 func (d *driverSQLServerTest) QuoteColumn(column string) string {
-	return fmt.Sprintf(`%s`, column)
+	return fmt.Sprintf("[%s]", column)
 }
 
 func (d *driverSQLServerTest) QuoteValue(value string) string {

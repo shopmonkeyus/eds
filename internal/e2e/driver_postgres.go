@@ -29,7 +29,7 @@ func (d *driverPostgresTest) QuoteTable(table string) string {
 }
 
 func (d *driverPostgresTest) QuoteColumn(column string) string {
-	return fmt.Sprintf(`%s`, column)
+	return fmt.Sprintf(`"%s"`, column)
 }
 
 func (d *driverPostgresTest) QuoteValue(value string) string {

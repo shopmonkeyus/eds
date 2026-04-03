@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -13,24 +12,15 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-var needsQuote = regexp.MustCompile(`[A-Z0-9_\s]`)
-var keywords = regexp.MustCompile(`(?i)\b(USER|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|GROUP BY|ORDER BY|HAVING|AND|OR|CREATE|DROP|ALTER|TABLE|INDEX|ON|INTO|VALUES|SET|AS|DISTINCT|TYPE|DEFAULT|ORDER|GROUP|LIMIT|SUM|TOTAL|START|END|BEGIN|COMMIT|ROLLBACK|PRIMARY|PERCENT|AUTHORIZATION|CURRENT)\b`)
-
-func quoteIdentifier(val string, istable bool) string {
-	if istable {
-		return "[" + val + "]"
-	}
-	if needsQuote.MatchString(val) || keywords.MatchString(val) {
-		return `"` + val + `"`
-	}
-	return val
+func quoteIdentifier(val string) string {
+	return "[" + val + "]"
 }
 
 func toSQLFromObject(model *internal.Schema, table string, object map[string]any, diff []string) string {
 	var sql strings.Builder
 
 	sql.WriteString("MERGE ")
-	sql.WriteString(quoteIdentifier(table, true))
+	sql.WriteString(quoteIdentifier(table))
 	sql.WriteString(" AS target")
 	sql.WriteString(" USING (")
 	sql.WriteString("VALUES('")
@@ -47,9 +37,9 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 			if val, ok := object[name]; ok {
 				prop := model.Properties[name]
 				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
-				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
+				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name)))
 			}
 		}
 	} else {
@@ -60,9 +50,9 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 			if val, ok := object[name]; ok {
 				prop := model.Properties[name]
 				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name, false), v))
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 			} else {
-				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name, false)))
+				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name)))
 			}
 		}
 	}
@@ -73,7 +63,7 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 	sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
 	var columns []string
 	for _, name := range model.Columns() {
-		columns = append(columns, quoteIdentifier(name, false))
+		columns = append(columns, quoteIdentifier(name))
 	}
 	sql.WriteString(strings.Join(columns, ","))
 	var insertVals []string
@@ -102,11 +92,11 @@ func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 	if c.Operation == "DELETE" {
 		var sql strings.Builder
 		sql.WriteString("DELETE FROM ")
-		sql.WriteString(quoteIdentifier(c.Table, true))
+		sql.WriteString(quoteIdentifier(c.Table))
 		sql.WriteString(" WHERE ")
 		var predicate []string
 		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk, false), quoteValue(c.Key[i])))
+			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
 		}
 		sql.WriteString(strings.Join(predicate, " AND "))
 		sql.WriteString(";\n")
@@ -180,10 +170,10 @@ func handleSchemaProperty(prop internal.SchemaProperty, v string) string {
 func createSQL(s *internal.Schema) string {
 	var sql strings.Builder
 	sql.WriteString("DROP TABLE IF EXISTS ")
-	sql.WriteString(quoteIdentifier(s.Table, true))
+	sql.WriteString(quoteIdentifier(s.Table))
 	sql.WriteString(";\n")
 	sql.WriteString("CREATE TABLE ")
-	sql.WriteString(quoteIdentifier(s.Table, true))
+	sql.WriteString(quoteIdentifier(s.Table))
 	sql.WriteString(" (\n")
 	var columns []string
 	for _, name := range s.Columns() {
@@ -197,7 +187,7 @@ func createSQL(s *internal.Schema) string {
 	for _, name := range columns {
 		prop := s.Properties[name]
 		sql.WriteString("\t")
-		sql.WriteString(quoteIdentifier(name, false))
+		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop, util.SliceContains(s.PrimaryKeys, name)))
 		if util.SliceContains(s.Required, name) && !prop.Nullable {
@@ -208,7 +198,7 @@ func createSQL(s *internal.Schema) string {
 	if len(s.PrimaryKeys) > 0 {
 		sql.WriteString("\tPRIMARY KEY (")
 		for i, pk := range s.PrimaryKeys {
-			sql.WriteString(quoteIdentifier(pk, false))
+			sql.WriteString(quoteIdentifier(pk))
 			if i < len(s.PrimaryKeys)-1 {
 				sql.WriteString(", ")
 			}
@@ -230,9 +220,9 @@ func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema
 		var sql strings.Builder
 		prop := s.Properties[column]
 		sql.WriteString("ALTER TABLE ")
-		sql.WriteString(quoteIdentifier(s.Table, true))
+		sql.WriteString(quoteIdentifier(s.Table))
 		sql.WriteString(" ADD ")
-		sql.WriteString(quoteIdentifier(column, false))
+		sql.WriteString(quoteIdentifier(column))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop, false))
 		sql.WriteString(";")
