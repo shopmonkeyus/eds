@@ -37,6 +37,9 @@ type NotificationHandler struct {
 	// Configure action is called to configure the server with a driver.
 	Configure func(config *ConfigureRequest) *ConfigureResponse
 
+	// BackfillInit is called to initialize backfill and create an export job.
+	BackfillInit func(*InitBackfillRequest) *InitBackfillResponse
+
 	// Import action is called to import data using the driver.
 	Import func(*ImportRequest) *ImportResponse
 
@@ -53,7 +56,19 @@ type SendLogsResponse struct {
 }
 
 type ImportRequest struct {
+	Backfill bool   `json:"backfill" msgpack:"backfill"`
+	JobID    string `json:"jobId" msgpack:"jobId"`
+}
+
+type InitBackfillRequest struct {
 	Backfill bool `json:"backfill" msgpack:"backfill"`
+}
+
+type InitBackfillResponse struct {
+	Success   bool    `json:"success" msgpack:"success"`
+	Message   *string `json:"message,omitempty" msgpack:"message,omitempty"`
+	SessionID string  `json:"sessionId" msgpack:"sessionId"`
+	JobID     string  `json:"jobId" msgpack:"jobId"`
 }
 
 type ImportResponse struct {
@@ -61,6 +76,7 @@ type ImportResponse struct {
 	Message   *string `json:"message,omitempty" msgpack:"message,omitempty"`
 	SessionID string  `json:"sessionId" msgpack:"sessionId"`
 	LogPath   *string `json:"-" msgpack:"-"`
+	JobID     string  `json:"jobId" msgpack:"jobId"`
 }
 
 type genericResponse struct {
@@ -248,7 +264,19 @@ func (c *NotificationConsumer) upgrade(version string) {
 	}
 }
 
-func (c *NotificationConsumer) importaction(req *ImportRequest) {
+func (c *NotificationConsumer) importaction(req *ImportRequest, m *nats.Msg) {
+	initResponse := c.handler.BackfillInit(&InitBackfillRequest{Backfill: req.Backfill})
+
+	if err := m.Respond([]byte(util.JSONStringify(initResponse))); err != nil {
+		c.logger.Error("failed to send import response: %s", err)
+		return
+	}
+	if !initResponse.Success {
+		return
+	}
+	req.JobID = initResponse.JobID
+	c.publishSimpleStatus("import", "")
+
 	c.wg.Add(1)
 	// NOTE: we're going to run this on a background goroutine so we can return the response immediately and allow
 	// other commands (like restart) to be processed while the import is running since the import could take a long time.
@@ -365,8 +393,7 @@ func (c *NotificationConsumer) callback(m *nats.Msg) {
 	case "import":
 		var req ImportRequest
 		req.Backfill = getBool(notification.Data["backfill"])
-		c.publishSimpleStatus("import", "")
-		c.importaction(&req)
+		c.importaction(&req, m)
 	case "driverconfig":
 		c.driverconfig(m)
 	case "validate":
