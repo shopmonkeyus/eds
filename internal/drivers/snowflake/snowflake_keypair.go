@@ -124,9 +124,19 @@ func (p *snowflakeKeyPairDriver) connectToDBWithKeyPair(ctx context.Context, url
 }
 
 func (p *snowflakeKeyPairDriver) Validate(values map[string]any) (string, []internal.FieldError) {
-	account := internal.GetRequiredStringValue("Account", values)
-	database := internal.GetRequiredStringValue("Database", values)
-	username := internal.GetRequiredStringValue("Username", values)
+	fieldErrors := []internal.FieldError{}
+	account, fieldError := internal.GetRequiredStringValue("Account", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
+	database, fieldError := internal.GetRequiredStringValue("Database", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
+	username, fieldError := internal.GetRequiredStringValue("Username", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
 	secret := internal.GetOptionalStringValue("Secret", "", values)
 
 	var u url.URL
@@ -137,6 +147,10 @@ func (p *snowflakeKeyPairDriver) Validate(values map[string]any) (string, []inte
 	q := u.Query()
 	q.Set(secretKey, secret)
 	u.RawQuery = q.Encode()
+
+	if len(fieldErrors) > 0 {
+		return "", fieldErrors
+	}
 	return u.String(), nil
 }
 

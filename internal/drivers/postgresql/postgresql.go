@@ -16,6 +16,7 @@ import (
 
 const maxBytesSizeInsert = 5_000_000
 const maxBatchSize = 500
+
 type postgresqlDriver struct {
 	ctx          context.Context
 	logger       logger.Logger
@@ -278,7 +279,8 @@ func (p *postgresqlDriver) Configuration() []internal.DriverField {
 
 // Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
 func (p *postgresqlDriver) Validate(values map[string]any) (string, []internal.FieldError) {
-	return internal.URLFromDatabaseConfiguration("postgres", 5432, values), nil
+	url, fieldErrors := internal.URLFromDatabaseConfiguration("postgres", 5432, values)
+	return url, fieldErrors
 }
 
 // MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.

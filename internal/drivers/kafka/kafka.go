@@ -256,9 +256,20 @@ func (p *kafkaDriver) Configuration() []internal.DriverField {
 
 // Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
 func (p *kafkaDriver) Validate(values map[string]any) (string, []internal.FieldError) {
-	hostname := internal.GetRequiredStringValue("Hostname", values)
+	fieldErrors := []internal.FieldError{}
+	hostname, fieldError := internal.GetRequiredStringValue("Hostname", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
 	port := internal.GetOptionalIntValue("Port", 9092, values)
-	topic := internal.GetRequiredStringValue("Topic", values)
+	topic, fieldError := internal.GetRequiredStringValue("Topic", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
+
+	if len(fieldErrors) > 0 {
+		return "", fieldErrors
+	}
 	return fmt.Sprintf("kafka://%s:%d/%s", hostname, port, topic), nil
 }
 

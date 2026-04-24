@@ -471,7 +471,11 @@ func (p *s3Driver) Configuration() []internal.DriverField {
 
 // Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
 func (p *s3Driver) Validate(values map[string]any) (string, []internal.FieldError) {
-	bucket := internal.GetRequiredStringValue("Bucket", values)
+	fieldErrors := []internal.FieldError{}
+	bucket, fieldError := internal.GetRequiredStringValue("Bucket", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
 	prefix := internal.GetOptionalStringValue("Prefix", "", values)
 	region := internal.GetOptionalStringValue("Region", "", values)
 	accesskey := internal.GetOptionalStringValue("Access Key ID", "", values)
@@ -503,6 +507,10 @@ func (p *s3Driver) Validate(values map[string]any) (string, []internal.FieldErro
 		q.Set("secret-access-key", secret)
 	}
 	url.RawQuery = q.Encode()
+
+	if len(fieldErrors) > 0 {
+		return "", fieldErrors
+	}
 	return url.String(), nil
 }
 

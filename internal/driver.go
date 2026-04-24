@@ -369,21 +369,21 @@ func NewFieldError(field, message string) FieldError {
 	}
 }
 
-func GetRequiredStringValue(name string, values map[string]any) string {
+func GetRequiredStringValue(name string, values map[string]any) (string, *FieldError) {
 	if val, ok := values[name].(string); ok {
-		return val
+		return val, nil
 	}
-	panic("required field " + name + " not found") // should not happen
+	return "", &FieldError{Field: name, Message: string(fmt.Sprintf("required field %s not found", name))}
 }
 
-func GetRequiredIntValue(name string, values map[string]any) int {
+func GetRequiredIntValue(name string, values map[string]any) (int, *FieldError) {
 	if val, ok := values[name].(int); ok {
-		return val
+		return val, nil
 	}
 	if val, ok := values[name].(int64); ok {
-		return int(val)
+		return int(val), nil
 	}
-	panic("required field " + name + " not found") // should not happen
+	return 0, &FieldError{Field: name, Message: string(fmt.Sprintf("required field %s not found", name))}
 }
 
 func GetOptionalStringValue(name string, def string, values map[string]any) string {
@@ -409,13 +409,23 @@ func GetOptionalIntValue(name string, def int, values map[string]any) int {
 	return def
 }
 
-func URLFromDatabaseConfiguration(schema string, defport int, values map[string]any) string {
-	hostname := GetRequiredStringValue("Hostname", values)
+func URLFromDatabaseConfiguration(schema string, defport int, values map[string]any) (string, []FieldError) {
+	fieldErrors := []FieldError{}
+	hostname, err := GetRequiredStringValue("Hostname", values)
+	if err != nil {
+		fieldErrors = append(fieldErrors, *err)
+	}
 	username := GetOptionalStringValue("Username", "", values)
 	password := GetOptionalStringValue("Password", "", values)
 	port := GetOptionalIntValue("Port", defport, values)
+	database, err := GetRequiredStringValue("Database", values)
+	if err != nil {
+		fieldErrors = append(fieldErrors, *err)
+	}
+	if len(fieldErrors) > 0 {
+		return "", fieldErrors
+	}
 
-	database := GetRequiredStringValue("Database", values)
 	var u url.URL
 	u.Scheme = schema
 	if username != "" {
@@ -429,7 +439,7 @@ func URLFromDatabaseConfiguration(schema string, defport int, values map[string]
 	u.Path = database
 	urlString := u.String()
 	unescapedUrl, _ := url.QueryUnescape(urlString)
-	return unescapedUrl
+	return unescapedUrl, nil
 }
 
 func NewDatabaseConfiguration(defport int) []DriverField {

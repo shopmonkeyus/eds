@@ -277,7 +277,11 @@ func (p *eventHubDriver) Configuration() []internal.DriverField {
 
 // Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
 func (p *eventHubDriver) Validate(values map[string]any) (string, []internal.FieldError) {
-	val := internal.GetRequiredStringValue("Connection String", values)
+	fieldErrors := []internal.FieldError{}
+	val, fieldError := internal.GetRequiredStringValue("Connection String", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
 	// example:
 	// Endpoint=sb://shopmonkey-xx-test.servicebus.windows.net/;SharedAccessKeyName=send;SharedAccessKey=x/x+x+x+x=;EntityPath=shopmonkey-eds-test
 	if !strings.HasPrefix(val, "Endpoint=") {
@@ -286,6 +290,9 @@ func (p *eventHubDriver) Validate(values map[string]any) (string, []internal.Fie
 	i := strings.Index(val, "://")
 	if i < 0 {
 		return "", []internal.FieldError{internal.NewFieldError("Connection String", "expected a url scheme after Endpoint= prefix")}
+	}
+	if len(fieldErrors) > 0 {
+		return "", fieldErrors
 	}
 	return "eventhub://" + val[i+3:], nil
 }

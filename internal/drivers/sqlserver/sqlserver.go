@@ -279,7 +279,8 @@ func (p *sqlserverDriver) Configuration() []internal.DriverField {
 
 // Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
 func (p *sqlserverDriver) Validate(values map[string]any) (string, []internal.FieldError) {
-	return internal.URLFromDatabaseConfiguration("sqlserver", 1433, values), nil
+	url, fieldErrors := internal.URLFromDatabaseConfiguration("sqlserver", 1433, values)
+	return url, fieldErrors
 }
 
 // MigrateNewTable is called when a new table is detected with the appropriate information for the driver to perform the migration.

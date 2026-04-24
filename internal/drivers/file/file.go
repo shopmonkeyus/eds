@@ -183,7 +183,11 @@ func (p *fileDriver) Configuration() []internal.DriverField {
 
 // Validate validates the configuration and returns an error if the configuration is invalid or a valid url if the configuration is valid.
 func (p *fileDriver) Validate(values map[string]any) (string, []internal.FieldError) {
-	dir := internal.GetRequiredStringValue("Directory", values)
+	fieldErrors := []internal.FieldError{}
+	dir, fieldError := internal.GetRequiredStringValue("Directory", values)
+	if fieldError != nil {
+		fieldErrors = append(fieldErrors, *fieldError)
+	}
 	if dir == "/" {
 		return "", []internal.FieldError{internal.NewFieldError("Directory", "cannot be the root directory")}
 	}
@@ -208,6 +212,9 @@ func (p *fileDriver) Validate(values map[string]any) (string, []internal.FieldEr
 		if !ok {
 			return "", []internal.FieldError{internal.NewFieldError("Directory", fmt.Sprintf("%s directory isn't writable", absdir))}
 		}
+	}
+	if len(fieldErrors) > 0 {
+		return "", fieldErrors
 	}
 	return "file://" + filepath.ToSlash(absdir), nil
 }
