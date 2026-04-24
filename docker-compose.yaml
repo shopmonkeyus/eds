@@ -1,6 +1,6 @@
 services:
   s3:
-    image: adobe/s3mock:latest
+    image: adobe/s3mock:5.0.0
     hostname: s3
     ports:
       - 4566:9090
