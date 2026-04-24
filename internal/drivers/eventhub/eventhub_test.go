@@ -14,4 +14,10 @@ func TestValidate(t *testing.T) {
 	})
 	assert.Empty(t, errs)
 	assert.Equal(t, "eventhub://shopmonkey-xx-test.servicebus.windows.net/;SharedAccessKeyName=send;SharedAccessKey=x/x+x+x+x=;EntityPath=shopmonkey-eds-test", url)
+
+	url, errs = driver.Validate(map[string]any{
+		"Format": "json", // missing required field Connection String
+	})
+	assert.GreaterOrEqual(t, len(errs), 1)
+	assert.Equal(t, "", url)
 }

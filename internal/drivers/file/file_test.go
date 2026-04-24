@@ -19,4 +19,10 @@ func TestValidate(t *testing.T) {
 	})
 	assert.Empty(t, errs)
 	assert.Equal(t, "file://"+tmpdir, url)
+
+	url, errs = driver.Validate(map[string]any{
+		"Format": "json", // missing required field Directory
+	})
+	assert.GreaterOrEqual(t, len(errs), 1)
+	assert.Equal(t, "", url)
 }

@@ -83,6 +83,13 @@ func TestValidate(t *testing.T) {
 	})
 	assert.Empty(t, err)
 	assert.Equal(t, "snowflake://user:pass@hostname/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Hostname": "hostname", // missing required field Database
+		"Username": "user",
+	})
+	assert.GreaterOrEqual(t, len(err), 1)
+	assert.Equal(t, "", url)
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {

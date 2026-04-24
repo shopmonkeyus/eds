@@ -8,6 +8,7 @@ import (
 
 func TestValidate(t *testing.T) {
 	var driver kafkaDriver
+
 	url, err := driver.Validate(map[string]any{
 		"Hostname": "hostname",
 		"Topic":    "topic",
@@ -22,4 +23,10 @@ func TestValidate(t *testing.T) {
 	})
 	assert.Empty(t, err)
 	assert.Equal(t, "kafka://hostname:9999/topic", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Hostname": "hostname", // missing required field Topic
+	})
+	assert.GreaterOrEqual(t, len(err), 1)
+	assert.Equal(t, "", url)
 }

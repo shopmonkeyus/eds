@@ -147,6 +147,12 @@ func TestValidate(t *testing.T) {
 	})
 	assert.Empty(t, err)
 	assert.Equal(t, "s3://storage.googleapis.com/bucket/foo?access-key-id=AKIAIOSFODNN7EXAMPLE&region=us-east-1&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Region": "us-east-1", // missing required field Bucket
+	})
+	assert.GreaterOrEqual(t, len(err), 1)
+	assert.Equal(t, "", url)
 }
 
 func TestSchemaValidationPath(t *testing.T) {

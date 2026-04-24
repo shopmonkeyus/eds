@@ -110,6 +110,24 @@ func TestParseDSN(t *testing.T) {
 	assert.Equal(t, "sqlserver://root:password@foo.microsoft.com:3306?app+name=eds&database=eds", dsn)
 }
 
+func TestValidate(t *testing.T) {
+	var driver sqlserverDriver
+
+	url, err := driver.Validate(map[string]any{
+		"Database": "db",
+		"Hostname": "hostname",
+	})
+	assert.Empty(t, err)
+	assert.Equal(t, "sqlserver://hostname:1433/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Database": "db", // missing required field Hostname
+		"Port":     1433,
+	})
+	assert.GreaterOrEqual(t, len(err), 1)
+	assert.Equal(t, "", url)
+}
+
 func TestAddNewColumnsSQL(t *testing.T) {
 	logger := logger.NewConsoleLogger()
 	detail := getOrderSchema()

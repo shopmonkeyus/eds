@@ -119,6 +119,13 @@ func TestValidate(t *testing.T) {
 	})
 	assert.Empty(t, err)
 	assert.Equal(t, "postgres://user:pass@hostname:1234/db", url)
+
+	url, err = driver.Validate(map[string]any{
+		"Hostname": "hostname", // missing required field Database
+		"Port":     5432,
+	})
+	assert.GreaterOrEqual(t, len(err), 1)
+	assert.Equal(t, "", url)
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
