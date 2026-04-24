@@ -34,6 +34,7 @@ func (d *driverS3Test) Validate(logger logger.Logger, dir string, url string, ev
 	if err != nil {
 		return fmt.Errorf("error creating s3 client: %w", err)
 	}
+	time.Sleep(500 * time.Millisecond)
 	res, err := client.GetObject(context.Background(), &awss3.GetObjectInput{
 		Bucket: aws.String(dbname),
 		Key:    aws.String(fmt.Sprintf("%s/%d-%s.json", event.Table, time.UnixMilli(event.Timestamp).Unix(), event.GetPrimaryKey())),
