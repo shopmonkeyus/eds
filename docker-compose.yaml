@@ -14,7 +14,7 @@ services:
     ports:
       - 22181:2181
   mysql:
-    image: mysql
+    image: mysql:8.4.5
     environment:
       MYSQL_ROOT_PASSWORD: eds
       MYSQL_USER: eds
@@ -23,7 +23,7 @@ services:
     ports:
       - 13306:3306
   postgres:
-    image: postgres
+    image: postgres:18.3
     environment:
       POSTGRES_USER: eds
       POSTGRES_PASSWORD: Asdf1234!
@@ -44,7 +44,8 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
   mssql:
-    image: mcr.microsoft.com/azure-sql-edge
+    platform: linux/amd64
+    image: mcr.microsoft.com/mssql/server:2025-CU2-ubuntu-24.04
     stdin_open: true
     user: root
     ports:
@@ -71,7 +72,7 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --list
       "
   init-s3:
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.19.0
     depends_on:
       - s3
     entrypoint: ["/bin/sh", "-c"]
