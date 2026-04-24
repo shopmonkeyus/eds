@@ -13,7 +13,7 @@ import (
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/stretchr/testify/assert"
 
-	_ "github.com/shopmonkeyus/eds/internal/drivers/eventhub"
+	_ "github.com/shopmonkeyus/eds/internal/drivers/eventhub" // this comment on this blank import is needed because Sonarqube doesn't understand Go modules
 	_ "github.com/shopmonkeyus/eds/internal/drivers/file"
 	_ "github.com/shopmonkeyus/eds/internal/drivers/kafka"
 	_ "github.com/shopmonkeyus/eds/internal/drivers/mysql"
@@ -114,4 +114,3 @@ func TestAllDriversReturnFieldErrorsOnEmptyConfig(t *testing.T) {
 		}
 	})
 }
-
