@@ -59,37 +59,47 @@ func TestConnectionString(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      map[string]any
+		expectedURL string
+		expectError bool
+	}{
+		{
+			name:        "minimal config",
+			config:      map[string]any{"Database": "db", "Hostname": "hostname"},
+			expectedURL: "snowflake://hostname/db",
+		},
+		{
+			name:        "with username",
+			config:      map[string]any{"Database": "db", "Hostname": "hostname", "Username": "user"},
+			expectedURL: "snowflake://user:@hostname/db",
+		},
+		{
+			name:        "with username and password",
+			config:      map[string]any{"Database": "db", "Hostname": "hostname", "Username": "user", "Password": "pass"},
+			expectedURL: "snowflake://user:pass@hostname/db",
+		},
+		{
+			name:        "missing required field Database",
+			config:      map[string]any{"Hostname": "hostname", "Username": "user"},
+			expectError: true,
+		},
+	}
+
 	var driver snowflakeDriver
-	url, err := driver.Validate(map[string]any{
-		"Database": "db",
-		"Hostname": "hostname",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "snowflake://hostname/db", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Database": "db",
-		"Hostname": "hostname",
-		"Username": "user",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "snowflake://user:@hostname/db", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Database": "db",
-		"Hostname": "hostname",
-		"Username": "user",
-		"Password": "pass",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "snowflake://user:pass@hostname/db", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Hostname": "hostname", // missing required field Database
-		"Username": "user",
-	})
-	assert.GreaterOrEqual(t, len(err), 1)
-	assert.Equal(t, "", url)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, errs := driver.Validate(tt.config)
+			if tt.expectError {
+				assert.GreaterOrEqual(t, len(errs), 1)
+				assert.Equal(t, "", url)
+			} else {
+				assert.Empty(t, errs)
+				assert.Equal(t, tt.expectedURL, url)
+			}
+		})
+	}
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
