@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
+	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/stretchr/testify/assert"
 
 	_ "github.com/shopmonkeyus/eds/internal/drivers/eventhub" // this comment on this blank import is needed because Sonarqube doesn't understand Go modules
@@ -113,4 +114,72 @@ func TestAllDriversReturnFieldErrorsOnEmptyConfig(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestImportActionReturnsErrorOnInitFailure(t *testing.T) {
+	opts := natsserver.DefaultTestOptions
+	opts.Port = -1
+	srv := natsserver.RunServer(&opts)
+	defer srv.Shutdown()
+
+	nc, _ := nats.Connect(srv.ClientURL())
+	defer nc.Close()
+
+	errMsg := "init failed"
+	consumer := &NotificationConsumer{
+		nc:     nc,
+		logger: logger.NewTestLogger(),
+		handler: NotificationHandler{
+			BackfillInit: func(*InitBackfillRequest) *InitBackfillResponse {
+				return &InitBackfillResponse{Success: false, Message: &errMsg}
+			},
+		},
+	}
+
+	nc.Subscribe("test.import", func(msg *nats.Msg) {
+		consumer.importaction(&ImportRequest{Backfill: true}, msg)
+	})
+
+	reply, err := nc.Request("test.import", nil, time.Second)
+	assert.NoError(t, err)
+
+	var resp InitBackfillResponse
+	json.Unmarshal(reply.Data, &resp)
+	assert.False(t, resp.Success)
+	assert.Equal(t, "init failed", *resp.Message)
+}
+
+func TestImportActionReturnsSuccessOnInitSuccess(t *testing.T) {
+	opts := natsserver.DefaultTestOptions
+	opts.Port = -1
+	srv := natsserver.RunServer(&opts)
+	defer srv.Shutdown()
+
+	nc, _ := nats.Connect(srv.ClientURL())
+	defer nc.Close()
+
+	consumer := &NotificationConsumer{
+		nc:     nc,
+		logger: logger.NewTestLogger(),
+		handler: NotificationHandler{
+			BackfillInit: func(*InitBackfillRequest) *InitBackfillResponse {
+				return &InitBackfillResponse{Success: true, JobID: "job-123", SessionID: "session-456"}
+			},
+			Import: func(*ImportRequest) *ImportResponse {
+				return &ImportResponse{Success: true, SessionID: "session-456"}
+			},
+		},
+	}
+
+	nc.Subscribe("test.import", func(msg *nats.Msg) {
+		consumer.importaction(&ImportRequest{Backfill: true}, msg)
+	})
+
+	reply, err := nc.Request("test.import", nil, time.Second)
+	assert.NoError(t, err)
+
+	var resp InitBackfillResponse
+	json.Unmarshal(reply.Data, &resp)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "job-123", resp.JobID)
 }
