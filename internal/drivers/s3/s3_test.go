@@ -76,77 +76,77 @@ func TestGetBucketInfoGCP(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      map[string]any
+		expectedURL string
+		expectError bool
+	}{
+		{
+			name:        "minimal config",
+			config:      map[string]any{"Bucket": "bucket"},
+			expectedURL: "s3://bucket",
+		},
+		{
+			name:        "with prefix",
+			config:      map[string]any{"Bucket": "bucket", "Prefix": "prefix"},
+			expectedURL: "s3://bucket/prefix",
+		},
+		{
+			name:        "with leading slash prefix",
+			config:      map[string]any{"Bucket": "bucket", "Prefix": "/prefix"},
+			expectedURL: "s3://bucket/prefix",
+		},
+		{
+			name:        "with endpoint and prefix",
+			config:      map[string]any{"Bucket": "bucket", "Prefix": "/prefix", "Endpoint": "storage.googleapis.com"},
+			expectedURL: "s3://storage.googleapis.com/bucket/prefix",
+		},
+		{
+			name:        "with endpoint prefix no slash",
+			config:      map[string]any{"Bucket": "bucket", "Prefix": "prefix", "Endpoint": "storage.googleapis.com"},
+			expectedURL: "s3://storage.googleapis.com/bucket/prefix",
+		},
+		{
+			name:        "with endpoint only",
+			config:      map[string]any{"Bucket": "bucket", "Endpoint": "storage.googleapis.com"},
+			expectedURL: "s3://storage.googleapis.com/bucket",
+		},
+		{
+			name:        "with access keys",
+			config:      map[string]any{"Bucket": "bucket", "Access Key ID": "AKIAIOSFODNN7EXAMPLE", "Secret Access Key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+			expectedURL: "s3://bucket?access-key-id=AKIAIOSFODNN7EXAMPLE&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY",
+		},
+		{
+			name:        "with region and access keys",
+			config:      map[string]any{"Bucket": "bucket", "Region": "us-east-1", "Access Key ID": "AKIAIOSFODNN7EXAMPLE", "Secret Access Key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+			expectedURL: "s3://bucket?access-key-id=AKIAIOSFODNN7EXAMPLE&region=us-east-1&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY",
+		},
+		{
+			name:        "full config",
+			config:      map[string]any{"Bucket": "bucket", "Endpoint": "storage.googleapis.com", "Prefix": "/foo", "Region": "us-east-1", "Access Key ID": "AKIAIOSFODNN7EXAMPLE", "Secret Access Key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+			expectedURL: "s3://storage.googleapis.com/bucket/foo?access-key-id=AKIAIOSFODNN7EXAMPLE&region=us-east-1&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY",
+		},
+		{
+			name:        "missing required field Bucket",
+			config:      map[string]any{"Region": "us-east-1"},
+			expectError: true,
+		},
+	}
+
 	var driver s3Driver
-	url, err := driver.Validate(map[string]any{
-		"Bucket": "bucket",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://bucket", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket": "bucket",
-		"Prefix": "prefix",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://bucket/prefix", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket": "bucket",
-		"Prefix": "/prefix",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://bucket/prefix", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket":   "bucket",
-		"Prefix":   "/prefix",
-		"Endpoint": "storage.googleapis.com",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://storage.googleapis.com/bucket/prefix", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket":   "bucket",
-		"Prefix":   "prefix",
-		"Endpoint": "storage.googleapis.com",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://storage.googleapis.com/bucket/prefix", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket":   "bucket",
-		"Endpoint": "storage.googleapis.com",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://storage.googleapis.com/bucket", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket":            "bucket",
-		"Access Key ID":     "AKIAIOSFODNN7EXAMPLE",
-		"Secret Access Key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://bucket?access-key-id=AKIAIOSFODNN7EXAMPLE&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket":            "bucket",
-		"Region":            "us-east-1",
-		"Access Key ID":     "AKIAIOSFODNN7EXAMPLE",
-		"Secret Access Key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://bucket?access-key-id=AKIAIOSFODNN7EXAMPLE&region=us-east-1&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Bucket":            "bucket",
-		"Endpoint":          "storage.googleapis.com",
-		"Prefix":            "/foo",
-		"Region":            "us-east-1",
-		"Access Key ID":     "AKIAIOSFODNN7EXAMPLE",
-		"Secret Access Key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "s3://storage.googleapis.com/bucket/foo?access-key-id=AKIAIOSFODNN7EXAMPLE&region=us-east-1&secret-access-key=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY", url)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, errs := driver.Validate(tt.config)
+			if tt.expectError {
+				assert.GreaterOrEqual(t, len(errs), 1)
+				assert.Equal(t, "", url)
+			} else {
+				assert.Empty(t, errs)
+				assert.Equal(t, tt.expectedURL, url)
+			}
+		})
+	}
 }
 
 func TestSchemaValidationPath(t *testing.T) {

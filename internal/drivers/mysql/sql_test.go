@@ -88,40 +88,52 @@ func TestParseDSN(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      map[string]any
+		expectedURL string
+		expectError bool
+	}{
+		{
+			name:        "minimal config",
+			config:      map[string]any{"Database": "db", "Hostname": "hostname"},
+			expectedURL: "mysql://hostname:3306/db",
+		},
+		{
+			name:        "with custom port",
+			config:      map[string]any{"Database": "db", "Hostname": "hostname", "Port": 1234},
+			expectedURL: "mysql://hostname:1234/db",
+		},
+		{
+			name:        "with username",
+			config:      map[string]any{"Database": "db", "Hostname": "hostname", "Port": 1234, "Username": "user"},
+			expectedURL: "mysql://user:@hostname:1234/db",
+		},
+		{
+			name:        "with username and password",
+			config:      map[string]any{"Database": "db", "Hostname": "hostname", "Port": 1234, "Username": "user", "Password": "pass"},
+			expectedURL: "mysql://user:pass@hostname:1234/db",
+		},
+		{
+			name:        "missing required field Hostname",
+			config:      map[string]any{"Database": "db", "Port": 3306},
+			expectError: true,
+		},
+	}
+
 	var driver mysqlDriver
-	url, err := driver.Validate(map[string]any{
-		"Database": "db",
-		"Hostname": "hostname",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "mysql://hostname:3306/db", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Database": "db",
-		"Hostname": "hostname",
-		"Port":     1234,
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "mysql://hostname:1234/db", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Database": "db",
-		"Hostname": "hostname",
-		"Port":     1234,
-		"Username": "user",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "mysql://user:@hostname:1234/db", url)
-
-	url, err = driver.Validate(map[string]any{
-		"Database": "db",
-		"Hostname": "hostname",
-		"Port":     1234,
-		"Username": "user",
-		"Password": "pass",
-	})
-	assert.Empty(t, err)
-	assert.Equal(t, "mysql://user:pass@hostname:1234/db", url)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, errs := driver.Validate(tt.config)
+			if tt.expectError {
+				assert.GreaterOrEqual(t, len(errs), 1)
+				assert.Equal(t, "", url)
+			} else {
+				assert.Empty(t, errs)
+				assert.Equal(t, tt.expectedURL, url)
+			}
+		})
+	}
 }
 
 func TestAddNewColumnsSQL(t *testing.T) {
