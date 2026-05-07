@@ -756,10 +756,13 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool) (bool, bool, *string, *string) {
+		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool, jobId string) (bool, bool, *string, *string) {
 			importargs := []string{"--url", url, "--api-key", apikey, "--no-confirm", "--data-dir", dataDir}
 			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
+			}
+			if jobId != "" {
+				importargs = append(importargs, "--job-id", jobId)
 			}
 			if validateOnly {
 				importargs = append(importargs, "--validate-only", "--silent")
@@ -804,6 +807,7 @@ var serverCmd = &cobra.Command{
 					}
 					return false, false, &msg, nil // this means the url is invalid
 				default:
+					logger.Error("import failed with exit code %d: %s", ec, result.LastErrorLines)
 					var uploadLogPath string
 					uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 					if err != nil {
@@ -833,7 +837,7 @@ var serverCmd = &cobra.Command{
 
 		configure := func(config *notification.ConfigureRequest) *notification.ConfigureResponse {
 			logger.Trace("received driver configuration. url: %s", cstr.Mask(config.URL))
-			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true)
+			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true, "")
 			var maskedURL *string
 			if success && validated {
 				viper.Set("url", config.URL)
@@ -863,10 +867,27 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
+		backFillInit := func(req *notification.InitBackfillRequest) *notification.InitBackfillResponse {
+			logger.Trace("received init backfill request")
+			if !req.Backfill {
+				return &notification.InitBackfillResponse{SessionID: sessionId, Success: true}
+			}
+			jobID, err := createExportJob(ctx, logger, apiurl, apikey, exportJobCreateRequest{})
+			if err != nil {
+				logger.Error("failed to create export job: %s", err)
+				errorMessage := err.Error()
+				return &notification.InitBackfillResponse{SessionID: sessionId, Success: false, Message: &errorMessage}
+			}
+			return &notification.InitBackfillResponse{SessionID: sessionId, Success: true, JobID: jobID}
+		}
+
 		importaction := func(req *notification.ImportRequest) *notification.ImportResponse {
 			logger.Trace("received import action")
 			pause() // pause the consumer, if any, from processing any data while we are importing
-			success, _, msg, uploadLogPath := runImport(ctx, driverURL, !req.Backfill, false)
+			success, _, msg, uploadLogPath := runImport(ctx, driverURL, !req.Backfill, false, req.JobID)
+			if !success {
+				return &notification.ImportResponse{SessionID: sessionId, Success: false, Message: msg, LogPath: uploadLogPath}
+			}
 			if !configured {
 				logger.Trace("driver configured")
 				configureChannel <- true
@@ -913,6 +934,7 @@ var serverCmd = &cobra.Command{
 			Upgrade:      upgrade,
 			SendLogs:     sendLogs,
 			Configure:    configure,
+			BackfillInit: backFillInit,
 			Import:       importaction,
 			DriverConfig: driverconfig,
 			Validate:     validate,
