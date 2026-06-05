@@ -479,7 +479,6 @@ var serverCmd = &cobra.Command{
 		}
 		dataDir := getDataDir(cmd, logger)
 		driverURL := viper.GetString("url")
-		server := mustFlagString(cmd, "server", false)
 		apikey := viper.GetString("token")
 		if apikey == "" {
 			logger.Fatal("API key not found. Make sure you run %s before continuing.", getCommandExample("enroll", "[CODE]"))
@@ -515,6 +514,14 @@ var serverCmd = &cobra.Command{
 			logger.Debug("using API url: %s", apiurl)
 		}
 
+		natsurl := api.GetNatsURLFromAPIURL(apiurl)
+		if cmd.Flags().Changed("server") {
+			natsurl = mustFlagString(cmd, "server", true)
+			logger.Debug("using alternative NATS url: %s", natsurl)
+		} else {
+			logger.Debug("using NATS url: %s", natsurl)
+		}
+
 		var credsFile string
 		var sessionDir string
 
@@ -538,7 +545,7 @@ var serverCmd = &cobra.Command{
 		_args := collectCommandArgs()
 		_args = append(_args, "--port", fmt.Sprintf("%d", port))
 		_args = append(_args, "--data-dir", dataDir)
-		_args = append(_args, "--server", server)
+		_args = append(_args, "--server", natsurl)
 		_args = append(_args, "--api-url", apiurl)
 
 		var sessionId string
@@ -918,11 +925,6 @@ var serverCmd = &cobra.Command{
 				URL:         url,
 				Message:     msg,
 			}
-		}
-
-		natsurl := mustFlagString(cmd, "server", true)
-		if strings.Contains(apiurl, "localhost") {
-			natsurl = "nats://localhost:4222"
 		}
 
 		// create a notification consumer that will listen for notification actions and handle them here

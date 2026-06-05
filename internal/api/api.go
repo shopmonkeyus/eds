@@ -1,6 +1,9 @@
 package api
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 type DriverMeta struct {
 	ID          string `json:"id"`
@@ -57,6 +60,14 @@ type EnrollResponse struct {
 	Data    EnrollTokenData `json:"data"`
 }
 
+const defaultNatsURL = "nats://connect.nats.shopmonkey.pub"
+
+var apiToNatsURLs = map[string]string{
+	"https://api.shopmonkey.cloud":      defaultNatsURL,
+	"https://edge-api.shopmonkey.cloud": "nats://connect.nats-test.shopmonkey.pub",
+	"http://localhost:3101":             "nats://localhost:4222",
+}
+
 func GetAPIURL(firstLetter string) (*string, error) {
 	apiUrls := map[string]string{
 		"P": "https://api.shopmonkey.cloud",
@@ -69,4 +80,13 @@ func GetAPIURL(firstLetter string) (*string, error) {
 		return &url, nil
 	}
 	return nil, errors.New("invalid code")
+}
+
+// GetNatsURLFromAPIURL returns the NATS server URL for a Shopmonkey API URL.
+func GetNatsURLFromAPIURL(apiURL string) string {
+	apiURL = strings.TrimSuffix(apiURL, "/")
+	if natsURL, ok := apiToNatsURLs[apiURL]; ok {
+		return natsURL
+	}
+	return defaultNatsURL
 }
