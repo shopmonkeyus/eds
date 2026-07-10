@@ -514,10 +514,12 @@ var serverCmd = &cobra.Command{
 			logger.Debug("using API url: %s", apiurl)
 		}
 
-		natsurl := api.GetNatsURLFromAPIURL(apiurl)
+		natsurl := mustFlagString(cmd, "server", true)
 		if cmd.Flags().Changed("server") {
-			natsurl = mustFlagString(cmd, "server", true)
 			logger.Debug("using alternative NATS url: %s", natsurl)
+		} else if configNats := viper.GetString("nats_url"); configNats != "" {
+			natsurl = configNats
+			logger.Debug("using NATS url from config: %s", natsurl)
 		} else {
 			logger.Debug("using NATS url: %s", natsurl)
 		}

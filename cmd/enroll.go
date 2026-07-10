@@ -60,6 +60,12 @@ var enrollCmd = &cobra.Command{
 			logger.Fatal("failed to start enroll: %s", enrollResp.Message)
 		}
 
+		natsURL, err := api.GetNatsURL(code[0:1])
+		if err != nil {
+			logger.Fatal("error getting nats url: %s", err)
+		}
+		enrollResp.Data.NatsURL = natsURL
+
 		var buf bytes.Buffer
 		if err := toml.NewEncoder(&buf).Encode(enrollResp.Data); err != nil {
 			logger.Fatal("failed to encode response: %w", err)

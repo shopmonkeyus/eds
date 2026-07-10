@@ -1,24 +1,37 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestGetNatsURLFromAPIURL(t *testing.T) {
-	tests := []struct {
-		apiURL  string
-		natsURL string
-	}{
-		{"https://api.shopmonkey.cloud", defaultNatsURL},
-		{"https://api.shopmonkey.cloud/", defaultNatsURL},
-		{"https://edge-api.shopmonkey.cloud", "nats://connect.nats-test.shopmonkey.pub"},
-		{"http://localhost:3101", "nats://localhost:4222"},
-		{"https://sandbox-api.shopmonkey.cloud", defaultNatsURL},
-		{"https://unknown.example.com", defaultNatsURL},
+func TestGetAPIURL(t *testing.T) {
+	url, err := GetAPIURL("P")
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.shopmonkey.cloud", *url)
+
+	url, err = GetAPIURL("e")
+	require.NoError(t, err)
+	assert.Equal(t, "https://edge-api.shopmonkey.cloud", *url)
+
+	_, err = GetAPIURL("X")
+	assert.Error(t, err)
+}
+
+func TestGetNatsURL(t *testing.T) {
+	for code, env := range environments {
+		natsURL, err := GetNatsURL(code)
+		require.NoError(t, err)
+		assert.Equal(t, env.NATS, natsURL, code)
+
+		natsURL, err = GetNatsURL(strings.ToLower(code))
+		require.NoError(t, err)
+		assert.Equal(t, env.NATS, natsURL, code)
 	}
-	for _, tt := range tests {
-		assert.Equal(t, tt.natsURL, GetNatsURLFromAPIURL(tt.apiURL), tt.apiURL)
-	}
+
+	_, err := GetNatsURL("X")
+	assert.Error(t, err)
 }
