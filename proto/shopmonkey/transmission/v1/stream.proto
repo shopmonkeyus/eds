@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package shopmonkey.transmission.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/shopmonkeyus/eds/pkg/transmission/v1;transmissionv1";
+
+service TransmissionService {
+  rpc Fetch(FetchRequest) returns (stream FetchResponse);
+
+  rpc Log(LogRequest) returns (LogResponse);
+
+  rpc Control(ControlRequest) returns (stream ControlResponse);
+}
+
+message FetchRequest {
+  int32 max_count = 1;
+
+  int64 timeout_ms = 2;
+}
+
+message FetchResponse {
+  repeated ChangeMessage messages = 1;
+}
+
+message ChangeMessage {
+  bytes payload = 1;
+}
+
+message LogRequest {
+  bytes json = 1;
+}
+
+message LogResponse {}
+
+message ControlRequest {}
+
+message ControlResponse {
+  string action = 1;
+
+  google.protobuf.Struct payload = 2;
+}

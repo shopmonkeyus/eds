@@ -77,6 +77,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.OsInfo = osinfo
 	body.ServerID = edsServerId
 	body.CompanyIDs = companyIds
+	body.UseTransmission = true
 
 	if driverUrl != "" {
 		driverMetadata, err := internal.GetDriverMetadataForURL(driverUrl)
@@ -983,6 +984,11 @@ var serverCmd = &cobra.Command{
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
+			if session.Transmission != nil && session.Transmission.Address != "" {
+				logger.Info("transmission connection acquired: address=%s", session.Transmission.Address)
+			} else {
+				logger.Info("transmission connection not acquired")
+			}
 			sessionDir = filepath.Join(dataDir, sessionId)
 			if err := os.MkdirAll(sessionDir, 0700); err != nil {
 				logger.Fatal("failed to create session directory: %s", err)

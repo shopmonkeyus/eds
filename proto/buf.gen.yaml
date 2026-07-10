@@ -1,0 +1,10 @@
+version: v2
+managed:
+  enabled: false
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: ..
+    opt: paths=import,module=github.com/shopmonkeyus/eds
+  - remote: buf.build/grpc/go
+    out: ..
+    opt: paths=import,module=github.com/shopmonkeyus/eds
