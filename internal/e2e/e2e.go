@@ -226,7 +226,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 		logger.Trace("creds: %s", userCreds)
 		httpport, shutdown := setupServer(logger, userCreds)
 		apiurl := fmt.Sprintf("http://127.0.0.1:%d", httpport)
-		run("enroll", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "1234"}, nil, nil)
+		run("enroll", []string{"--api-url", apiurl, "-v", "-d", tmpdir, "L1234"}, nil, nil)
 		for _, test := range tests {
 			if tv, ok := test.(e2eTestDisabled); ok {
 				if tv.Disabled() {

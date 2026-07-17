@@ -1,6 +1,9 @@
 package api
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 type DriverMeta struct {
 	ID          string `json:"id"`
@@ -49,6 +52,7 @@ type SessionEndResponse struct {
 type EnrollTokenData struct {
 	Token    string `json:"token" toml:"token"`
 	ServerID string `json:"serverId" toml:"server_id"`
+	NatsURL  string `json:"natsUrl,omitempty" toml:"nats_url,omitempty"`
 }
 
 type EnrollResponse struct {
@@ -57,16 +61,45 @@ type EnrollResponse struct {
 	Data    EnrollTokenData `json:"data"`
 }
 
-func GetAPIURL(firstLetter string) (*string, error) {
-	apiUrls := map[string]string{
-		"P": "https://api.shopmonkey.cloud",
-		"S": "https://sandbox-api.shopmonkey.cloud",
-		"E": "https://edge-api.shopmonkey.cloud",
-		"L": "http://localhost:3101",
-	}
+const defaultNatsURL = "nats://connect.nats.shopmonkey.pub"
 
-	if url, exists := apiUrls[firstLetter]; exists {
-		return &url, nil
+type environment struct {
+	API  string
+	NATS string
+}
+
+var environments = map[string]environment{
+	"P": {API: "https://api.shopmonkey.cloud", NATS: defaultNatsURL},
+	"S": {API: "https://sandbox-api.shopmonkey.cloud", NATS: "nats://connect.nats-sandbox.shopmonkey.pub"},
+	"E": {API: "https://edge-api.shopmonkey.cloud", NATS: "nats://connect.nats-test.shopmonkey.pub"},
+	"L": {API: "http://localhost:3101", NATS: "nats://localhost:4222"},
+}
+
+func GetAPIURL(firstLetter string) (*string, error) {
+	env, err := getEnvironment(firstLetter)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("invalid code")
+	return &env.API, nil
+}
+
+func GetNatsURL(firstLetter string) (string, error) {
+	env, err := getEnvironment(firstLetter)
+	if err != nil {
+		return "", err
+	}
+	return env.NATS, nil
+}
+
+func getEnvironment(code string) (environment, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "" {
+		return environment{}, errors.New("invalid code")
+	}
+	code = code[0:1]
+	env, exists := environments[code]
+	if !exists {
+		return environment{}, errors.New("invalid code")
+	}
+	return env, nil
 }
