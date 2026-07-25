@@ -26,6 +26,7 @@ type FetchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MaxCount      int32                  `protobuf:"varint,1,opt,name=max_count,json=maxCount,proto3" json:"max_count,omitempty"`
 	TimeoutMs     int64                  `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	EdsId         string                 `protobuf:"bytes,3,opt,name=eds_id,json=edsId,proto3" json:"eds_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -72,6 +73,13 @@ func (x *FetchRequest) GetTimeoutMs() int64 {
 		return x.TimeoutMs
 	}
 	return 0
+}
+
+func (x *FetchRequest) GetEdsId() string {
+	if x != nil {
+		return x.EdsId
+	}
+	return ""
 }
 
 type FetchResponse struct {
@@ -165,6 +173,7 @@ func (x *ChangeMessage) GetPayload() []byte {
 type LogRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Json          []byte                 `protobuf:"bytes,1,opt,name=json,proto3" json:"json,omitempty"`
+	EdsId         string                 `protobuf:"bytes,2,opt,name=eds_id,json=edsId,proto3" json:"eds_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -206,6 +215,13 @@ func (x *LogRequest) GetJson() []byte {
 	return nil
 }
 
+func (x *LogRequest) GetEdsId() string {
+	if x != nil {
+		return x.EdsId
+	}
+	return ""
+}
+
 type LogResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -244,6 +260,7 @@ func (*LogResponse) Descriptor() ([]byte, []int) {
 
 type ControlRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	EdsId         string                 `protobuf:"bytes,1,opt,name=eds_id,json=edsId,proto3" json:"eds_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -276,6 +293,13 @@ func (x *ControlRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ControlRequest.ProtoReflect.Descriptor instead.
 func (*ControlRequest) Descriptor() ([]byte, []int) {
 	return file_shopmonkey_transmission_v1_stream_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ControlRequest) GetEdsId() string {
+	if x != nil {
+		return x.EdsId
+	}
+	return ""
 }
 
 type ControlResponse struct {
@@ -334,20 +358,23 @@ var File_shopmonkey_transmission_v1_stream_proto protoreflect.FileDescriptor
 
 const file_shopmonkey_transmission_v1_stream_proto_rawDesc = "" +
 	"\n" +
-	"'shopmonkey/transmission/v1/stream.proto\x12\x1ashopmonkey.transmission.v1\x1a\x1cgoogle/protobuf/struct.proto\"J\n" +
+	"'shopmonkey/transmission/v1/stream.proto\x12\x1ashopmonkey.transmission.v1\x1a\x1cgoogle/protobuf/struct.proto\"a\n" +
 	"\fFetchRequest\x12\x1b\n" +
 	"\tmax_count\x18\x01 \x01(\x05R\bmaxCount\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x02 \x01(\x03R\ttimeoutMs\"V\n" +
+	"timeout_ms\x18\x02 \x01(\x03R\ttimeoutMs\x12\x15\n" +
+	"\x06eds_id\x18\x03 \x01(\tR\x05edsId\"V\n" +
 	"\rFetchResponse\x12E\n" +
 	"\bmessages\x18\x01 \x03(\v2).shopmonkey.transmission.v1.ChangeMessageR\bmessages\")\n" +
 	"\rChangeMessage\x12\x18\n" +
-	"\apayload\x18\x01 \x01(\fR\apayload\" \n" +
+	"\apayload\x18\x01 \x01(\fR\apayload\"7\n" +
 	"\n" +
 	"LogRequest\x12\x12\n" +
-	"\x04json\x18\x01 \x01(\fR\x04json\"\r\n" +
-	"\vLogResponse\"\x10\n" +
-	"\x0eControlRequest\"\\\n" +
+	"\x04json\x18\x01 \x01(\fR\x04json\x12\x15\n" +
+	"\x06eds_id\x18\x02 \x01(\tR\x05edsId\"\r\n" +
+	"\vLogResponse\"'\n" +
+	"\x0eControlRequest\x12\x15\n" +
+	"\x06eds_id\x18\x01 \x01(\tR\x05edsId\"\\\n" +
 	"\x0fControlResponse\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x121\n" +
 	"\apayload\x18\x02 \x01(\v2\x17.google.protobuf.StructR\apayload2\xb3\x02\n" +

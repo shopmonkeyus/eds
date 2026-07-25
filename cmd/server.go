@@ -984,8 +984,10 @@ var serverCmd = &cobra.Command{
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
+			transmissionAddress := ""
 			if session.Transmission != nil && session.Transmission.Address != "" {
-				logger.Info("transmission connection acquired: address=%s", session.Transmission.Address)
+				transmissionAddress = session.Transmission.Address
+				logger.Info("transmission connection acquired: address=%s", transmissionAddress)
 			} else {
 				logger.Info("transmission connection not acquired")
 			}
@@ -1029,6 +1031,13 @@ var serverCmd = &cobra.Command{
 				"--url", driverURL,
 				"--server", natsurl,
 			)
+			if transmissionAddress != "" {
+				args = append(args,
+					"--transmission-address", transmissionAddress,
+					"--eds-id", edsServerId,
+					"--session-id", sessionId,
+				)
+			}
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
 				Command:          "fork",

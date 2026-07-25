@@ -17,6 +17,7 @@ import (
 	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/registry"
 	"github.com/shopmonkeyus/eds/internal/tracker"
+	"github.com/shopmonkeyus/eds/internal/transmission"
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-common/sys"
@@ -31,6 +32,15 @@ const (
 	exitCodeRestart          = 4
 	exitCodeNatsDisconnected = 5
 )
+
+// messageSource is the shared control surface for NATS and Transmission ingest.
+type messageSource interface {
+	Stop() error
+	Pause()
+	Unpause() error
+	Error() <-chan error
+	Disconnected() <-chan bool
+}
 
 func runHealthCheckServerFork(logger logger.Logger, port int) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +88,9 @@ var forkCmd = &cobra.Command{
 		minPendingLatency, _ := cmd.Flags().GetDuration("minPendingLatency")
 		maxPendingLatency, _ := cmd.Flags().GetDuration("maxPendingLatency")
 		port := mustFlagInt(cmd, "port", false)
+		transmissionAddress, _ := cmd.Flags().GetString("transmission-address")
+		edsID, _ := cmd.Flags().GetString("eds-id")
+		sessionID, _ := cmd.Flags().GetString("session-id")
 
 		// check to see if there's a schema validator and if so load it
 		validator, err := loadSchemaValidator(cmd)
@@ -133,6 +146,7 @@ var forkCmd = &cobra.Command{
 		wg.Add(1)
 
 		restartFlag, _ := cmd.Flags().GetBool("restart")
+		useTransmission := transmissionAddress != ""
 
 		// the ability to control the process from HTTP control channel
 		pauseCh := make(chan bool)
@@ -172,87 +186,110 @@ var forkCmd = &cobra.Command{
 			}()
 			var completed bool
 			var paused bool
-			var localConsumer *consumer.Consumer
+			var source messageSource
 			var err error
 			for !completed {
-				if !paused && localConsumer == nil {
-					localConsumer, err = consumer.NewConsumer(consumer.ConsumerConfig{
-						Context:               ctx,
-						Logger:                logger,
-						URL:                   natsurl,
-						Credentials:           creds,
-						Suffix:                consumerSuffix,
-						MaxAckPending:         maxAckPending,
-						MaxPendingBuffer:      maxPendingBuffer,
-						Driver:                driver,
-						ExportTableTimestamps: exportTableTimestamps,
-						DeliverAll:            restartFlag,
-						SchemaValidator:       validator,
-						CompanyIDs:            companyIds,
-						Registry:              schemaRegistry,
-						MinPendingLatency:     minPendingLatency,
-						MaxPendingLatency:     maxPendingLatency,
-					})
-					if err != nil {
-						logger.Error("error creating consumer: %s", err)
-						os.Exit(1)
+				if !paused && source == nil {
+					if useTransmission {
+						source, err = transmission.NewClient(transmission.Config{
+							Context:               ctx,
+							Logger:                logger,
+							Address:               transmissionAddress,
+							EdsID:                 edsID,
+							SessionID:             sessionID,
+							Driver:                driver,
+							ExportTableTimestamps: exportTableTimestamps,
+							SchemaValidator:       validator,
+							Registry:              schemaRegistry,
+						})
+						if err != nil {
+							logger.Error("error creating transmission client: %s", err)
+							os.Exit(1)
+						}
+						logger.Info("using transmission poller at %s (every %s)", transmissionAddress, transmission.DefaultFetchInterval)
+					} else {
+						source, err = consumer.NewConsumer(consumer.ConsumerConfig{
+							Context:               ctx,
+							Logger:                logger,
+							URL:                   natsurl,
+							Credentials:           creds,
+							Suffix:                consumerSuffix,
+							MaxAckPending:         maxAckPending,
+							MaxPendingBuffer:      maxPendingBuffer,
+							Driver:                driver,
+							ExportTableTimestamps: exportTableTimestamps,
+							DeliverAll:            restartFlag,
+							SchemaValidator:       validator,
+							CompanyIDs:            companyIds,
+							Registry:              schemaRegistry,
+							MinPendingLatency:     minPendingLatency,
+							MaxPendingLatency:     maxPendingLatency,
+						})
+						if err != nil {
+							logger.Error("error creating consumer: %s", err)
+							os.Exit(1)
+						}
 					}
-					if localConsumer != nil {
-						go func() {
+					if source != nil {
+						go func(src messageSource) {
 							select {
-							case <-localConsumer.Disconnected():
-								logger.Warn("nats server disconnected")
+							case <-src.Disconnected():
+								if useTransmission {
+									logger.Warn("transmission disconnected")
+								} else {
+									logger.Warn("nats server disconnected")
+								}
 								os.Exit(exitCodeNatsDisconnected)
 							case <-ctx.Done():
 								return
 							}
-						}()
+						}(source)
 					}
 				}
 				select {
 				case <-ctx.Done():
 					completed = true
-					if localConsumer != nil {
-						localConsumer.Stop()
-						localConsumer = nil
+					if source != nil {
+						source.Stop()
+						source = nil
 					}
-				case err := <-localConsumer.Error():
+				case err := <-source.Error():
 					if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) {
 						logger.Warn("nats server / consumer needs reconnection: %s", err)
 					} else {
-						logger.Error("error from consumer: %s", err)
+						logger.Error("error from message source: %s", err)
 					}
-					if err := localConsumer.Stop(); err != nil {
-						logger.Error("error stopping consumer: %s", err)
+					if err := source.Stop(); err != nil {
+						logger.Error("error stopping message source: %s", err)
 					}
 					exitCode = 1
 					return
 				case sig := <-restart:
 					switch sig {
 					case syscall.SIGHUP:
-						logger.Debug("restarting consumer")
+						logger.Debug("restarting message source")
 						completed = true
 						exitCode = exitCodeRestart // this is a special code to indicate an intentional restart
 					case syscall.SIGTERM:
 						logger.Debug("shutting down")
 						completed = true
 					}
-					if err := localConsumer.Stop(); err != nil {
-						logger.Error("error stopping consumer: %s", err)
+					if err := source.Stop(); err != nil {
+						logger.Error("error stopping message source: %s", err)
 					}
-					localConsumer = nil
+					source = nil
 				case pause := <-pauseCh:
 					if pause {
 						if !paused {
 							paused = true
 							logger.Debug("pausing")
-							localConsumer.Pause()
+							source.Pause()
 						}
 					} else {
 						if paused {
 							logger.Debug("unpausing")
 							paused = false
-							if err := localConsumer.Unpause(); err != nil {
+							if err := source.Unpause(); err != nil {
 								logger.Error("error unpausing: %s", err)
 								return
 							}
@@ -300,6 +337,9 @@ func init() {
 	forkCmd.Flags().Duration("minPendingLatency", 0, "the minimum accumulation period before flushing (0 uses default)")
 	forkCmd.Flags().Duration("maxPendingLatency", 0, "the maximum accumulation period before flushing (0 uses default)")
 	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
+	forkCmd.Flags().String("transmission-address", "", "gRPC address for transmission (when set, polls Fetch instead of NATS)")
+	forkCmd.Flags().String("eds-id", "", "the EDS server ID used with transmission")
+	forkCmd.Flags().String("session-id", "", "the session ID used with transmission")
 
 	// NOTE: sync these with serverCmd
 	// these flags are passed through from the server

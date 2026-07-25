@@ -18,6 +18,8 @@ message FetchRequest {
   int32 max_count = 1;
 
   int64 timeout_ms = 2;
+
+  string eds_id = 3;
 }
 
 message FetchResponse {
@@ -30,12 +32,15 @@ message ChangeMessage {
 
 message LogRequest {
   bytes json = 1;
+
+  string eds_id = 2;
 }
 
 message LogResponse {}
 
-message ControlRequest {}
-
+message ControlRequest {
+  string eds_id = 1;
+}
 message ControlResponse {
   string action = 1;
 
