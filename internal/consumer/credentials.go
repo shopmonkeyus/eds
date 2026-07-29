@@ -6,13 +6,49 @@ import (
 	"os"
 	"regexp"
 
+	"github.com/google/uuid"
 	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds/internal/util"
+	"github.com/shopmonkeyus/go-common/logger"
+	cnats "github.com/shopmonkeyus/go-common/nats"
 )
 
 var companyIDRE = regexp.MustCompile(`^dbchange\.\*\.\*\.([a-f0-9-]+)\.`)
 var sessionIDRE = regexp.MustCompile(`^eds.notify.([a-f0-9-]+)\.`)
+
+type CredentialInfo struct {
+	CompanyIDs []string
+	ServerID   string
+	SessionID  string
+}
+
+func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Conn, *CredentialInfo, error) {
+	var natsCredentials nats.Option
+	var info *CredentialInfo
+
+	if creds == "" {
+		info = &CredentialInfo{
+			CompanyIDs: []string{"*"},
+			ServerID:   "dev",
+			SessionID:  uuid.NewString(),
+		}
+		logger.Debug("using localhost nats server")
+	} else {
+		var err error
+		natsCredentials, info, err = getNatsCreds(creds)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
+	}
+
+	return nc, info, nil
+}
 
 func extractCompanyIdFromDBChangeSubscription(sub string) string {
 	return getFirstMatch(companyIDRE, sub)

@@ -1,31 +1,35 @@
 package consumer
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
+	transmissionv1 "github.com/shopmonkeyus/eds/pkg/transmission/v1"
 	"github.com/shopmonkeyus/go-common/logger"
-	cnats "github.com/shopmonkeyus/go-common/nats"
-	"github.com/vmihailenco/msgpack/v5"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const (
-	defaultEmptyBufferPauseTime = time.Millisecond * 10 // time to wait when the buffer is empty to prevent CPU spinning
-	DefaultMinPendingLatency    = time.Second * 2       // minimum accumulation period before flushing
-	DefaultMaxPendingLatency    = time.Second * 30      // maximum accumulation period before flushing
-	traceLogNatsProcessDetail   = true                  // turn on trace logging for nats processing
+	defaultMaxCount     = 200
+	defaultFetchTimeout = 500 * time.Millisecond
+	extraFetchTimeout   = 500 * time.Millisecond
+
+	ControlActionStart = "start"
+	ControlActionPause = "pause"
 )
 
+// TODO: Make sure we handle rejecting connections to the transmission server from more than one client
 var ErrConsumerAlreadyRunning = errors.New("consumer already running")
 
 // Driver is a local interface which slims down the driver to only the methods we need to make it easier to test.
@@ -35,204 +39,90 @@ type Driver interface {
 	MaxBatchSize() int
 }
 
-// ConsumerConfig is the configuration for the consumer.
-type ConsumerConfig struct {
+// TODO: Make sure we handle import table timestamps properly
+// TODO: Determine if we need heartbeats
 
-	// Context is the context for the consumer.
-	Context context.Context
-
-	// Logger is the logger for the consumer.
-	Logger logger.Logger
-
-	// URL to the nats server
-	URL string
-
-	// Credentials for the nats server
-	Credentials string
-
-	// CompanyIDs is the list of company IDs to listen for. If empty, all companies will be listened to.
-	CompanyIDs []string
-
-	// Suffix for the consumer name
-	Suffix string
-
-	// MaxAckPending is the maximum number of messages that can be in-flight at once.
-	MaxAckPending int
-
-	// MaxPendingBuffer is the maximum number of messages that can be buffered before the consumer starts dropping messages.
-	MaxPendingBuffer int
-
-	// Driver is the driver for the consumer.
-	Driver Driver
-
-	// ExportTableData is the map of table names to mvcc timestamps. This should be provided after an import to make sure the consumer doesnt double process data.
+type ClientConfig struct {
+	Context               context.Context
+	Credentials           string
+	Logger                logger.Logger
+	Address               string
+	EdsID                 string
+	SessionID             string
+	Driver                Driver
+	Registry              internal.SchemaRegistry
+	SchemaValidator       internal.SchemaValidator
 	ExportTableTimestamps map[string]*time.Time
-
-	// DeliverAll will configure the consumer to read from the beginning of the stream, this only works if the consumer is new
-	DeliverAll bool
-
-	// SchemaValidator is the schema validator to use for the importer or nil if not needed.
-	SchemaValidator internal.SchemaValidator
-
-	// HeartbeatInterval is the interval to send heartbeats. Defaults to 1 minute.
-	HeartbeatInterval time.Duration
-
-	// MinPendingLatency is the minimum accumulation period before flushing.
-	MinPendingLatency time.Duration
-
-	// MaxPendingLatency is the maximum accumulation period before flushing.
-	MaxPendingLatency time.Duration
-
-	// EmptyBufferPauseTime is the time to wait when the buffer is empty to prevent CPU spinning.
-	EmptyBufferPauseTime time.Duration
-
-	// Registry returns the schema registry to use.
-	Registry internal.SchemaRegistry
-
-	sessionIDCallback func(id string) // only used in testing
+	FetchInterval         time.Duration
+	MaxCount              int32
+	FetchTimeout          time.Duration
 }
 
-type Consumer struct {
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	max                  int
-	driver               Driver
-	conn                 *nats.Conn
-	jsconn               jetstream.Consumer
-	logger               logger.Logger
-	subscriber           jetstream.ConsumeContext
-	buffer               chan jetstream.Msg
-	pending              []jetstream.Msg
-	started              *time.Time
-	pendingStarted       *time.Time
-	pauseStarted         *time.Time
-	waitGroup            sync.WaitGroup
-	once                 sync.Once
-	lock                 sync.Mutex
-	stopping             bool
-	subError             chan error
-	sessionID            string
-	tableTimestamps      map[string]*time.Time
-	validator            internal.SchemaValidator
-	heartbeatInterval    time.Duration
-	minPendingLatency    time.Duration
-	maxPendingLatency    time.Duration
-	emptyBufferPauseTime time.Duration
-	offset               int64
-	supportsMigration    bool
-	registry             internal.SchemaRegistry
-	sequence             uint64
-	disconnected         chan bool
+// TODO: If we keep heartbeats, do we keep pause started and started?
+// TODO: See if we can get Stop idempotency
+type Client struct {
+	ctx               context.Context
+	cancel            context.CancelFunc
+	logger            logger.Logger
+	edsID             string
+	sessionID         string
+	driver            Driver
+	registry          internal.SchemaRegistry
+	validator         internal.SchemaValidator
+	tableTimestamps   map[string]*time.Time
+	maxCount          int32
+	fetchTimeout      time.Duration
+	supportsMigration bool
+
+	conn   *grpc.ClientConn
+	client transmissionv1.TransmissionServiceClient
+
+	errCh        chan error
+	disconnected chan bool
+	controlChan  chan *transmissionv1.ControlResponse
+	waitGroup    sync.WaitGroup
+	once         sync.Once
+	lock         sync.Mutex
+	paused       bool
+	ready        chan struct{}
 }
 
-// Disconnected returns a channel that will be closed when the consumer is disconnected from the NATS server.
-func (c *Consumer) Disconnected() <-chan bool {
+// Disconnected returns a channel that will be closed when the client is disconnected from Transmission.
+func (c *Client) Disconnected() <-chan bool {
 	return c.disconnected
 }
 
-func (c *Consumer) isStopping() bool {
-	c.lock.Lock()
-	val := c.stopping
-	c.lock.Unlock()
-	return val
-}
-
-// Stop the consumer and close the connection to the NATS server.
-func (c *Consumer) Stop() error {
-	c.logger.Debug("stopping consumer")
-	c.once.Do(func() {
-		c.logger.Debug("stopping bufferer")
-		// set the consumer to stopping in a safe way since we have the goroutine running
-		c.lock.Lock()
-		c.stopping = true
-		c.lock.Unlock()
-		if c.subscriber != nil {
-			c.logger.Debug("draining subscriber")
-			c.subscriber.Drain()
-			<-c.subscriber.Closed()
-			c.logger.Debug("drained subscriber")
-		}
-		c.flush(c.logger)
-
-		c.cancel()
-		c.logger.Debug("waiting on bufferer")
-		c.waitGroup.Wait()
-		c.logger.Debug("stopped bufferer")
-
-		// once we get here, the bufferer should be done and its safe to start shutting down
-
-		c.nackEverything() // just be safe
-		if c.conn != nil {
-			c.logger.Debug("stopping nats connection")
-			c.conn.Close()
-			c.logger.Debug("stopped nats connection")
-		}
-		close(c.buffer)
-		c.subscriber = nil
-		c.conn = nil
-	})
-	c.logger.Debug("stopped consumer")
+func (c *Client) Stop() error {
+	c.cancel()
+	c.waitGroup.Wait()
+	c.conn.Close()
 	return nil
 }
 
-func (c *Consumer) nackEverything() {
-	c.logger.Debug("nack everything")
-	for _, m := range c.pending {
-		if err := m.Nak(); err != nil {
-			c.logger.Error("error nacking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
-		}
+func (c *Client) handleError(err error) {
+	if c.ctx.Err() != nil {
+		return
 	}
-	c.pending = nil
-	c.pendingStarted = nil
+	c.logger.Error("%s", err)
+	select {
+	case c.errCh <- err:
+	default:
+	}
 }
 
-func (c *Consumer) handleError(err error) {
-	c.logger.Error("error: %s", err)
-	c.nackEverything()
-	c.subError <- err
-}
-
-func (c *Consumer) flush(logger logger.Logger) bool {
+func (c *Client) flush(logger logger.Logger) error {
 	logger.Trace("flush")
-	if c.driver == nil {
-		return c.stopping
-	}
 	started := time.Now()
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	if err := c.driver.Flush(logger); err != nil {
-		if errors.Is(err, internal.ErrDriverStopped) {
-			c.nackEverything()
-			return true
-		}
-		c.handleError(err)
-		return true
+		return err
 	}
 	var count float64
-	for _, m := range c.pending {
-		c.logger.Trace("acknowledged message %s", m.Headers().Get(nats.MsgIdHdr))
-
-		if err := m.Ack(); err != nil {
-			internal.PendingEvents.Dec()
-			logger.Error("error acking msg %s: %s", m.Headers().Get(nats.MsgIdHdr), err)
-			c.nackEverything()
-			return true
-		}
-		internal.PendingEvents.Dec()
-		count++
-	}
-	if c.pendingStarted != nil {
-		processingDuration := time.Since(*c.pendingStarted)
-		internal.ProcessingDuration.Observe(processingDuration.Seconds())
-	}
 	internal.FlushDuration.Observe(time.Since(started).Seconds())
 	internal.FlushCount.Observe(count)
-	c.pending = nil
-	c.pendingStarted = nil
-	return c.stopping
+	return nil
 }
 
-func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent) bool {
+func (c *Client) shouldSkip(evt *internal.DBChangeEvent) bool {
 	if c.tableTimestamps != nil {
 		eventTimestamp := time.UnixMilli(evt.Timestamp)
 		// check if we have a timestamp for this table and only process if its newer
@@ -247,58 +137,58 @@ func (c *Consumer) shouldSkip(logger logger.Logger, evt *internal.DBChangeEvent)
 		if err != nil {
 			if errors.Is(err, util.ErrSchemaValidation) {
 				// note we join these errors since they are separated by definition in errors.Join and we want to log them together
-				logger.Debug("skipping %s, schema did not validate (%s) for event: %s", evt.Table, strings.TrimSpace(strings.Join(strings.Split(err.Error(), "\n"), " ")), util.JSONStringify(evt))
+				c.logger.Debug("skipping %s, schema did not validate (%s) for event: %s", evt.Table, strings.TrimSpace(strings.Join(strings.Split(err.Error(), "\n"), " ")), util.JSONStringify(evt))
 				return true
 			}
-			logger.Error("error validating schema: %s for event: %s", err, util.JSONStringify(evt))
+			c.logger.Error("error validating schema: %s for event: %s", err, util.JSONStringify(evt))
 			return true
 		}
 		if !found {
-			logger.Trace("skipping %s, no schema found for event: %s", evt.Table, util.JSONStringify(evt))
+			c.logger.Trace("skipping %s, no schema found for event: %s", evt.Table, util.JSONStringify(evt))
 			return true
 		}
 		if !valid {
-			logger.Trace("skipping %s, schema did not validate for event: %s", evt.Table, util.JSONStringify(evt))
+			c.logger.Trace("skipping %s, schema did not validate for event: %s", evt.Table, util.JSONStringify(evt))
 			return true
 		}
 		if path != "" {
 			evt.SchemaValidatedPath = &path
-			logger.Trace("schema validated %s", path)
+			c.logger.Trace("schema validated %s", path)
 		}
 	}
 	return false
 }
 
-func (c *Consumer) Error() <-chan error {
-	return c.subError
+func (c *Client) Error() <-chan error {
+	return c.errCh
 }
 
-func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Logger, event *internal.DBChangeEvent) (bool, error) {
+func (c *Client) handlePossibleMigration(event *internal.DBChangeEvent) error {
 	found, version, err := c.registry.GetTableVersion(event.Table)
 	if err != nil {
-		return false, fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+		return fmt.Errorf("error getting current table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 	}
 	if !found || version != event.ModelVersion {
-		logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, version, event.ModelVersion)
+		c.logger.Trace("%s found: %v, version: %v, model version: %v", event.Table, found, version, event.ModelVersion)
 		newschema, err := c.registry.GetSchema(event.Table, event.ModelVersion)
 		if err != nil {
-			return false, fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			return fmt.Errorf("error getting new schema for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 		}
 		migration := c.driver.(internal.DriverMigration)
 		if !found {
-			logger.Debug("need to migrate new table: %s, model version: %s", event.Table, event.ModelVersion)
-			if err := migration.MigrateNewTable(ctx, logger, newschema); err != nil {
-				return false, fmt.Errorf("error migrating new table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			c.logger.Debug("need to migrate new table: %s, model version: %s", event.Table, event.ModelVersion)
+			if err := migration.MigrateNewTable(c.ctx, c.logger, newschema); err != nil {
+				return fmt.Errorf("error migrating new table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
 			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
-				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+				return fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
-			logger.Info("migrated new table: %s, model version: %s", event.Table, event.ModelVersion)
-			return true, nil
+			c.logger.Info("migrated new table: %s, model version: %s", event.Table, event.ModelVersion)
+			return nil
 		}
 		oldschema, err := c.registry.GetSchema(event.Table, version)
 		if err != nil {
-			return false, fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
+			return fmt.Errorf("error getting current schema for table: %s, model version: %s: %w", event.Table, version, err)
 		}
 		// figure out which columns are new
 		var columns []string
@@ -309,9 +199,9 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 		}
 		// we only care about if there are new columns
 		if len(columns) > 0 {
-			logger.Debug("need to migrate table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
-			if err := migration.MigrateNewColumns(ctx, logger, newschema, columns); err != nil {
-				return false, fmt.Errorf("error migrating new columns for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+			c.logger.Debug("need to migrate table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
+			if err := migration.MigrateNewColumns(c.ctx, c.logger, newschema, columns); err != nil {
+				return fmt.Errorf("error migrating new columns for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
 			for _, col := range columns {
 				if !util.SliceContains(event.Diff, col) {
@@ -319,399 +209,250 @@ func (c *Consumer) handlePossibleMigration(ctx context.Context, logger logger.Lo
 				}
 			}
 			if err := c.registry.SetTableVersion(event.Table, event.ModelVersion); err != nil {
-				return false, fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
+				return fmt.Errorf("error setting table version for table: %s, model version: %s: %w", event.Table, event.ModelVersion, err)
 			}
-			logger.Info("migrated table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
-			return true, nil
+			c.logger.Info("migrated table: %s, columns: %s, model version: %s", event.Table, strings.Join(columns, ","), event.ModelVersion)
+			return nil
 		} else {
-			logger.Info("new table: %s with different model version: %s but no new columns added", event.Table, event.ModelVersion)
+			c.logger.Info("new table: %s with different model version: %s but no new columns added", event.Table, event.ModelVersion)
 		}
 	}
-	return false, nil
-}
-
-func (c *Consumer) bufferer() {
-	c.logger.Trace("starting bufferer")
-	c.waitGroup.Add(1)
-	defer func() {
-		c.waitGroup.Done()
-		c.logger.Trace("stopped bufferer")
-	}()
-	for {
-		select {
-		case <-c.ctx.Done():
-			c.nackEverything()
-			return
-		case msg := <-c.buffer:
-			if msg == nil {
-				return
-			}
-			m, err := msg.Metadata()
-			if err != nil {
-				internal.PendingEvents.Dec()
-				c.handleError(err)
-				return
-			}
-			log := c.logger.With(map[string]any{
-				"msgId":   msg.Headers().Get(nats.MsgIdHdr),
-				"subject": msg.Subject(),
-				"seq":     m.Sequence.Consumer,
-				"sid":     m.Sequence.Stream,
-			})
-			log.Trace("msg received - deliveries=%d,pending=%d", m.NumDelivered, len(c.pending))
-			c.pending = append(c.pending, msg)
-
-			// check the expected sequence number
-			if m.Sequence.Consumer != c.sequence+1 {
-				internal.PendingEvents.Dec()
-				c.handleError(fmt.Errorf("out of order sequence: %d, expected: %d", m.Sequence.Consumer, c.sequence+1))
-				return
-			}
-			c.sequence = m.Sequence.Consumer
-			evt, err := internal.DBChangeEventFromMessage(msg)
-			if err != nil {
-				internal.PendingEvents.Dec()
-				log.Error("error getting event from message: %s", err)
-				c.handleError(err)
-				return
-			}
-			if c.shouldSkip(log, &evt) {
-				log.Debug("skipping event")
-				if err := msg.Ack(); err != nil {
-					// not much we can do here, just log it
-					log.Error("error acking skipped msg: %s", err)
-				}
-				// remove from pending
-				for i, m := range c.pending {
-					if m == msg {
-						c.pending = append(c.pending[:i], c.pending[i+1:]...)
-						break
-					}
-				}
-				internal.PendingEvents.Dec()
-				continue
-			}
-
-			var forceFlushAfterMigration bool
-
-			// check to see if we need to perform a migration
-			if c.supportsMigration {
-				migrated, err := c.handlePossibleMigration(c.ctx, log, &evt)
-				if err != nil {
-					c.handleError(err)
-					return
-				}
-				forceFlushAfterMigration = migrated
-			}
-
-			// check to see if the schema matches the incoming object
-			if evt.Operation != "DELETE" && c.registry != nil {
-				schema, err := c.registry.GetSchema(evt.Table, evt.ModelVersion)
-				if err != nil {
-					c.handleError(fmt.Errorf("error getting schema for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err))
-					return
-				}
-				object, err := evt.GetObject()
-				if err != nil {
-					c.handleError(fmt.Errorf("error getting object for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err))
-					return
-				}
-				diff := util.JSONDiff(object, schema.Columns())
-				if len(diff) > 0 {
-					if err := evt.OmitProperties(diff...); err != nil {
-						c.handleError(fmt.Errorf("error omitting extra properties: %s properties for table: %s, model version: %s: %w", diff, evt.Table, evt.ModelVersion, err))
-						return
-					}
-				}
-			}
-
-			flush, err := c.driver.Process(log, evt)
-			if err != nil {
-				internal.PendingEvents.Dec()
-				c.handleError(err)
-				return
-			}
-			maxsize := c.max
-			if traceLogNatsProcessDetail {
-				log.Trace("process returned. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
-			}
-			if flush || len(c.pending) >= maxsize || forceFlushAfterMigration {
-				if traceLogNatsProcessDetail {
-					log.Trace("flush 1 called. flush=%v,pending=%d,max=%d", flush, len(c.pending), maxsize)
-				}
-				if c.flush(log) {
-					return
-				}
-				continue
-			}
-			if c.pendingStarted == nil {
-				ts := time.Now()
-				c.pendingStarted = &ts
-			}
-			md, _ := msg.Metadata()
-			if md.NumPending > uint64(c.max) && time.Since(*c.pendingStarted) < c.maxPendingLatency*2 {
-				continue // if we have a large number, just keep going to try and catchup
-			}
-			if len(c.pending) >= c.max || time.Since(*c.pendingStarted) >= c.maxPendingLatency {
-				if traceLogNatsProcessDetail {
-					log.Trace("flush 2 called. flush=%v,pending=%d,max=%d,started=%v", flush, len(c.pending), maxsize, time.Since(*c.pendingStarted))
-				}
-				if c.flush(log) {
-					return
-				}
-				continue
-			}
-		default:
-			count := len(c.pending)
-			if count > 0 && count < c.max && c.pendingStarted != nil && time.Since(*c.pendingStarted) >= c.minPendingLatency {
-				if traceLogNatsProcessDetail {
-					c.logger.Trace("flush 3 called. count=%d,max=%d,started=%v", count, c.max, time.Since(*c.pendingStarted))
-				}
-				if c.flush(c.logger) {
-					return
-				}
-				continue
-			}
-			if count > 0 {
-				continue
-			}
-			select {
-			case <-c.ctx.Done():
-				c.logger.Debug("context done")
-				c.nackEverything()
-				return
-			default:
-				time.Sleep(c.emptyBufferPauseTime)
-			}
-		}
-	}
-}
-
-func (c *Consumer) process(msg jetstream.Msg) {
-	c.logger.Trace("message received from queue: %s", msg.Headers())
-
-	internal.PendingEvents.Inc()
-	internal.TotalEvents.Inc()
-	c.buffer <- msg
-}
-
-type heartbeat struct {
-	SessionId string               `json:"sessionId" msgpack:"sessionId"`
-	Offset    int64                `json:"offset" msgpack:"offset"`
-	Uptime    time.Duration        `json:"uptime" msgpack:"uptime"`
-	Stats     internal.SystemStats `json:"stats" msgpack:"stats"`
-	Paused    *time.Time           `json:"paused,omitempty" msgpack:"paused,omitempty"`
-}
-
-func (c *Consumer) heartbeat() error {
-	stats, err := internal.GetSystemStats()
-	if err != nil {
-		return fmt.Errorf("error getting system stats: %w", err)
-	}
-
-	subject := fmt.Sprintf("eds.client.%s.heartbeat", c.sessionID)
-
-	hb := heartbeat{
-		SessionId: c.sessionID,
-		Stats:     *stats,
-		Uptime:    time.Duration(time.Since(*c.started).Seconds()),
-		Paused:    c.pauseStarted,
-		Offset:    c.offset,
-	}
-
-	c.offset++
-
-	var buffer bytes.Buffer
-	enc := msgpack.NewEncoder(&buffer)
-	enc.SetCustomStructTag("json")
-	if err := enc.Encode(hb); err != nil {
-		return fmt.Errorf("error encoding heartbeat: %w", err)
-	}
-	msg := nats.NewMsg(subject)
-	msgId := util.Hash(time.Now().UnixNano(), c.offset)
-	msg.Header.Set(nats.MsgIdHdr, msgId)
-	msg.Header.Set("content-encoding", "msgpack")
-	msg.Data = buffer.Bytes()
-	if err := c.conn.PublishMsg(msg); err != nil {
-		return err
-	}
-	c.logger.Trace("heartbeat sent %s with: %v", msgId, util.JSONStringify(hb))
 	return nil
 }
 
-// sendHeartbeats sends a heartbeat every minute
-func (c *Consumer) sendHeartbeats() {
-
-	// first heartbeat
-	if err := c.heartbeat(); err != nil {
-		c.logger.Error("error sending heartbeat: %s", err)
+func (c *Client) processPayload(payload []byte) error {
+	evt, err := internal.DBChangeEventFromPayload(payload)
+	if err != nil {
+		return err
 	}
-	// we dont need the WG here since this doesnt need to gracefully complete
-	ticker := time.NewTicker(c.heartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.ctx.Done():
-			c.logger.Debug("context done, stopping heartbeat")
-			return
-		case <-ticker.C:
-			if err := c.heartbeat(); err != nil {
-				c.logger.Error("error sending heartbeat: %s", err)
+	if c.shouldSkip(&evt) {
+		c.logger.Debug("skipping event")
+		return nil
+	}
+
+	// check to see if we need to perform a migration
+	if c.supportsMigration {
+		err := c.handlePossibleMigration(&evt)
+		if err != nil {
+			return err
+		}
+	}
+
+	// check to see if the schema matches the incoming object
+	if evt.Operation != "DELETE" && c.registry != nil {
+		schema, err := c.registry.GetSchema(evt.Table, evt.ModelVersion)
+		if err != nil {
+			return fmt.Errorf("error getting schema for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err)
+		}
+		object, err := evt.GetObject()
+		if err != nil {
+			return fmt.Errorf("error getting object for table: %s, model version: %s: %w", evt.Table, evt.ModelVersion, err)
+		}
+		diff := util.JSONDiff(object, schema.Columns())
+		if len(diff) > 0 {
+			if err := evt.OmitProperties(diff...); err != nil {
+				return fmt.Errorf("error omitting extra properties: %s properties for table: %s, model version: %s: %w", diff, evt.Table, evt.ModelVersion, err)
 			}
 		}
 	}
-}
 
-func (c *Consumer) Name() string {
-	return c.jsconn.CachedInfo().Config.Durable
-}
-
-type CredentialInfo struct {
-	CompanyIDs []string
-	ServerID   string
-	SessionID  string
-}
-
-func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Conn, *CredentialInfo, error) {
-	var natsCredentials nats.Option
-	var info *CredentialInfo
-
-	if creds == "" {
-		info = &CredentialInfo{
-			CompanyIDs: []string{"*"},
-			ServerID:   "dev",
-			SessionID:  uuid.NewString(),
-		}
-		logger.Debug("using localhost nats server")
-	} else {
-		var err error
-		natsCredentials, info, err = getNatsCreds(creds)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials)
+	// ignore flush return value since v4 flushes after every fetch
+	_, err = c.driver.Process(c.logger, evt)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
+		return err
 	}
-
-	return nc, info, nil
+	return nil
 }
 
-func (c *Consumer) Pause() {
-	c.logger.Debug("pausing")
-	c.subscriber.Drain()
-	c.subscriber = nil
-	t := time.Now()
-	c.pauseStarted = &t
+func (c *Client) Pause() {
+	c.paused = true
 	c.logger.Debug("paused")
 }
 
-func (c *Consumer) Unpause() error {
-	if c.subscriber != nil {
-		return fmt.Errorf("consumer already started")
-	}
-	// start consuming messages
-	sub, err := c.jsconn.Consume(
-		c.process,
-		jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, err error) {
-			c.logger.Warn("consumer error: %s", err)
-		}),
-		jetstream.PullExpiry(30*time.Second),
-		jetstream.PullMaxMessages(4_096),
-	)
-	if err != nil {
-		c.conn.Close()
-		return fmt.Errorf("error starting jetstream consumer: %w", err)
-	}
-	c.subscriber = sub
-	c.pauseStarted = nil
-	return nil
+func (c *Client) Unpause() {
+	c.paused = false
+	c.logger.Debug("unpaused")
 }
 
-func (c *Consumer) start() error {
-	if c.subscriber != nil {
-		return fmt.Errorf("consumer already started")
+func (c *Client) signalDisconnected() {
+	select {
+	case <-c.disconnected:
+	default:
+		close(c.disconnected)
+	}
+}
+
+func (c *Client) isPaused() bool {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.paused
+}
+
+func (c *Client) applyControlMessage(resp *transmissionv1.ControlResponse) {
+	switch resp.GetAction() {
+	case ControlActionStart:
+		c.logger.Info("received start from transmission")
+		c.Unpause()
+	case ControlActionPause:
+		c.logger.Info("received pause from transmission")
+		c.Pause()
+	}
+}
+
+func (c *Client) runControl() {
+	defer c.waitGroup.Done()
+
+	stream, err := c.client.Control(c.ctx, &transmissionv1.ControlRequest{EdsId: c.edsID, SessionId: c.sessionID})
+	if err != nil {
+		c.handleError(fmt.Errorf("error opening control stream: %w", err))
+		return
+	}
+	c.logger.Debug("control stream attached")
+	close(c.ready)
+
+	defer close(c.controlChan)
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			if c.ctx.Err() != nil {
+				return
+			}
+			if errors.Is(err, io.EOF) || status.Code(err) == codes.Unavailable {
+				c.logger.Error("control stream interrupted: %s", err)
+				c.signalDisconnected()
+				return
+			}
+			c.handleError(fmt.Errorf("error reading control stream: %w", err))
+			return
+		}
+
+		c.controlChan <- resp
+	}
+}
+
+func (c *Client) runFetch() {
+	defer c.waitGroup.Done()
+
+	select {
+	case <-c.ready:
+	case <-c.ctx.Done():
+		return
 	}
 
-	if err := c.Unpause(); err != nil {
-		return err
+	for c.ctx.Err() == nil {
+		if c.isPaused() || len(c.controlChan) > 0 {
+			if resp, ok := <-c.controlChan; ok {
+				c.applyControlMessage(resp)
+			}
+			continue
+		}
+		c.fetchOnce()
+	}
+}
+
+func (c *Client) fetchOnce() {
+	fetchCtx, cancel := context.WithTimeout(c.ctx, defaultFetchTimeout+extraFetchTimeout+c.fetchTimeout)
+	defer cancel()
+
+	c.logger.Debug("fetching (maxCount=%d timeout=%s)", c.maxCount, c.fetchTimeout)
+
+	stream, err := c.client.Fetch(fetchCtx, &transmissionv1.FetchRequest{
+		EdsId:     c.edsID,
+		MaxCount:  c.maxCount,
+		TimeoutMs: c.fetchTimeout.Milliseconds(),
+	})
+	if err != nil {
+		if c.ctx.Err() != nil {
+			return
+		}
+		c.handleError(fmt.Errorf("error calling fetch: %w", err))
+		return
 	}
 
-	// start the background processor
-	go c.bufferer()
+	received := 0
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			if c.ctx.Err() != nil {
+				return
+			}
+			c.handleError(fmt.Errorf("error receiving fetch response: %w", err))
+			return
+		}
 
-	// start the heartbeat
-	go c.sendHeartbeats()
+		for _, msg := range resp.GetMessages() {
+			if err := c.processPayload(msg.GetPayload()); err != nil {
+				c.handleError(err)
+				return
+			}
+			received++
+		}
+	}
 
+	if received > 0 {
+		if err := c.driver.Flush(c.logger); err != nil {
+			c.handleError(fmt.Errorf("error flushing driver: %w", err))
+			return
+		}
+	}
+
+	c.logger.Debug("fetch completed (messages=%d)", received)
+}
+
+func (c *Client) start() error {
+	c.controlChan = make(chan *transmissionv1.ControlResponse, 16)
+	c.waitGroup.Add(2)
+	go c.runControl()
+	go c.runFetch()
 	c.logger.Debug("started")
 	return nil
 }
 
 // CreateConsumer creates a new nats consumer, but does not start it.
-func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
-	nc, info, err := NewNatsConnection(config.Logger, config.URL, config.Credentials)
-	if err != nil {
-		return nil, err
-	}
-
-	// for unit testing only
-	if config.sessionIDCallback != nil {
-		config.sessionIDCallback(info.SessionID)
-	}
-
+func CreateClient(config ClientConfig) (*Client, error) {
 	ctx, cancel := context.WithCancel(config.Context)
 
-	if config.MaxAckPending <= 0 {
-		config.MaxAckPending = 25_000
+	var credentials credentials.TransportCredentials
+	if config.Credentials == "" {
+		config.Logger.Warn("no credentials provided for NATS connection")
+		credentials = insecure.NewCredentials()
+	}
+
+	conn, err := grpc.NewClient(config.Address, grpc.WithTransportCredentials(credentials))
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("error dialing transmission at %s: %w", config.Address, err)
+	}
+
+	client := &Client{
+		ctx:             ctx,
+		cancel:          cancel,
+		logger:          config.Logger.WithPrefix("[client]"),
+		edsID:           config.EdsID,
+		sessionID:       config.SessionID,
+		driver:          config.Driver,
+		registry:        config.Registry,
+		validator:       config.SchemaValidator,
+		tableTimestamps: config.ExportTableTimestamps,
+		maxCount:        defaultMaxCount,
+		fetchTimeout:    defaultFetchTimeout,
+		conn:            conn,
+		client:          transmissionv1.NewTransmissionServiceClient(conn),
+		errCh:           make(chan error, 1),
+		disconnected:    make(chan bool),
+		ready:           make(chan struct{}),
+	}
+
+	if _, ok := config.Driver.(internal.DriverMigration); ok {
+		client.supportsMigration = true
 	}
 
 	var startAt *time.Time
-	var consumer Consumer
-	started := time.Now()
-	consumer.logger = config.Logger.WithPrefix("[consumer]")
-	consumer.started = &started
-	consumer.ctx = ctx
-	consumer.cancel = cancel
-	consumer.conn = nc
-	consumer.driver = config.Driver
-	consumer.max = config.MaxAckPending
-	if consumer.driver != nil {
-		driverMaxSize := consumer.driver.MaxBatchSize()
-		if driverMaxSize > 0 && driverMaxSize < consumer.max {
-			consumer.max = driverMaxSize
-		}
-	}
-	consumer.buffer = make(chan jetstream.Msg, config.MaxAckPending)
-	consumer.pending = make([]jetstream.Msg, 0)
-	consumer.subError = make(chan error, 10)
-	consumer.sessionID = info.SessionID
-	consumer.validator = config.SchemaValidator
-	consumer.registry = config.Registry
-	if _, ok := config.Driver.(internal.DriverMigration); ok {
-		consumer.supportsMigration = true
-	}
-	consumer.heartbeatInterval = config.HeartbeatInterval
-	if consumer.heartbeatInterval == 0 {
-		consumer.heartbeatInterval = time.Minute
-	}
-	consumer.minPendingLatency = config.MinPendingLatency
-	if consumer.minPendingLatency == 0 {
-		consumer.minPendingLatency = DefaultMinPendingLatency
-	}
-	consumer.maxPendingLatency = config.MaxPendingLatency
-	if consumer.maxPendingLatency == 0 {
-		consumer.maxPendingLatency = DefaultMaxPendingLatency
-	}
-	consumer.emptyBufferPauseTime = config.EmptyBufferPauseTime
-	if consumer.emptyBufferPauseTime == 0 {
-		consumer.emptyBufferPauseTime = defaultEmptyBufferPauseTime
-	}
-
 	if config.ExportTableTimestamps != nil {
-		consumer.tableTimestamps = config.ExportTableTimestamps
+		client.tableTimestamps = config.ExportTableTimestamps
 		// get the earliest timestamp
 		for _, ts := range config.ExportTableTimestamps {
 			if ts != nil && (startAt == nil || ts.Before(*startAt)) {
@@ -720,189 +461,35 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		}
 	}
 
-	if consumer.supportsMigration {
-		if err := internal.UpdateDestinationSchema(ctx, consumer.logger, consumer.registry, config.Driver.(internal.DriverMigration)); err != nil {
+	// TODO: Figure out how to send the start time to the transmission consumer
+
+	if client.supportsMigration {
+		if err := internal.UpdateDestinationSchema(ctx, client.logger, client.registry, config.Driver.(internal.DriverMigration)); err != nil {
 			return nil, fmt.Errorf("error updating destination schema: %w", err)
 		}
 	}
 
-	// set company ID overrides
-	if len(config.CompanyIDs) > 0 {
-		var newCompanyIDs []string
-		for _, companyID := range config.CompanyIDs {
-			if !util.SliceContains(info.CompanyIDs, companyID) {
-				return nil, fmt.Errorf("provided company ID %s not in credentials", companyID)
-			}
-			newCompanyIDs = append(newCompanyIDs, companyID)
-		}
-		if len(newCompanyIDs) == 0 {
-			return nil, fmt.Errorf("no valid company IDs provided")
-		}
-		info.CompanyIDs = newCompanyIDs
-		consumer.logger.Debug("using override company IDs: %v", newCompanyIDs)
-	}
-
 	if config.Driver != nil {
 		if p, ok := config.Driver.(internal.DriverSessionHandler); ok {
-			p.SetSessionID(consumer.sessionID)
+			p.SetSessionID(client.sessionID)
 		}
 	} else {
 		config.Logger.Debug("no driver set")
 	}
 
-	natsLogger := config.Logger.WithPrefix("[nats]")
-	js, err := jetstream.New(nc,
-		jetstream.WithClientTrace(
-			&jetstream.ClientTrace{
-				RequestSent: func(subj string, payload []byte) {
-					natsLogger.Trace("tx: %s: %s", subj, string(payload))
-				},
-				ResponseReceived: func(subj string, payload []byte, hdr nats.Header) {
-					natsLogger.Trace("rx: %s: %s", subj, string(payload))
-				},
-			},
-		),
-	)
-	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("error creating jetstream connection: %w", err)
-	}
+	client.disconnected = make(chan bool, 1)
 
-	consumer.logger.Info("using info from credentials, server: %s companies: %s, session: %s", info.ServerID, info.CompanyIDs, info.SessionID)
-
-	var suffix string
-	if config.Suffix != "" {
-		suffix = "-" + config.Suffix
-	}
-	name := fmt.Sprintf("eds-%s%s", info.ServerID, suffix)
-	var subjects []string
-	for _, companyID := range info.CompanyIDs {
-		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
-		subjects = append(subjects, subject)
-	}
-
-	jsConfig := jetstream.ConsumerConfig{
-		Durable:           name,
-		MaxAckPending:     consumer.max,
-		MaxDeliver:        20,
-		AckWait:           time.Minute * 5,
-		MaxRequestBatch:   config.MaxPendingBuffer,
-		FilterSubjects:    subjects,
-		AckPolicy:         jetstream.AckExplicitPolicy,
-		InactiveThreshold: time.Hour * 24 * 3, // expire if unused 3 days from first creating
-		MaxWaiting:        1,                  // only 1 consumer allowed
-	}
-
-	// create a context with a longer deadline for creating the consumer
-	configConsumerCtx, cancelConfig := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
-	defer cancelConfig()
-
-	// setup the consumer
-	c, err := js.Consumer(configConsumerCtx, "dbchange", jsConfig.Durable)
-	if err != nil {
-		if !errors.Is(err, jetstream.ErrConsumerNotFound) {
-			nc.Close()
-			return nil, fmt.Errorf("error getting jetstream consumer: %w", err)
-		}
-		// consumer not found, create it
-
-		// only set the deliver policy if we are creating a new consumer, it will error if we try to update it
-		if config.DeliverAll {
-			jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
-		} else if startAt != nil {
-			jsConfig.DeliverPolicy = jetstream.DeliverByStartTimePolicy
-			jsConfig.OptStartTime = startAt
-		} else {
-			jsConfig.DeliverPolicy = jetstream.DeliverNewPolicy
-			consumer.logger.Warn("no import timestamp found, starting data stream from now")
-		}
-
-		c, err = js.CreateConsumer(configConsumerCtx, "dbchange", jsConfig)
-		if err != nil {
-			nc.Close()
-			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
-		}
-	} else {
-		preUpdateInfo, err := c.Info(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("error getting consumer info: %w", err)
-		}
-
-		jsConfig.DeliverPolicy = preUpdateInfo.Config.DeliverPolicy
-		jsConfig.OptStartTime = preUpdateInfo.Config.OptStartTime
-		jsConfig.MaxWaiting = preUpdateInfo.Config.MaxWaiting
-		consumer.logger.Debug("consumer found, setting delivery policy to %v and start time to %v", jsConfig.DeliverPolicy, jsConfig.OptStartTime)
-
-		// consumer found, update it
-		// TODO: we should check if the consumer is already in the correct state and skip this
-		c, err = js.UpdateConsumer(configConsumerCtx, "dbchange", jsConfig)
-		if err != nil {
-			nc.Close()
-			return nil, fmt.Errorf("error updating jetstream consumer: %w", err)
-		}
-	}
-	cancelConfig()
-
-	ci, err := c.Info(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error getting consumer info: %w", err)
-	}
-
-	if ci.NumWaiting > 0 {
-		return nil, ErrConsumerAlreadyRunning
-	}
-
-	consumer.logger.Debug("number of waiting consumers: %d, number of messages pending: %d, consumer ack floor: %d, consumer seq: %d", ci.NumWaiting, ci.NumPending, ci.AckFloor.Consumer, ci.Delivered.Consumer)
-
-	consumer.sequence = ci.Delivered.Consumer
-	consumer.jsconn = c
-	consumer.disconnected = make(chan bool, 1)
-
-	connectedURL := nc.ConnectedUrlRedacted()
-
-	nc.SetClosedHandler(func(nc *nats.Conn) {
-		if !consumer.isStopping() {
-			consumer.logger.Info("nats closed: %s", connectedURL)
-			select {
-			case consumer.disconnected <- true:
-			default:
-			}
-			consumer.Stop()
-		}
-	})
-
-	nc.SetReconnectHandler(func(nc *nats.Conn) {
-		consumer.logger.Info("nats reconnect: %s", connectedURL)
-	})
-
-	nc.SetDisconnectErrHandler(func(nc *nats.Conn, err error) {
-		if !consumer.isStopping() {
-			if err != nil {
-				consumer.logger.Error("nats disconnected: %s %s", connectedURL, err)
-			} else {
-				consumer.logger.Error("nats disconnected: %s", connectedURL)
-			}
-			select {
-			case consumer.disconnected <- true:
-			default:
-			}
-			consumer.Stop()
-		}
-	})
-
-	consumer.logger.Info("nats connected: %s", connectedURL)
-
-	return &consumer, nil
+	return client, nil
 }
 
 // NewConsumer creates and starts a new nats consumer
-func NewConsumer(config ConsumerConfig) (*Consumer, error) {
-	consumer, err := CreateConsumer(config)
+func NewClient(config ClientConfig) (*Client, error) {
+	client, err := CreateClient(config)
 	if err != nil {
 		return nil, err
 	}
-	if err := consumer.start(); err != nil {
+	if err := client.start(); err != nil {
 		return nil, err
 	}
-	return consumer, nil
+	return client, nil
 }

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -22,7 +23,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/api"
-	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/notification"
 	"github.com/shopmonkeyus/eds/internal/upgrade"
 	"github.com/shopmonkeyus/eds/internal/util"
@@ -52,7 +52,7 @@ func writeCredsToFile(data string, filename string) error {
 
 var errAlreadyRunning = errors.New("already running")
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string, companyIds []string) (*api.EdsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*api.EdsSession, error) {
 	var body api.SessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -76,7 +76,6 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Version = Version
 	body.OsInfo = osinfo
 	body.ServerID = edsServerId
-	body.CompanyIDs = companyIds
 	body.UseTransmission = true
 
 	if driverUrl != "" {
@@ -539,10 +538,6 @@ var serverCmd = &cobra.Command{
 		}()
 
 		port := mustFlagInt(cmd, "port", true)
-		oldHealthPort := mustFlagInt(cmd, "health-port", false)
-		if oldHealthPort > 0 {
-			port = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
-		}
 		parentPort := mustFlagInt(cmd, "parent", true)
 
 		_args := collectCommandArgs()
@@ -965,53 +960,44 @@ var serverCmd = &cobra.Command{
 			}
 		}()
 
-		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
-
 		// main loop
 		var failures int
 		for {
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId, companyIds)
+			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
 			if err != nil {
 				if errors.Is(err, errAlreadyRunning) {
 					logger.Info("another eds server is already running for this server (id: %s). Retrying in 5 seconds", edsServerId)
 					time.Sleep(time.Second * 5)
 					continue
 				}
-				logger.Fatal("failed to send session start: %s", err)
+				errorType := reflect.TypeOf(err)
+
+				logger.Fatal("failed to send session start: %s, error type: %s", err, errorType.String())
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
-			transmissionAddress := ""
-			if session.Transmission != nil && session.Transmission.Address != "" {
-				transmissionAddress = session.Transmission.Address
-				logger.Info("transmission connection acquired: address=%s", transmissionAddress)
-			} else {
-				logger.Info("transmission connection not acquired")
-			}
+			transmissionAddress := session.Transmission.Address
 			sessionDir = filepath.Join(dataDir, sessionId)
 			if err := os.MkdirAll(sessionDir, 0700); err != nil {
 				logger.Fatal("failed to create session directory: %s", err)
 			}
 			if session.Credential == nil {
-				logger.Fatal("no credential found in session")
-			}
-			// write credential to file
-			credsFile = filepath.Join(sessionDir, "nats.creds")
-			if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
-				logger.Fatal("failed to write creds to file: %s", err)
-			}
-			logger.Trace("creds written to %s", credsFile)
-			if err := notificationConsumer.Start(credsFile); err != nil {
-				if strings.Contains(err.Error(), "error connecting to NATS") {
-					logger.Trace("error from nats: %s", err)
-					logger.Trace("nats not available, retrying in 5 seconds")
-					time.Sleep(time.Second * 5)
-					continue
+				logger.Debug("no NATS credential found in transmission session")
+			} else {
+				// write credential to file
+				credsFile = filepath.Join(sessionDir, "nats.creds")
+				if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
+					logger.Fatal("failed to write creds to file: %s", err)
 				}
+				logger.Trace("creds written to %s", credsFile)
 			}
+			if err := notificationConsumer.Start(credsFile, sessionId); err != nil {
+				logger.Fatal("failed to start notification consumer: %s", err)
+			}
+
 			if !configured {
 				logger.Info("Return to HQ and continue with configuring your server.")
 				select {
@@ -1030,14 +1016,10 @@ var serverCmd = &cobra.Command{
 				"--logs-dir", sessionLogsDir,
 				"--url", driverURL,
 				"--server", natsurl,
+				"--transmission-address", transmissionAddress,
+				"--eds-id", edsServerId,
+				"--session-id", sessionId,
 			)
-			if transmissionAddress != "" {
-				args = append(args,
-					"--transmission-address", transmissionAddress,
-					"--eds-id", edsServerId,
-					"--session-id", sessionId,
-				)
-			}
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
 				Command:          "fork",
@@ -1076,7 +1058,7 @@ var serverCmd = &cobra.Command{
 						}
 					}
 				}
-				if ec == exitCodeNatsDisconnected {
+				if ec == exitCodeDisconnected {
 					logger.Info("nats disconnected, retrying in 5 seconds")
 					time.Sleep(time.Second * 5)
 					continue
@@ -1185,32 +1167,14 @@ func init() {
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
 	serverCmd.Flags().String("eds-id", "", "the EDS server ID")
 	viper.BindPFlag("server_id", serverCmd.Flags().Lookup("eds-id"))
-	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
-	serverCmd.Flags().MarkHidden("companyIds") // not intended for production use
 	serverCmd.Flags().Bool("keep-logs", false, "keep logs after the server exits instead of deleting them")
 	viper.BindPFlag("keep_logs", serverCmd.Flags().Lookup("keep-logs"))
-
-	// deprecated but left for backwards compatibility
-	serverCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
-	serverCmd.Flags().MarkDeprecated("health-port", "use --port instead")
 
 	// internal use only
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().MarkHidden("api-url")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().MarkHidden("server")
-	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
-	serverCmd.Flags().MarkHidden("consumer-suffix")
-	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
-	serverCmd.Flags().MarkHidden("maxAckPending")
-	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
-	serverCmd.Flags().MarkHidden("maxPendingBuffer")
-	serverCmd.Flags().Duration("minPendingLatency", consumer.DefaultMinPendingLatency, "the minimum accumulation period before flushing (0 uses default)")
-	serverCmd.Flags().MarkHidden("minPendingLatency")
-	serverCmd.Flags().Duration("maxPendingLatency", consumer.DefaultMaxPendingLatency, "the maximum accumulation period before flushing (0 uses default)")
-	serverCmd.Flags().MarkHidden("maxPendingLatency")
-	serverCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
-	serverCmd.Flags().MarkHidden("restart")
 	serverCmd.Flags().Duration("renew-interval", time.Hour*24, "the interval to renew the session")
 	serverCmd.Flags().MarkHidden("renew-interval")
 	serverCmd.Flags().Bool("wrapper", false, "running in wrapper mode")

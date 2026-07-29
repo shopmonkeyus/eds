@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,13 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/registry"
 	"github.com/shopmonkeyus/eds/internal/tracker"
-	"github.com/shopmonkeyus/eds/internal/transmission"
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/logger"
 	"github.com/shopmonkeyus/go-common/sys"
@@ -28,19 +25,10 @@ const (
 	defaultMaxAckPending    = 25_000 // this is currently our system max
 	defaultMaxPendingBuffer = 4_096  // maximum number of messages to pull from nats to buffer
 
-	exitCodeIncorrectUsage   = 3
-	exitCodeRestart          = 4
-	exitCodeNatsDisconnected = 5
+	exitCodeIncorrectUsage = 3
+	exitCodeRestart        = 4
+	exitCodeDisconnected   = 5
 )
-
-// messageSource is the shared control surface for NATS and Transmission ingest.
-type messageSource interface {
-	Stop() error
-	Pause()
-	Unpause() error
-	Error() <-chan error
-	Disconnected() <-chan bool
-}
 
 func runHealthCheckServerFork(logger logger.Logger, port int) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +53,6 @@ var forkCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		logger := newLogger(cmd)
-		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
 		datadir := mustFlagString(cmd, "data-dir", true)
 		logDir := mustFlagString(cmd, "logs-dir", true)
 		sink, err := newLogFileSink(logDir)
@@ -79,16 +66,15 @@ var forkCmd = &cobra.Command{
 
 		defer util.RecoverPanic(logger)
 
-		natsurl := mustFlagString(cmd, "server", true)
+		// natsurl := mustFlagString(cmd, "server", true)
 		url := mustFlagString(cmd, "url", true)
-		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
-		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
-		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
-		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
-		minPendingLatency, _ := cmd.Flags().GetDuration("minPendingLatency")
-		maxPendingLatency, _ := cmd.Flags().GetDuration("maxPendingLatency")
+		// creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
 		port := mustFlagInt(cmd, "port", false)
 		transmissionAddress, _ := cmd.Flags().GetString("transmission-address")
+
+		// TODO: get Transmission creds from backend
+		transmissionCreds := ""
+
 		edsID, _ := cmd.Flags().GetString("eds-id")
 		sessionID, _ := cmd.Flags().GetString("session-id")
 
@@ -145,9 +131,6 @@ var forkCmd = &cobra.Command{
 		var wg sync.WaitGroup
 		wg.Add(1)
 
-		restartFlag, _ := cmd.Flags().GetBool("restart")
-		useTransmission := transmissionAddress != ""
-
 		// the ability to control the process from HTTP control channel
 		pauseCh := make(chan bool)
 		http.HandleFunc("/control/pause", func(w http.ResponseWriter, r *http.Request) {
@@ -186,80 +169,46 @@ var forkCmd = &cobra.Command{
 			}()
 			var completed bool
 			var paused bool
-			var source messageSource
+			var client *consumer.Client
 			var err error
 			for !completed {
-				if !paused && source == nil {
-					if useTransmission {
-						source, err = transmission.NewClient(transmission.Config{
-							Context:               ctx,
-							Logger:                logger,
-							Address:               transmissionAddress,
-							EdsID:                 edsID,
-							SessionID:             sessionID,
-							Driver:                driver,
-							ExportTableTimestamps: exportTableTimestamps,
-							SchemaValidator:       validator,
-							Registry:              schemaRegistry,
-						})
-						if err != nil {
-							logger.Error("error creating transmission client: %s", err)
-							os.Exit(1)
-						}
-						logger.Info("using transmission poller at %s (every %s)", transmissionAddress, transmission.DefaultFetchInterval)
-					} else {
-						source, err = consumer.NewConsumer(consumer.ConsumerConfig{
-							Context:               ctx,
-							Logger:                logger,
-							URL:                   natsurl,
-							Credentials:           creds,
-							Suffix:                consumerSuffix,
-							MaxAckPending:         maxAckPending,
-							MaxPendingBuffer:      maxPendingBuffer,
-							Driver:                driver,
-							ExportTableTimestamps: exportTableTimestamps,
-							DeliverAll:            restartFlag,
-							SchemaValidator:       validator,
-							CompanyIDs:            companyIds,
-							Registry:              schemaRegistry,
-							MinPendingLatency:     minPendingLatency,
-							MaxPendingLatency:     maxPendingLatency,
-						})
-						if err != nil {
-							logger.Error("error creating consumer: %s", err)
-							os.Exit(1)
-						}
+				if !paused {
+					client, err = consumer.NewClient(consumer.ClientConfig{
+						Context:               ctx,
+						Logger:                logger,
+						Address:               transmissionAddress,
+						EdsID:                 edsID,
+						SessionID:             sessionID,
+						Driver:                driver,
+						ExportTableTimestamps: exportTableTimestamps,
+						SchemaValidator:       validator,
+						Registry:              schemaRegistry,
+						Credentials:           transmissionCreds,
+					})
+					if err != nil {
+						logger.Error("error creating transmission client: %s", err)
+						os.Exit(1)
 					}
-					if source != nil {
-						go func(src messageSource) {
+
+					if client != nil {
+						go func(src *consumer.Client) {
 							select {
 							case <-src.Disconnected():
-								if useTransmission {
-									logger.Warn("transmission disconnected")
-								} else {
-									logger.Warn("nats server disconnected")
-								}
-								os.Exit(exitCodeNatsDisconnected)
+								logger.Warn("transmission disconnected")
+								os.Exit(exitCodeDisconnected)
 							case <-ctx.Done():
 								return
 							}
-						}(source)
+						}(client)
 					}
 				}
 				select {
 				case <-ctx.Done():
 					completed = true
-					if source != nil {
-						source.Stop()
-						source = nil
-					}
-				case err := <-source.Error():
-					if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) {
-						logger.Warn("nats server / consumer needs reconnection: %s", err)
-					} else {
-						logger.Error("error from message source: %s", err)
-					}
-					if err := source.Stop(); err != nil {
+					client.Stop()
+				case err := <-client.Error():
+					logger.Error("error from message source: %s", err)
+					if err := client.Stop(); err != nil {
 						logger.Error("error stopping message source: %s", err)
 					}
 					exitCode = 1
@@ -274,25 +223,22 @@ var forkCmd = &cobra.Command{
 						logger.Debug("shutting down")
 						completed = true
 					}
-					if err := source.Stop(); err != nil {
+					if err := client.Stop(); err != nil {
 						logger.Error("error stopping message source: %s", err)
 					}
-					source = nil
+					client = nil
 				case pause := <-pauseCh:
 					if pause {
 						if !paused {
 							paused = true
 							logger.Debug("pausing")
-							source.Pause()
+							client.Pause()
 						}
 					} else {
 						if paused {
 							logger.Debug("unpausing")
 							paused = false
-							if err := source.Unpause(); err != nil {
-								logger.Error("error unpausing: %s", err)
-								return
-							}
+							client.Unpause()
 						}
 					}
 				}
@@ -328,23 +274,13 @@ func init() {
 	forkCmd.Flags().String("logs-dir", "", "the directory for storing logs")
 	forkCmd.Flags().String("creds", "", "the server credentials file provided by Shopmonkey")
 	forkCmd.Flags().String("url", "", "driver connection string")
-	// Deprecated: update-strategy implementation has been removed (Snowflake always uses MERGE). Flag kept for backward compatibility; value is ignored.
-	forkCmd.Flags().String("update-strategy", "", "the update strategy to use (deprecated: implementation removed, value ignored)")
-	forkCmd.Flags().MarkDeprecated("update-strategy", "the update-strategy implementation has been removed; this flag is ignored")
 	forkCmd.Flags().String("api-url", "", "url to shopmonkey api")
-	forkCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
-	forkCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
-	forkCmd.Flags().Duration("minPendingLatency", 0, "the minimum accumulation period before flushing (0 uses default)")
-	forkCmd.Flags().Duration("maxPendingLatency", 0, "the maximum accumulation period before flushing (0 uses default)")
-	forkCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
-	forkCmd.Flags().String("transmission-address", "", "gRPC address for transmission (when set, polls Fetch instead of NATS)")
+	forkCmd.Flags().String("transmission-address", "", "gRPC address for transmission")
 	forkCmd.Flags().String("eds-id", "", "the EDS server ID used with transmission")
 	forkCmd.Flags().String("session-id", "", "the session ID used with transmission")
 
 	// NOTE: sync these with serverCmd
 	// these flags are passed through from the server
 	forkCmd.Flags().Int("port", 0, "the port to listen for health checks and metrics")
-	forkCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple")
-	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 }

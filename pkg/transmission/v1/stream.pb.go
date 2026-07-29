@@ -261,6 +261,7 @@ func (*LogResponse) Descriptor() ([]byte, []int) {
 type ControlRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EdsId         string                 `protobuf:"bytes,1,opt,name=eds_id,json=edsId,proto3" json:"eds_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -298,6 +299,13 @@ func (*ControlRequest) Descriptor() ([]byte, []int) {
 func (x *ControlRequest) GetEdsId() string {
 	if x != nil {
 		return x.EdsId
+	}
+	return ""
+}
+
+func (x *ControlRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
 	}
 	return ""
 }
@@ -372,9 +380,11 @@ const file_shopmonkey_transmission_v1_stream_proto_rawDesc = "" +
 	"LogRequest\x12\x12\n" +
 	"\x04json\x18\x01 \x01(\fR\x04json\x12\x15\n" +
 	"\x06eds_id\x18\x02 \x01(\tR\x05edsId\"\r\n" +
-	"\vLogResponse\"'\n" +
+	"\vLogResponse\"F\n" +
 	"\x0eControlRequest\x12\x15\n" +
-	"\x06eds_id\x18\x01 \x01(\tR\x05edsId\"\\\n" +
+	"\x06eds_id\x18\x01 \x01(\tR\x05edsId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\"\\\n" +
 	"\x0fControlResponse\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x121\n" +
 	"\apayload\x18\x02 \x01(\v2\x17.google.protobuf.StructR\apayload2\xb3\x02\n" +
