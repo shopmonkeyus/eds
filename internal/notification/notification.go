@@ -1,16 +1,20 @@
 package notification
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 
-	"github.com/google/uuid"
-	"github.com/nats-io/nats.go"
 	"github.com/shopmonkeyus/eds/internal"
-	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/util"
+	transmissionv1 "github.com/shopmonkeyus/eds/pkg/transmission/v1"
 	"github.com/shopmonkeyus/go-common/logger"
-	"github.com/vmihailenco/msgpack/v5"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // NotificationHandler is an interface that is used to handle notification callbacks.
@@ -133,103 +137,153 @@ func (n *Notification) String() string {
 }
 
 type NotificationConsumer struct {
-	nc        *nats.Conn
-	sub       *nats.Subscription
-	logger    logger.Logger
-	natsurl   string
-	handler   NotificationHandler
-	wg        sync.WaitGroup
-	sessionID string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	gRPCAddress    string
+	gRPCConnection *grpc.ClientConn
+	logger         logger.Logger
+	handler        NotificationHandler
+	wg             sync.WaitGroup
+	edsID          string
+	sessionID      string
+	client         transmissionv1.TransmissionServiceClient
 }
 
 // New will create a new NotificationConsumer.
-func New(logger logger.Logger, natsurl string, handler NotificationHandler) *NotificationConsumer {
+func New(logger logger.Logger, gRPCAddress string, handler NotificationHandler) *NotificationConsumer {
 	return &NotificationConsumer{
-		logger:  logger.WithPrefix("[notification]"),
-		natsurl: natsurl,
-		handler: handler,
+		logger:      logger.WithPrefix("[notification]"),
+		gRPCAddress: gRPCAddress,
+		handler:     handler,
 	}
 }
 
 // Start will start the consumer.
-func (c *NotificationConsumer) Start(credsFile string, sessionID string) error {
-	var err error
-	var info *consumer.CredentialInfo
-	c.nc, info, err = consumer.NewNatsConnection(c.logger, c.natsurl, credsFile)
+func (c *NotificationConsumer) Start(ctx context.Context, conn *grpc.ClientConn, sessionID string, edsID string) error {
+	c.ctx, c.cancel = context.WithCancel(ctx)
+	c.sessionID = sessionID
+	c.edsID = edsID
+	c.client = transmissionv1.NewTransmissionServiceClient(conn)
+	stream, err := c.client.Control(c.ctx)
 	if err != nil {
-		return fmt.Errorf("failed to create nats connection: %w", err)
+		return fmt.Errorf("error opening control stream: %w", err)
 	}
-	info.SessionID = sessionID // TODO: remove when we finish switching to gRPC control stream
-	c.logger.Debug("connected to nats: %s", info.SessionID)
-	subject := fmt.Sprintf("eds.notify.%s.>", info.SessionID)
-	c.sub, err = c.nc.Subscribe(subject, c.callback)
+	if err := stream.Send(&transmissionv1.ControlRequest{EdsId: edsID, SessionId: sessionID}); err != nil {
+		return fmt.Errorf("error sending control request: %w", err)
+	}
+	c.logger.Debug("control stream attached")
+
+	c.client.Log(c.ctx, &transmissionv1.LogRequest{
+		EdsId: edsID,
+		Json:  []byte(util.JSONStringify(map[string]any{"message": "test", "severity": "info"})),
+	})
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to eds.notify: %w", err)
+		return fmt.Errorf("error sending log: %w", err)
 	}
-	c.logger.Debug("subscribed to: %s", subject)
-	c.sessionID = info.SessionID
+	c.logger.Debug("log sent")
+
+	c.wg.Add(1)
+	go c.runControl(stream, c.callback)
+
 	return nil
 }
 
 // Stop will stop the consumer.
 func (c *NotificationConsumer) Stop() {
-	if c.sub != nil {
-		if err := c.sub.Unsubscribe(); err != nil {
-			c.logger.Error("failed to unsubscribe from nats: %s", err)
-		}
-		c.sub = nil
-	}
-	if c.nc != nil {
-		c.nc.Close()
-		c.nc = nil
-	}
+	c.logger.Debug("stopping notification handler")
+	c.cancel()
 	c.wg.Wait()
-	c.logger.Debug("stopped")
+	c.logger.Debug("notification handler stopped")
 }
 
-// Restart will stop the consumer and start it again.
-func (c *NotificationConsumer) Restart(credsFile string, sessionID string) error {
-	c.Stop()
-	return c.Start(credsFile, sessionID)
+func (c *NotificationConsumer) runControl(
+	stream transmissionv1.TransmissionService_ControlClient,
+	controlCallback func(*transmissionv1.ControlResponse) (string, *transmissionv1.ControlRequest),
+) {
+	defer c.wg.Done()
+
+	for {
+		if c.ctx.Err() != nil {
+			return
+		}
+		resp, err := stream.Recv()
+		if err != nil {
+			if status.Code(err) == codes.Canceled {
+				return
+			}
+			c.logger.Error("error receiving command: %s", err)
+			// TODO: figure out how/where we handle the reconnect behavior
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		_, commandReply := controlCallback(resp)
+		if commandReply != nil {
+			if err := stream.Send(commandReply); err != nil {
+				c.logger.Error("error sending command reply: %s", err)
+			}
+		}
+	}
 }
 
-func (c *NotificationConsumer) publishResponse(sessionId string, action string, v any) error {
-	return c.publish(sessionId, action, "response", v)
-}
-
-func (c *NotificationConsumer) publishStatus(sessionId string, action string, v any) error {
-	return c.publish(sessionId, action, "status", v)
-}
-
-func (c *NotificationConsumer) publish(sessionId string, action string, actionMod string, v any) error {
-	data, err := msgpack.Marshal(v)
+func goStructToStructpb(v any) (*structpb.Struct, error) {
+	var payload structpb.Struct
+	err := protojson.Unmarshal([]byte(util.JSONStringify(v)), &payload)
 	if err != nil {
-		return fmt.Errorf("error marshaling response: %w", err)
+		return nil, fmt.Errorf("error converting struct to protobuf: %w", err)
 	}
-	msg := nats.NewMsg(fmt.Sprintf("eds.client.%s.%s-%s", sessionId, action, actionMod))
-	msg.Data = data
-	msg.Header.Add(nats.MsgIdHdr, uuid.NewString())
-	msg.Header.Add("content-encoding", "msgpack")
-	c.logger.Trace("sending response: %s", msg.Subject)
-	if err := c.nc.PublishMsg(msg); err != nil {
-		return fmt.Errorf("error sending response: %w", err)
+
+	return &payload, nil
+}
+
+func (c *NotificationConsumer) publishResponse(action string, v any) *transmissionv1.ControlRequest {
+	payload, err := goStructToStructpb(v)
+	if err != nil {
+		c.logger.Error("error converting response to protobuf: %s", err)
+		return nil
 	}
-	return nil
+	return &transmissionv1.ControlRequest{
+		SessionId: c.sessionID,
+		Payload:   payload,
+	}
 }
 
 func (c *NotificationConsumer) publishSimpleStatus(action string, errMsg string) {
-	if err := c.publishStatus(c.sessionID, action, genericResponse{
+	r := genericResponse{
 		Success:   errMsg == "",
 		Message:   &errMsg,
 		SessionID: c.sessionID,
 		Action:    action,
-	}); err != nil {
+	}
+	payload, err := goStructToStructpb(r)
+	if err != nil {
+		c.logger.Error("error converting generic response to protobuf: %s", err)
+		return
+	}
+	_, err = c.client.Status(c.ctx, &transmissionv1.StatusRequest{
+		SessionId: c.sessionID,
+		Action:    action,
+		Payload:   payload,
+	})
+	if err != nil {
 		c.logger.Error("failed to send %s status: %s", action, err)
 	}
 }
 
-func (c *NotificationConsumer) PublishSendLogsResponse(response *SendLogsResponse) error {
-	return c.publishResponse(response.SessionID, "sendlogs", response)
+// Need to notify Depot to ingest logs into the monitoring CH database whenever logs
+// are uploaded via the backend API. The code for this is very messy and logs are uploaded
+// in lots of different places, e.g. on an import failure or shutdown. We are wantint
+// to remove the Depot ingestion of logs and log over Transmission (working name for
+// the EDSv4 backend servie) instead
+func (c *NotificationConsumer) PublishSendLogsResponse(logPath string) error {
+	if _, err := c.client.SendLogs(c.ctx, &transmissionv1.SendLogsRequest{
+		EdsId:     c.edsID,
+		SessionId: c.sessionID,
+		Path:      logPath,
+	}); err != nil {
+		return fmt.Errorf("failed to send import logs: %w", err)
+	}
+	return nil
 }
 
 func (c *NotificationConsumer) CallSendLogs() {
@@ -238,42 +292,38 @@ func (c *NotificationConsumer) CallSendLogs() {
 		c.logger.Warn("sendlogs handler returned nothing")
 		return
 	}
-	if err := c.PublishSendLogsResponse(response); err != nil {
+	if err := c.PublishSendLogsResponse(response.Path); err != nil {
 		c.logger.Error("failed to send sendlogs response: %s", err)
 	}
 }
 
-func (c *NotificationConsumer) configure(config ConfigureRequest, m *nats.Msg) {
+func (c *NotificationConsumer) configure(config ConfigureRequest) *ConfigureResponse {
 	response := c.handler.Configure(&config)
-	if err := m.Respond([]byte(util.JSONStringify(response))); err != nil {
-		c.logger.Error("failed to send driverconfig response: %s", err)
-	} else if response.LogPath != nil {
-		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
+	if response.LogPath != nil {
+		if err := c.PublishSendLogsResponse(*response.LogPath); err != nil {
 			c.logger.Error("failed to publish send logs response during configure: %s", err)
 		}
 	}
+	return response
 }
 
-func (c *NotificationConsumer) upgrade(version string) {
+func (c *NotificationConsumer) upgrade(version string) UpgradeResponse {
 	response := c.handler.Upgrade(version)
-	if err := c.publishResponse(response.SessionID, "upgrade", response); err != nil {
-		c.logger.Error("failed to send upgrade response: %s", err)
-	} else if response.LogPath != nil {
-		if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
+	if response.LogPath != nil {
+		if err := c.PublishSendLogsResponse(*response.LogPath); err != nil {
 			c.logger.Error("failed to publish send logs response during upgrade: %s", err)
 		}
 	}
+	return response
 }
 
-func (c *NotificationConsumer) importaction(req *ImportRequest, m *nats.Msg) {
+// This is an odd one because it needs to return whether the backfill initialized successfully
+// The result of the import is returned much later in a separate message
+func (c *NotificationConsumer) importaction(req *ImportRequest) *InitBackfillResponse {
 	initResponse := c.handler.BackfillInit(&InitBackfillRequest{Backfill: req.Backfill})
 
-	if err := m.Respond([]byte(util.JSONStringify(initResponse))); err != nil {
-		c.logger.Error("failed to send import response: %s", err)
-		return
-	}
 	if !initResponse.Success {
-		return
+		return initResponse
 	}
 	req.JobID = initResponse.JobID
 	c.publishSimpleStatus("import", "")
@@ -284,28 +334,31 @@ func (c *NotificationConsumer) importaction(req *ImportRequest, m *nats.Msg) {
 	go func() {
 		defer c.wg.Done()
 		response := c.handler.Import(req)
-		if err := c.publishResponse(response.SessionID, "import", response); err != nil {
-			c.logger.Error("failed to send import response: %s", err)
+		var message string
+		if response.Message != nil {
+			message = *response.Message
+		}
+		if _, err := c.client.ImportResult(c.ctx, &transmissionv1.ImportResultRequest{
+			SessionId: c.sessionID,
+			Success:   response.Success,
+			Message:   message,
+			JobId:     response.JobID,
+		}); err != nil {
+			c.logger.Error("failed to send import result: %s", err)
+			return
 		} else if response.LogPath != nil {
-			if err := c.PublishSendLogsResponse(&SendLogsResponse{Path: *response.LogPath, SessionID: response.SessionID}); err != nil {
-				c.logger.Error("failed to publish send logs response during import: %s", err)
-			}
+			c.PublishSendLogsResponse(*response.LogPath)
 		}
 	}()
+	return initResponse
 }
 
-func (c *NotificationConsumer) driverconfig(m *nats.Msg) {
-	response := c.handler.DriverConfig()
-	if err := m.Respond([]byte(util.JSONStringify(response))); err != nil {
-		c.logger.Error("failed to send driverconfig response: %s", err)
-	}
+func (c *NotificationConsumer) driverconfig() *DriverConfigResponse {
+	return c.handler.DriverConfig()
 }
 
-func (c *NotificationConsumer) validate(driver string, vals map[string]any, m *nats.Msg) {
-	response := c.handler.Validate(driver, vals)
-	if err := m.Respond([]byte(util.JSONStringify(response))); err != nil {
-		c.logger.Error("failed to send validate response: %s", err)
-	}
+func (c *NotificationConsumer) validate(driver string, vals map[string]any) *ValidateResponse {
+	return c.handler.Validate(driver, vals)
 }
 
 func getBool(val any) bool {
@@ -318,102 +371,109 @@ func getBool(val any) bool {
 	return false
 }
 
-func (c *NotificationConsumer) callback(m *nats.Msg) {
+func (c *NotificationConsumer) callback(command *transmissionv1.ControlResponse) (string, *transmissionv1.ControlRequest) {
 	c.wg.Add(1)
 	defer c.wg.Done()
-	var notification Notification
-	if err := util.DecodeNatsMsg(m, &notification); err != nil {
-		c.logger.Error("failed to decode notification message: %s", err)
-		return
-	}
-	c.logger.Trace("received message: %s", notification.String())
+	action := command.Action
+	data := command.Payload.AsMap()
+	c.logger.Trace("received message: %s", util.JSONStringify(command))
 
-	respondGenerically := func(err error) {
+	respondGenerically := func(err error) *transmissionv1.ControlRequest {
 		var errmsg *string
 		if err != nil {
-			c.logger.Error("failed to %s: %s", notification.Action, err)
+			c.logger.Error("failed to %s: %s", action, err)
 			e := err.Error()
 			errmsg = &e
 		}
-		if err := c.publishResponse(c.sessionID, notification.Action, genericResponse{
+		payload, err := goStructToStructpb(genericResponse{
 			Success:   errmsg == nil,
 			Message:   errmsg,
 			SessionID: c.sessionID,
-			Action:    notification.Action,
-		}); err != nil {
-			c.logger.Error("failed to send pause response: %s", err)
+			Action:    action,
+		})
+		if err != nil {
+			return nil
+		}
+		return &transmissionv1.ControlRequest{
+			SessionId: c.sessionID,
+			Payload:   payload,
 		}
 	}
 
-	switch notification.Action {
+	var commandReply *transmissionv1.ControlRequest
+	switch action {
 	case "restart":
 		c.publishSimpleStatus("restart", "")
 		c.handler.Restart()
-		respondGenerically(nil)
+		commandReply = respondGenerically(nil)
 	case "ping":
-		if subject, ok := notification.Data["subject"].(string); ok {
-			c.logger.Trace("received ping notification, replying to: %s", subject)
-			if err := c.nc.Publish(subject, []byte("pong")); err != nil {
-				c.logger.Error("error sending ping response: %s", err)
-			}
-		} else {
-			c.logger.Warn("invalid ping notification. missing subject for: %s", notification.String())
+		c.logger.Trace("received ping notification")
+		commandReply = &transmissionv1.ControlRequest{
+			SessionId: c.sessionID,
 		}
 	case "shutdown":
-		deleted := getBool(notification.Data["deleted"])
-		if message, ok := notification.Data["message"].(string); ok {
+		deleted := getBool(data["deleted"])
+		if message, ok := data["message"].(string); ok {
 			c.handler.Shutdown(message, deleted)
+			commandReply = &transmissionv1.ControlRequest{
+				SessionId: c.sessionID,
+			}
 		} else {
-			c.logger.Warn("invalid shutdown notification. missing message for: %s", notification.String())
+			c.logger.Warn("invalid shutdown notification. missing message for: %s", util.JSONStringify(data))
 		}
 	case "pause":
-		respondGenerically(c.handler.Pause())
+		commandReply = respondGenerically(c.handler.Pause())
 	case "unpause":
-		respondGenerically(c.handler.Unpause())
+		commandReply = respondGenerically(c.handler.Unpause())
 	case "upgrade":
 		var version string
-		if v, ok := notification.Data["version"].(string); ok {
+		if v, ok := data["version"].(string); ok {
 			version = v
 		} else {
-			msg := fmt.Sprintf("invalid upgrade notification. missing version for: %s", notification.String())
+			msg := fmt.Sprintf("invalid upgrade notification. missing version for: %s", util.JSONStringify(data))
 			c.logger.Warn(msg)
 			c.publishSimpleStatus("upgrade", msg)
-			return
 		}
 		c.publishSimpleStatus("upgrade", "")
 		c.upgrade(version)
+		commandReply = respondGenerically(nil)
 	case "sendlogs":
 		c.CallSendLogs()
+		commandReply = respondGenerically(nil)
 	case "configure":
 		var req ConfigureRequest
-		if v, ok := notification.Data["url"].(string); ok {
+		if v, ok := data["url"].(string); ok {
 			req.URL = v
 		}
-		req.Backfill = getBool(notification.Data["backfill"])
-		c.configure(req, m)
+		req.Backfill = getBool(data["backfill"])
+		commandReply = c.publishResponse("configure", c.configure(req))
 	case "import":
 		var req ImportRequest
-		req.Backfill = getBool(notification.Data["backfill"])
-		c.importaction(&req, m)
+		req.Backfill = getBool(data["backfill"])
+		commandReply = c.publishResponse("import", c.importaction(&req))
+
 	case "driverconfig":
-		c.driverconfig(m)
+		commandReply = c.publishResponse("driverconfig", c.driverconfig())
 	case "validate":
 		var driver string
 		var config map[string]any
-		if v, ok := notification.Data["driver"].(string); ok {
+		if v, ok := data["driver"].(string); ok {
 			driver = v
 		} else {
-			c.logger.Error("invalid validate notification. missing driver for: %s", notification.String())
-			return
+			err := fmt.Errorf("invalid validate notification. missing driver for: %s", util.JSONStringify(data))
+			c.logger.Error(err.Error())
+			commandReply = respondGenerically(err)
 		}
-		if v, ok := notification.Data["config"].(map[string]any); ok {
+		if v, ok := data["config"].(map[string]any); ok {
 			config = v
 		} else {
-			c.logger.Error("invalid validate notification. missing config for: %s", notification.String())
-			return
+			err := fmt.Errorf("invalid validate notification. missing config for: %s", util.JSONStringify(data))
+			c.logger.Error(err.Error())
+			commandReply = respondGenerically(err)
 		}
-		c.validate(driver, config, m)
+		commandReply = c.publishResponse("validate", c.validate(driver, config))
 	default:
-		c.logger.Warn("unknown action: %s", notification.Action)
+		c.logger.Warn("unknown action: %s", action)
 	}
+	return action, commandReply
 }

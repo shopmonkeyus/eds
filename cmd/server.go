@@ -32,6 +32,9 @@ import (
 	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 var Version string                // set in main
@@ -966,6 +969,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
+
 			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
 			if err != nil {
 				if errors.Is(err, errAlreadyRunning) {
@@ -979,22 +983,31 @@ var serverCmd = &cobra.Command{
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
+
+			var creds credentials.TransportCredentials
+			if session.Credential == nil {
+				creds = insecure.NewCredentials()
+			} else {
+				// TODO: Implement credentials handling
+				logger.Error("Transmission credentials not yet implemented")
+			}
 			transmissionAddress := session.Transmission.Address
+			transmissionConnection, err := grpc.NewClient(
+				session.Transmission.Address,
+				grpc.WithTransportCredentials(creds),
+			)
+			if err != nil {
+				logger.Fatal("error creating transmission client for %s: %s", transmissionAddress, err)
+			}
+			defer transmissionConnection.Close()
+			logger.Debug("connected to Transmission session: %s", sessionId)
+
 			sessionDir = filepath.Join(dataDir, sessionId)
 			if err := os.MkdirAll(sessionDir, 0700); err != nil {
 				logger.Fatal("failed to create session directory: %s", err)
 			}
-			if session.Credential == nil {
-				logger.Debug("no NATS credential found in transmission session")
-			} else {
-				// write credential to file
-				credsFile = filepath.Join(sessionDir, "nats.creds")
-				if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
-					logger.Fatal("failed to write creds to file: %s", err)
-				}
-				logger.Trace("creds written to %s", credsFile)
-			}
-			if err := notificationConsumer.Start(credsFile, sessionId); err != nil {
+
+			if err := notificationConsumer.Start(ctx, transmissionConnection, sessionId, edsServerId); err != nil {
 				logger.Fatal("failed to start notification consumer: %s", err)
 			}
 
@@ -1053,13 +1066,14 @@ var serverCmd = &cobra.Command{
 					if err != nil {
 						logger.Error("failed to send end and upload logs: %s", err)
 					} else {
-						if err := notificationConsumer.PublishSendLogsResponse(&notification.SendLogsResponse{Path: logPath, SessionID: sessionId}); err != nil {
+						if err := notificationConsumer.PublishSendLogsResponse(logPath); err != nil {
 							logger.Error("failed to publish send logs response: %s", err)
 						}
 					}
 				}
 				if ec == exitCodeDisconnected {
 					logger.Info("nats disconnected, retrying in 5 seconds")
+					notificationConsumer.Stop()
 					time.Sleep(time.Second * 5)
 					continue
 				}

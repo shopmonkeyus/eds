@@ -11,14 +11,18 @@ service TransmissionService {
 
   rpc Log(LogRequest) returns (LogResponse);
 
-  rpc Control(ControlRequest) returns (stream ControlResponse);
+  rpc Control(stream ControlRequest) returns (stream ControlResponse);
+
+  rpc SendLogs(SendLogsRequest) returns (SendLogsResponse);
+
+  rpc Status(StatusRequest) returns (StatusResponse);
+
+  rpc ImportResult(ImportResultRequest) returns (ImportResultResponse);
 }
 
 message FetchRequest {
   int32 max_count = 1;
-
   int64 timeout_ms = 2;
-
   string eds_id = 3;
 }
 
@@ -32,7 +36,6 @@ message ChangeMessage {
 
 message LogRequest {
   bytes json = 1;
-
   string eds_id = 2;
 }
 
@@ -41,9 +44,38 @@ message LogResponse {}
 message ControlRequest {
   string eds_id = 1;
   string session_id = 2;
+  google.protobuf.Struct payload = 3;
 }
+
 message ControlResponse {
   string action = 1;
 
   google.protobuf.Struct payload = 2;
 }
+
+message SendLogsRequest {
+  string eds_id = 1;
+  string session_id = 2;
+  string path = 3;
+}
+
+message SendLogsResponse {}
+
+message StatusRequest {
+  string eds_id = 1;
+  string session_id = 2;
+  string action = 3;
+
+  google.protobuf.Struct payload = 4;
+}
+
+message StatusResponse {}
+
+message ImportResultRequest {
+  bool success = 1;
+  string message = 2;
+  string job_id = 3;
+  string session_id = 4;
+}
+
+message ImportResultResponse {}

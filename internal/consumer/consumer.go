@@ -14,10 +14,8 @@ import (
 	transmissionv1 "github.com/shopmonkeyus/eds/pkg/transmission/v1"
 	"github.com/shopmonkeyus/go-common/logger"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -79,12 +77,10 @@ type Client struct {
 
 	errCh        chan error
 	disconnected chan bool
-	controlChan  chan *transmissionv1.ControlResponse
 	waitGroup    sync.WaitGroup
 	once         sync.Once
 	lock         sync.Mutex
 	paused       bool
-	ready        chan struct{}
 }
 
 // Disconnected returns a channel that will be closed when the client is disconnected from Transmission.
@@ -299,59 +295,35 @@ func (c *Client) applyControlMessage(resp *transmissionv1.ControlResponse) {
 	}
 }
 
-func (c *Client) runControl() {
-	defer c.waitGroup.Done()
-
-	stream, err := c.client.Control(c.ctx, &transmissionv1.ControlRequest{EdsId: c.edsID, SessionId: c.sessionID})
-	if err != nil {
-		c.handleError(fmt.Errorf("error opening control stream: %w", err))
-		return
-	}
-	c.logger.Debug("control stream attached")
-	close(c.ready)
-
-	defer close(c.controlChan)
-	for {
-		resp, err := stream.Recv()
-		if err != nil {
-			if c.ctx.Err() != nil {
-				return
-			}
-			if errors.Is(err, io.EOF) || status.Code(err) == codes.Unavailable {
-				c.logger.Error("control stream interrupted: %s", err)
-				c.signalDisconnected()
-				return
-			}
-			c.handleError(fmt.Errorf("error reading control stream: %w", err))
-			return
-		}
-
-		c.controlChan <- resp
-	}
-}
-
 func (c *Client) runFetch() {
 	defer c.waitGroup.Done()
 
-	select {
-	case <-c.ready:
-	case <-c.ctx.Done():
-		return
-	}
-
 	for c.ctx.Err() == nil {
-		if c.isPaused() || len(c.controlChan) > 0 {
-			if resp, ok := <-c.controlChan; ok {
-				c.applyControlMessage(resp)
-			}
+		if c.isPaused() {
+			time.Sleep(c.fetchTimeout)
 			continue
 		}
 		c.fetchOnce()
 	}
 }
 
+// TODO: Move disconnect handling here
+
+// resp, err := stream.Recv()
+// if err != nil {
+// 	if c.ctx.Err() != nil {
+// 		return
+// 	}
+// 	if errors.Is(err, io.EOF) || status.Code(err) == codes.Unavailable {
+// 		c.logger.Error("control stream interrupted: %s", err)
+// 		c.signalDisconnected()
+// 		return
+// 	}
+// 	c.handleError(fmt.Errorf("error reading control stream: %w", err))
+// 	return
+
 func (c *Client) fetchOnce() {
-	fetchCtx, cancel := context.WithTimeout(c.ctx, defaultFetchTimeout+extraFetchTimeout+c.fetchTimeout)
+	fetchCtx, cancel := context.WithTimeout(c.ctx, c.fetchTimeout+extraFetchTimeout)
 	defer cancel()
 
 	c.logger.Debug("fetching (maxCount=%d timeout=%s)", c.maxCount, c.fetchTimeout)
@@ -403,9 +375,7 @@ func (c *Client) fetchOnce() {
 }
 
 func (c *Client) start() error {
-	c.controlChan = make(chan *transmissionv1.ControlResponse, 16)
-	c.waitGroup.Add(2)
-	go c.runControl()
+	c.waitGroup.Add(1)
 	go c.runFetch()
 	c.logger.Debug("started")
 	return nil
@@ -443,7 +413,6 @@ func CreateClient(config ClientConfig) (*Client, error) {
 		client:          transmissionv1.NewTransmissionServiceClient(conn),
 		errCh:           make(chan error, 1),
 		disconnected:    make(chan bool),
-		ready:           make(chan struct{}),
 	}
 
 	if _, ok := config.Driver.(internal.DriverMigration); ok {
