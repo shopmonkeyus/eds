@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package shopmonkey.transmission.v1;
+package shopmonkey.edsv4prototype.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/shopmonkeyus/eds/pkg/transmission/v1;transmissionv1";
+option go_package = "github.com/shopmonkeyus/eds/pkg/edsv4prototype/v1;edsv4prototypev1";
 
-service TransmissionService {
+service EdsV4PrototypeService {
   // needs stream to handle large batches of messages
   rpc Fetch(FetchRequest) returns (stream FetchResponse);
 
@@ -40,7 +40,7 @@ message LogRequest {
 }
 message LogResponse {}
 
-// Control replies: EDS -> transmission
+// Control replies: EDS -> eds-v4-prototype
 message ControlReply {
   string eds_id = 1;
   string session_id = 2;
@@ -103,7 +103,7 @@ message FieldError {
   string message = 2;
 }
 
-// Control commands: transmission -> EDS client
+// Control commands: eds-v4-prototype -> EDS client
 message ControlCommand {
   oneof command {
     Restart restart = 1;

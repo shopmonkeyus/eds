@@ -18,4 +18,4 @@
 /quill-*.log
 /.vscode/
 eds-debug
-/pkg/transmission/**/*.pb.go
+/pkg/edsv4prototype/**/*.pb.go
