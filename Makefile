@@ -6,7 +6,7 @@ proto:
 	@cd proto && buf generate
 
 proto-check: proto
-	@git diff --exit-code pkg/transmission/v1
+	@git diff --exit-code pkg/edsv4prototype/v1
 
 build:
 	@go build -v -o /dev/null
