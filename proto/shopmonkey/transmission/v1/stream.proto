@@ -7,15 +7,17 @@ import "google/protobuf/struct.proto";
 option go_package = "github.com/shopmonkeyus/eds/pkg/transmission/v1;transmissionv1";
 
 service TransmissionService {
+  // needs stream to handle large batches of messages
   rpc Fetch(FetchRequest) returns (stream FetchResponse);
 
   rpc Log(LogRequest) returns (LogResponse);
 
-  rpc Control(stream ControlRequest) returns (stream ControlResponse);
+  // Control is used for syncronous commands pushed to the client
+  rpc Control(stream ControlReply) returns (stream ControlCommand);
 
-  rpc SendLogs(SendLogsRequest) returns (SendLogsResponse);
+  rpc PublishSendLogsComplete(PSLCRequest) returns (PSLCResponse);
 
-  rpc Status(StatusRequest) returns (StatusResponse);
+  rpc SendStatus(SendStatusRequest) returns (SendStatusResponse);
 
   rpc ImportResult(ImportResultRequest) returns (ImportResultResponse);
 }
@@ -25,11 +27,9 @@ message FetchRequest {
   int64 timeout_ms = 2;
   string eds_id = 3;
 }
-
 message FetchResponse {
   repeated ChangeMessage messages = 1;
 }
-
 message ChangeMessage {
   bytes payload = 1;
 }
@@ -38,44 +38,136 @@ message LogRequest {
   bytes json = 1;
   string eds_id = 2;
 }
-
 message LogResponse {}
 
-message ControlRequest {
+// Control replies: EDS -> transmission
+message ControlReply {
   string eds_id = 1;
   string session_id = 2;
-  google.protobuf.Struct payload = 3;
+
+  oneof reply {
+    StreamAttach stream_attach = 3;
+    RestartReply restart = 4;
+    ShutdownReply shutdown = 5;
+    PauseReply pause = 6;
+    UnpauseReply unpause = 7;
+    UpgradeReply upgrade = 8;
+    SendLogsReply sendlogs = 9;
+    ConfigureReply configure = 10;
+    ImportReply import = 11;
+    DriverConfigReply driver_config = 12;
+    ValidateReply validate = 13;
+  }
+}
+message StreamAttach {}
+message ShutdownReply {}
+message RestartReply {
+  bool success = 1;
+  string message = 2;
+}
+message PauseReply {
+  bool success = 1;
+  string message = 2;
+}
+message UnpauseReply {
+  bool success = 1;
+  string message = 2;
+}
+message UpgradeReply {
+  bool success = 1;
+  string message = 2;
+}
+message SendLogsReply {}
+message ConfigureReply {
+  bool success = 1;
+  string message = 2;
+  string masked_url = 3;
+  bool backfill = 4;
+}
+// Returns whether import initialized successfully; final result uses ImportResult
+message ImportReply {
+  bool success = 1;
+  string message = 2;
+}
+message DriverConfigReply {
+  bytes drivers = 1;
+}
+message ValidateReply {
+  bool success = 1;
+  string message = 2;
+  string url = 3;
+  repeated FieldError field_errors = 4;
+}
+message FieldError {
+  string field = 1;
+  string message = 2;
 }
 
-message ControlResponse {
-  string action = 1;
-
-  google.protobuf.Struct payload = 2;
+// Control commands: transmission -> EDS client
+message ControlCommand {
+  oneof command {
+    Restart restart = 1;
+    Shutdown shutdown = 2;
+    Pause pause = 3;
+    Unpause unpause = 4;
+    Upgrade upgrade = 5;
+    SendLogs sendlogs = 6;
+    Configure configure = 7;
+    Import import = 8;
+    DriverConfig driver_config = 9;
+    Validate validate = 10;
+  }
+}
+message Restart {}
+message Pause {}
+message Unpause {}
+message SendLogs {}
+message DriverConfig {}
+message Shutdown {
+  string message = 1;
+  bool deleted = 2;
+}
+message Upgrade {
+  string version = 1;
+}
+message Configure {
+  string url = 1;
+  bool backfill = 2;
+}
+message Import {
+  bool backfill = 1;
+}
+message Validate {
+  string driver = 1;
+  google.protobuf.Struct config = 2;
 }
 
-message SendLogsRequest {
+
+// PSLC = PublishSendLogsComplete
+message PSLCRequest {
   string eds_id = 1;
   string session_id = 2;
   string path = 3;
 }
-
-message SendLogsResponse {}
-
-message StatusRequest {
+message PSLCResponse {}
+enum StatusAction {
+  STATUS_ACTION_UNSPECIFIED = 0;
+  STATUS_ACTION_RESTART = 1;
+  STATUS_ACTION_UPGRADE = 2;
+  STATUS_ACTION_IMPORT = 3;
+}
+message SendStatusRequest {
   string eds_id = 1;
   string session_id = 2;
-  string action = 3;
-
-  google.protobuf.Struct payload = 4;
+  StatusAction action = 3;
+  bool success = 4;
+  string message = 5;
 }
-
-message StatusResponse {}
+message SendStatusResponse {}
 
 message ImportResultRequest {
   bool success = 1;
   string message = 2;
-  string job_id = 3;
-  string session_id = 4;
+  string session_id = 3;
 }
-
 message ImportResultResponse {}

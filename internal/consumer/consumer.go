@@ -284,17 +284,6 @@ func (c *Client) isPaused() bool {
 	return c.paused
 }
 
-func (c *Client) applyControlMessage(resp *transmissionv1.ControlResponse) {
-	switch resp.GetAction() {
-	case ControlActionStart:
-		c.logger.Info("received start from transmission")
-		c.Unpause()
-	case ControlActionPause:
-		c.logger.Info("received pause from transmission")
-		c.Pause()
-	}
-}
-
 func (c *Client) runFetch() {
 	defer c.waitGroup.Done()
 
@@ -307,20 +296,7 @@ func (c *Client) runFetch() {
 	}
 }
 
-// TODO: Move disconnect handling here
-
-// resp, err := stream.Recv()
-// if err != nil {
-// 	if c.ctx.Err() != nil {
-// 		return
-// 	}
-// 	if errors.Is(err, io.EOF) || status.Code(err) == codes.Unavailable {
-// 		c.logger.Error("control stream interrupted: %s", err)
-// 		c.signalDisconnected()
-// 		return
-// 	}
-// 	c.handleError(fmt.Errorf("error reading control stream: %w", err))
-// 	return
+// TODO: Make sure we handle disconnects gracefully (preferably with retries)
 
 func (c *Client) fetchOnce() {
 	fetchCtx, cancel := context.WithTimeout(c.ctx, c.fetchTimeout+extraFetchTimeout)
@@ -381,8 +357,7 @@ func (c *Client) start() error {
 	return nil
 }
 
-// CreateConsumer creates a new nats consumer, but does not start it.
-func CreateClient(config ClientConfig) (*Client, error) {
+func NewClient(config ClientConfig) (*Client, error) {
 	ctx, cancel := context.WithCancel(config.Context)
 
 	var credentials credentials.TransportCredentials
@@ -448,15 +423,6 @@ func CreateClient(config ClientConfig) (*Client, error) {
 
 	client.disconnected = make(chan bool, 1)
 
-	return client, nil
-}
-
-// NewConsumer creates and starts a new nats consumer
-func NewClient(config ClientConfig) (*Client, error) {
-	client, err := CreateClient(config)
-	if err != nil {
-		return nil, err
-	}
 	if err := client.start(); err != nil {
 		return nil, err
 	}

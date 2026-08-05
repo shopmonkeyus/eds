@@ -26,6 +26,7 @@ import (
 	"github.com/shopmonkeyus/eds/internal/notification"
 	"github.com/shopmonkeyus/eds/internal/upgrade"
 	"github.com/shopmonkeyus/eds/internal/util"
+	tv1 "github.com/shopmonkeyus/eds/pkg/transmission/v1"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
 	cstr "github.com/shopmonkeyus/go-common/string"
@@ -557,6 +558,9 @@ var serverCmd = &cobra.Command{
 			logger.Debug("fork process started with pid: %d", p.Pid)
 		}
 
+		// need this to untangle log upload publish from notification handler functions
+		var publishLogUploadResponse func(logPath string) error = func(string) error { return nil }
+
 		restart := func() {
 			if configured {
 				logger.Info("need to restart")
@@ -625,15 +629,13 @@ var serverCmd = &cobra.Command{
 			return nil
 		}
 
-		upgrade := func(version string) notification.UpgradeResponse {
+		upgrade := func(version string) *tv1.UpgradeReply {
 			versionWithoutV := strings.TrimPrefix(version, "v")
 			logger.Info("server upgrade requested to version: %s", versionWithoutV)
 			if util.IsRunningInsideDocker() {
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   "upgrade is not supported inside a virtualized container system",
-					SessionID: sessionId,
-					Version:   version,
+				return &tv1.UpgradeReply{
+					Success: false,
+					Message: "upgrade is not supported inside a virtualized container system",
 				}
 			}
 			pause()
@@ -644,11 +646,9 @@ var serverCmd = &cobra.Command{
 			if err := c.Run(); err != nil {
 				logger.Error("upgrade failed: %s", err)
 				unpause()
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("failed to download version %s: %s", versionWithoutV, err),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
+				return &tv1.UpgradeReply{
+					Success: false,
+					Message: fmt.Sprintf("failed to download version %s: %s", versionWithoutV, err),
 				}
 			}
 			c = exec.Command(fn, "version")
@@ -658,22 +658,18 @@ var serverCmd = &cobra.Command{
 			if err := c.Run(); err != nil {
 				logger.Error("upgrade failed checking version: %s", err)
 				unpause()
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("upgrade failed checking version: %s", err),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
+				return &tv1.UpgradeReply{
+					Success: false,
+					Message: fmt.Sprintf("upgrade failed checking version: %s", err),
 				}
 			}
 			newversion := strings.TrimSpace(out.String())
 			if newversion != versionWithoutV {
 				logger.Error("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion)
 				unpause()
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
+				return &tv1.UpgradeReply{
+					Success: false,
+					Message: fmt.Sprintf("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion),
 				}
 			}
 
@@ -685,11 +681,9 @@ var serverCmd = &cobra.Command{
 				} else {
 					logger.Error("failed to apply upgrade: %s", err)
 					unpause()
-					return notification.UpgradeResponse{
-						Success:   false,
-						Message:   fmt.Sprintf("failed to rename old binary: %s", err),
-						SessionID: sessionId,
-						Version:   versionWithoutV,
+					return &tv1.UpgradeReply{
+						Success: false,
+						Message: fmt.Sprintf("failed to rename old binary: %s", err),
 					}
 				}
 			}
@@ -698,58 +692,54 @@ var serverCmd = &cobra.Command{
 			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/restart", parentPort))
 			if err != nil {
 				logger.Fatal("restart failed: %s", err)
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("upgrade failed. tried restarting: %s", err),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
+				return &tv1.UpgradeReply{
+					Success: false,
+					Message: fmt.Sprintf("upgrade failed. tried restarting: %s", err),
 				}
 			} else {
 				logger.Debug("restart response: %d", resp.StatusCode)
-				return notification.UpgradeResponse{
-					Success:   true,
-					SessionID: sessionId,
-					Version:   versionWithoutV,
+				return &tv1.UpgradeReply{
+					Success: true,
 				}
 			}
 		}
 
 		var logsLock sync.Mutex
-		sendLogs := func() *notification.SendLogsResponse {
+		sendLogs := func() bool {
 			logger.Info("server logfile requested")
 			logsLock.Lock()
 			defer logsLock.Unlock()
 			if sessionId == "" {
 				logger.Error("no session ID to rotate logs")
-				return nil
+				return false
 			}
 			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/logfile", port))
 			if err != nil {
 				logger.Error("logfile failed: %s", err)
-				return nil
+				return false
 			}
 			logger.Debug("logfile response: %d", resp.StatusCode)
 			if resp.StatusCode != http.StatusOK {
 				logger.Error("logfile failed: %d", resp.StatusCode)
-				return nil
+				return false
 			}
 			defer resp.Body.Close()
 
 			buf, err := io.ReadAll(resp.Body)
 			if err != nil {
 				logger.Error("failed to read body: %s", err)
-				return nil
+				return false
 			}
 			logFile := string(buf)
 			uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 			if err != nil {
 				logger.Error("failed to get upload URL: %s", err)
-				return nil
+				return false
 			}
 			path, err := uploadLogFile(logger, uploadURL, logFile)
 			if err != nil {
 				logger.Error("failed to upload logfile: %s", err)
-				return nil
+				return false
 			}
 
 			// fork will be done writing to the file, so we can remove it
@@ -758,13 +748,12 @@ var serverCmd = &cobra.Command{
 				os.Remove(logFile)
 			}
 
-			return &notification.SendLogsResponse{
-				Path:      path,
-				SessionID: sessionId,
-			}
+			publishLogUploadResponse(path)
+
+			return true
 		}
 
-		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool, jobId string) (bool, bool, *string, *string) {
+		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool, jobId string) (bool, bool, string, *string) {
 			importargs := []string{"--url", url, "--api-key", apikey, "--no-confirm", "--data-dir", dataDir}
 			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
@@ -795,7 +784,7 @@ var serverCmd = &cobra.Command{
 			})
 			if err != nil && result == nil {
 				s := "Error importing data. Please contact support for assistance."
-				return true, false, &s, nil
+				return true, false, s, nil
 			} else {
 				ec := result.ProcessState.ExitCode()
 				logger.Debug("import exit code: %d, last log line: %s", ec, result.LastErrorLines)
@@ -804,7 +793,7 @@ var serverCmd = &cobra.Command{
 				}
 				switch ec {
 				case 0:
-					return true, true, nil, nil
+					return true, true, "", nil
 				case exitCodeIncorrectUsage:
 					var msg string
 					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
@@ -813,7 +802,7 @@ var serverCmd = &cobra.Command{
 					} else {
 						msg = strings.TrimSpace(result.LastErrorLines)
 					}
-					return false, false, &msg, nil // this means the url is invalid
+					return false, false, msg, nil // this means the url is invalid
 				default:
 					logger.Error("import failed with exit code %d: %s", ec, result.LastErrorLines)
 					var uploadLogPath string
@@ -838,63 +827,69 @@ var serverCmd = &cobra.Command{
 						}
 					}
 					s := "Error importing data. See the error logs for more details or contact support for further assistance."
-					return true, false, &s, &uploadLogPath
+					return true, false, s, &uploadLogPath
 				}
 			}
 		}
 
-		configure := func(config *notification.ConfigureRequest) *notification.ConfigureResponse {
-			logger.Trace("received driver configuration. url: %s", cstr.Mask(config.URL))
-			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true, "")
-			var maskedURL *string
+		configure := func(config *tv1.Configure) *tv1.ConfigureReply {
+			url := config.GetUrl()
+			logger.Trace("received driver configuration. url: %s", cstr.Mask(url))
+			success, validated, msg, uploadLogPath := runImport(ctx, url, false, true, "")
+			if uploadLogPath != nil {
+				publishLogUploadResponse(*uploadLogPath)
+			}
+			var maskedURL string
 			if success && validated {
-				viper.Set("url", config.URL)
+				viper.Set("url", url)
 				if err := viper.WriteConfig(); err != nil {
 					logger.Error("failed to write config: %s", err)
 				}
 				logger.Info("driver configured successfully, waiting for import action...")
-				driverURL = config.URL
-				if masked, err := util.MaskURL(config.URL); err != nil {
+				driverURL = url
+				if masked, err := util.MaskURL(url); err != nil {
 					logger.Warn("could not mask URL, will not display in app: %s", err)
 				} else {
-					maskedURL = &masked
+					maskedURL = masked
 				}
 				if !configured {
 					// restart the server
 					restart()
 				}
 			}
-
-			return &notification.ConfigureResponse{
-				SessionID: sessionId,
+			return &tv1.ConfigureReply{
 				Success:   validated,
-				LogPath:   uploadLogPath,
-				MaskedURL: maskedURL,
+				MaskedUrl: maskedURL,
 				Message:   msg,
 				Backfill:  config.Backfill,
 			}
 		}
 
-		backFillInit := func(req *notification.InitBackfillRequest) *notification.InitBackfillResponse {
+		backFillInit := func(backfill bool) notification.InitBackfillResponse {
 			logger.Trace("received init backfill request")
-			if !req.Backfill {
-				return &notification.InitBackfillResponse{SessionID: sessionId, Success: true}
+			if !backfill {
+				return notification.InitBackfillResponse{SessionID: sessionId, Success: true}
 			}
 			jobID, err := createExportJob(ctx, logger, apiurl, apikey, exportJobCreateRequest{})
 			if err != nil {
 				logger.Error("failed to create export job: %s", err)
-				errorMessage := err.Error()
-				return &notification.InitBackfillResponse{SessionID: sessionId, Success: false, Message: &errorMessage}
+				return notification.InitBackfillResponse{SessionID: sessionId, Success: false, Message: err.Error()}
 			}
-			return &notification.InitBackfillResponse{SessionID: sessionId, Success: true, JobID: jobID}
+			return notification.InitBackfillResponse{SessionID: sessionId, Success: true, JobID: jobID}
 		}
 
-		importaction := func(req *notification.ImportRequest) *notification.ImportResponse {
+		importaction := func(backfill bool, jobID string) *tv1.ImportReply {
 			logger.Trace("received import action")
 			pause() // pause the consumer, if any, from processing any data while we are importing
-			success, _, msg, uploadLogPath := runImport(ctx, driverURL, !req.Backfill, false, req.JobID)
+			schemaOnly := !backfill
+			success, _, msg, uploadLogPath := runImport(ctx, driverURL, schemaOnly, false, jobID)
+			defer func() {
+				if uploadLogPath != nil {
+					publishLogUploadResponse(*uploadLogPath)
+				}
+			}()
 			if !success {
-				return &notification.ImportResponse{SessionID: sessionId, Success: false, Message: msg, LogPath: uploadLogPath}
+				return &tv1.ImportReply{Success: false, Message: msg}
 			}
 			if !configured {
 				logger.Trace("driver configured")
@@ -902,28 +897,36 @@ var serverCmd = &cobra.Command{
 			} else {
 				restart() // once we have finished the import, restart the server to pick up the new timestamps, etc
 			}
-			return &notification.ImportResponse{SessionID: sessionId, Success: success, Message: msg, LogPath: uploadLogPath}
+			return &tv1.ImportReply{Success: success, Message: msg}
 		}
 
-		driverconfig := func() *notification.DriverConfigResponse {
+		driverconfig := func() *tv1.DriverConfigReply {
 			config := internal.GetDriverConfigurations()
-			return &notification.DriverConfigResponse{
-				SessionID: sessionId,
-				Drivers:   config,
+			bytes, err := json.Marshal(config)
+			if err != nil {
+				logger.Error("failed to marshal driver configurations: %s", err)
+				return nil
 			}
+			return &tv1.DriverConfigReply{Drivers: bytes}
 		}
 
-		validate := func(driver string, values map[string]any) *notification.ValidateResponse {
+		validate := func(driver string, values map[string]any) *tv1.ValidateReply {
 			url, fielderrs, err := internal.Validate(driver, values)
 			var msg string
 			if err != nil {
 				msg = err.Error()
 			}
-			return &notification.ValidateResponse{
+			var fieldErrorsProto []*tv1.FieldError
+			for _, fieldError := range fielderrs {
+				fieldErrorsProto = append(fieldErrorsProto, &tv1.FieldError{
+					Field:   fieldError.Field,
+					Message: fieldError.Message,
+				})
+			}
+			return &tv1.ValidateReply{
 				Success:     err == nil && url != "",
-				SessionID:   sessionId,
-				FieldErrors: fielderrs,
-				URL:         url,
+				FieldErrors: fieldErrorsProto,
+				Url:         url,
 				Message:     msg,
 			}
 		}
@@ -942,6 +945,7 @@ var serverCmd = &cobra.Command{
 			DriverConfig: driverconfig,
 			Validate:     validate,
 		})
+		publishLogUploadResponse = notificationConsumer.PublishSendLogsResponse
 
 		// setup tickers
 		duration, _ := cmd.Flags().GetDuration("renew-interval")
@@ -956,7 +960,7 @@ var serverCmd = &cobra.Command{
 				select {
 				case <-logSenderTicker.C:
 					// ask the notification consumer to send the logs so it can report the success/failure
-					notificationConsumer.CallSendLogs()
+					sendLogs()
 				case <-renewTicker.C:
 					restart()
 				}
