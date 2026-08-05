@@ -42,6 +42,8 @@ require (
 	github.com/tidwall/buntdb v1.3.2
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	golang.org/x/sync v0.16.0
+	google.golang.org/grpc v1.67.1
+	google.golang.org/protobuf v1.36.6
 )
 
 require (
@@ -168,6 +170,6 @@ require (
 	golang.org/x/time v0.13.0 // indirect
 	golang.org/x/tools v0.35.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	google.golang.org/protobuf v1.36.6 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241021214115-324edc3d5d38 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
