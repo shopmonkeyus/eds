@@ -18,4 +18,3 @@
 /quill-*.log
 /.vscode/
 eds-debug
-/pkg/transmission/**/*.pb.go
