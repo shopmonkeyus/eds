@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
+	adsv1 "eds-v4-prototype/pkg/ads/v1"
+
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/util"
-	transmissionv1 "github.com/shopmonkeyus/eds/pkg/transmission/v1"
 	"github.com/shopmonkeyus/go-common/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -73,7 +74,7 @@ type Client struct {
 	supportsMigration bool
 
 	conn   *grpc.ClientConn
-	client transmissionv1.TransmissionServiceClient
+	client adsv1.AdsServiceClient
 
 	errCh        chan error
 	disconnected chan bool
@@ -304,7 +305,7 @@ func (c *Client) fetchOnce() {
 
 	c.logger.Debug("fetching (maxCount=%d timeout=%s)", c.maxCount, c.fetchTimeout)
 
-	stream, err := c.client.Fetch(fetchCtx, &transmissionv1.FetchRequest{
+	stream, err := c.client.Fetch(fetchCtx, &adsv1.FetchRequest{
 		EdsId:     c.edsID,
 		MaxCount:  c.maxCount,
 		TimeoutMs: c.fetchTimeout.Milliseconds(),
@@ -385,7 +386,7 @@ func NewClient(config ClientConfig) (*Client, error) {
 		maxCount:        defaultMaxCount,
 		fetchTimeout:    defaultFetchTimeout,
 		conn:            conn,
-		client:          transmissionv1.NewTransmissionServiceClient(conn),
+		client:          adsv1.NewAdsServiceClient(conn),
 		errCh:           make(chan error, 1),
 		disconnected:    make(chan bool),
 	}

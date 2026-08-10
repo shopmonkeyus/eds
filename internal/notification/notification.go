@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
+	tv1 "eds-v4-prototype/pkg/ads/v1"
+
 	"github.com/shopmonkeyus/eds/internal/util"
-	tv1 "github.com/shopmonkeyus/eds/pkg/transmission/v1"
 	"github.com/shopmonkeyus/go-common/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -31,33 +32,17 @@ type NotificationHandler struct {
 	// Unpause action is called to unpause the driver from processing.
 	Unpause func() error
 
-	// Upgrade action is called to upgrade the server version.
-	Upgrade func(version string) *tv1.UpgradeReply
-
-	// SendLogs action is called to send logs to the server, should return the storage path.
-	SendLogs func() bool
-
 	// Configure action is called to configure the server with a driver.
 	Configure func(config *tv1.Configure) *tv1.ConfigureReply
 
-	// BackfillInit is called to initialize backfill and create an export job.
-	BackfillInit func(bool) InitBackfillResponse
-
 	// Import action is called to import data using the driver.
-	Import func(backfill bool, jobID string) *tv1.ImportReply
+	Import func() *tv1.ImportReply
 
 	// DriverConfig action is called to get the driver configurations.
 	DriverConfig func() *tv1.DriverConfigReply
 
 	// Validate action is called to validate the driver configurations.
 	Validate func(driver string, values map[string]any) *tv1.ValidateReply
-}
-
-type InitBackfillResponse struct {
-	Success   bool
-	Message   string
-	SessionID string
-	JobID     string
 }
 
 type NotificationConsumer struct {
@@ -70,7 +55,7 @@ type NotificationConsumer struct {
 	wg             sync.WaitGroup
 	edsID          string
 	sessionID      string
-	client         tv1.TransmissionServiceClient
+	client         tv1.AdsServiceClient
 }
 
 // New will create a new NotificationConsumer.
@@ -87,7 +72,7 @@ func (c *NotificationConsumer) Start(ctx context.Context, conn *grpc.ClientConn,
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.sessionID = sessionID
 	c.edsID = edsID
-	c.client = tv1.NewTransmissionServiceClient(conn)
+	c.client = tv1.NewAdsServiceClient(conn)
 	stream, err := c.client.Control(c.ctx)
 	if err != nil {
 		return fmt.Errorf("error opening control stream: %w", err)
@@ -100,15 +85,6 @@ func (c *NotificationConsumer) Start(ctx context.Context, conn *grpc.ClientConn,
 		return fmt.Errorf("error sending control request: %w", err)
 	}
 	c.logger.Debug("control stream attached")
-
-	c.client.Log(c.ctx, &tv1.LogRequest{
-		EdsId: edsID,
-		Json:  []byte(util.JSONStringify(map[string]any{"message": "test", "severity": "info"})),
-	})
-	if err != nil {
-		return fmt.Errorf("error sending log: %w", err)
-	}
-	c.logger.Debug("log sent")
 
 	c.wg.Add(1)
 	go c.runControl(stream, c.callback)
@@ -125,7 +101,7 @@ func (c *NotificationConsumer) Stop() {
 }
 
 func (c *NotificationConsumer) runControl(
-	stream tv1.TransmissionService_ControlClient,
+	stream tv1.AdsService_ControlClient,
 	controlCallback func(*tv1.ControlCommand) *tv1.ControlReply,
 ) {
 	defer c.wg.Done()
@@ -177,46 +153,16 @@ func (c *NotificationConsumer) publishSimpleStatus(action tv1.StatusAction, errM
 	}
 }
 
-// Need to notify Depot to ingest logs into the monitoring CH database whenever logs
-// are uploaded via the backend API. The code for this is very messy and logs are uploaded
-// in lots of different places, e.g. on an import failure or shutdown. We are wantint
-// to remove the Depot ingestion of logs and log over Transmission (working name for
-// the EDSv4 backend servie) instead
-func (c *NotificationConsumer) PublishSendLogsResponse(logPath string) error {
-	if _, err := c.client.PublishSendLogsComplete(c.ctx, &tv1.PSLCRequest{
-		EdsId:     c.edsID,
-		SessionId: c.sessionID,
-		Path:      logPath,
-	}); err != nil {
-		return fmt.Errorf("failed to send import logs: %w", err)
-	}
-	return nil
-}
+func (c *NotificationConsumer) importaction(_ *tv1.Import) *tv1.ImportReply {
 
-// The return is whether the backfill initialized successfully
-// The result of the import is returned much later in a separate message
-func (c *NotificationConsumer) importaction(req *tv1.Import) *tv1.ImportReply {
-	initResponse := c.handler.BackfillInit(req.Backfill)
+	// This is only here for testing. We removed the backfill flag so in order to avoid the full import the following code was commented out.
 
-	if !initResponse.Success {
-		return &tv1.ImportReply{Success: false, Message: initResponse.Message}
-	}
-	jobId := initResponse.JobID
-	c.publishSimpleStatus(tv1.StatusAction_STATUS_ACTION_IMPORT, "")
-
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		response := c.handler.Import(req.Backfill, jobId)
-		if _, err := c.client.ImportResult(c.ctx, &tv1.ImportResultRequest{
-			SessionId: c.sessionID,
-			Success:   response.Success,
-			Message:   response.Message,
-		}); err != nil {
-			c.logger.Error("failed to send import result: %s", err)
-			return
-		}
-	}()
+	// c.publishSimpleStatus(tv1.StatusAction_STATUS_ACTION_IMPORT, "")
+	// c.wg.Add(1)
+	// go func() {
+	// 	defer c.wg.Done()
+	// 	c.handler.Import()
+	// }()
 	return &tv1.ImportReply{Success: true}
 }
 
@@ -273,13 +219,6 @@ func (c *NotificationConsumer) callback(command *tv1.ControlCommand) *tv1.Contro
 			Success: err == nil,
 			Message: message,
 		}}
-	case *tv1.ControlCommand_Upgrade:
-		c.publishSimpleStatus(tv1.StatusAction_STATUS_ACTION_UPGRADE, "")
-		c.handler.Upgrade(command.GetUpgrade().GetVersion())
-		commandReply.Reply = &tv1.ControlReply_Upgrade{Upgrade: &tv1.UpgradeReply{}}
-	case *tv1.ControlCommand_Sendlogs:
-		c.handler.SendLogs()
-		commandReply.Reply = &tv1.ControlReply_Sendlogs{}
 	case *tv1.ControlCommand_Configure:
 		commandReply.Reply = &tv1.ControlReply_Configure{
 			Configure: c.handler.Configure(command.GetConfigure())}

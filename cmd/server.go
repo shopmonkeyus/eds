@@ -20,13 +20,13 @@ import (
 	"syscall"
 	"time"
 
+	tv1 "eds-v4-prototype/pkg/ads/v1"
+
 	"github.com/fatih/color"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/api"
 	"github.com/shopmonkeyus/eds/internal/notification"
-	"github.com/shopmonkeyus/eds/internal/upgrade"
 	"github.com/shopmonkeyus/eds/internal/util"
-	tv1 "github.com/shopmonkeyus/eds/pkg/transmission/v1"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
 	cstr "github.com/shopmonkeyus/go-common/string"
@@ -80,7 +80,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Version = Version
 	body.OsInfo = osinfo
 	body.ServerID = edsServerId
-	body.UseTransmission = true
+	body.UseEdsV4Prototype = true
 
 	if driverUrl != "" {
 		driverMetadata, err := internal.GetDriverMetadataForURL(driverUrl)
@@ -542,7 +542,6 @@ var serverCmd = &cobra.Command{
 		}()
 
 		port := mustFlagInt(cmd, "port", true)
-		parentPort := mustFlagInt(cmd, "parent", true)
 
 		_args := collectCommandArgs()
 		_args = append(_args, "--port", fmt.Sprintf("%d", port))
@@ -627,81 +626,6 @@ var serverCmd = &cobra.Command{
 				}
 			}
 			return nil
-		}
-
-		upgrade := func(version string) *tv1.UpgradeReply {
-			versionWithoutV := strings.TrimPrefix(version, "v")
-			logger.Info("server upgrade requested to version: %s", versionWithoutV)
-			if util.IsRunningInsideDocker() {
-				return &tv1.UpgradeReply{
-					Success: false,
-					Message: "upgrade is not supported inside a virtualized container system",
-				}
-			}
-			pause()
-			fn := filepath.Join(dataDir, "eds-"+versionWithoutV)
-			c := exec.Command(os.Args[0], "download", version, fn, fmt.Sprintf("--verbose=%v", verbose))
-			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
-			if err := c.Run(); err != nil {
-				logger.Error("upgrade failed: %s", err)
-				unpause()
-				return &tv1.UpgradeReply{
-					Success: false,
-					Message: fmt.Sprintf("failed to download version %s: %s", versionWithoutV, err),
-				}
-			}
-			c = exec.Command(fn, "version")
-			var out strings.Builder
-			c.Stdout = &out
-			c.Stderr = os.Stderr
-			if err := c.Run(); err != nil {
-				logger.Error("upgrade failed checking version: %s", err)
-				unpause()
-				return &tv1.UpgradeReply{
-					Success: false,
-					Message: fmt.Sprintf("upgrade failed checking version: %s", err),
-				}
-			}
-			newversion := strings.TrimSpace(out.String())
-			if newversion != versionWithoutV {
-				logger.Error("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion)
-				unpause()
-				return &tv1.UpgradeReply{
-					Success: false,
-					Message: fmt.Sprintf("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion),
-				}
-			}
-
-			exec := util.GetExecutable() // current running executable path
-
-			if err := upgrade.Apply(exec, fn); err != nil {
-				if rerr := upgrade.RollbackError(err); rerr != nil {
-					logger.Fatal("failed to apply upgrade: %s", rerr)
-				} else {
-					logger.Error("failed to apply upgrade: %s", err)
-					unpause()
-					return &tv1.UpgradeReply{
-						Success: false,
-						Message: fmt.Sprintf("failed to rename old binary: %s", err),
-					}
-				}
-			}
-
-			// if we get here our new binary is in place and we can restart
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/restart", parentPort))
-			if err != nil {
-				logger.Fatal("restart failed: %s", err)
-				return &tv1.UpgradeReply{
-					Success: false,
-					Message: fmt.Sprintf("upgrade failed. tried restarting: %s", err),
-				}
-			} else {
-				logger.Debug("restart response: %d", resp.StatusCode)
-				return &tv1.UpgradeReply{
-					Success: true,
-				}
-			}
 		}
 
 		var logsLock sync.Mutex
@@ -865,24 +789,10 @@ var serverCmd = &cobra.Command{
 			}
 		}
 
-		backFillInit := func(backfill bool) notification.InitBackfillResponse {
-			logger.Trace("received init backfill request")
-			if !backfill {
-				return notification.InitBackfillResponse{SessionID: sessionId, Success: true}
-			}
-			jobID, err := createExportJob(ctx, logger, apiurl, apikey, exportJobCreateRequest{})
-			if err != nil {
-				logger.Error("failed to create export job: %s", err)
-				return notification.InitBackfillResponse{SessionID: sessionId, Success: false, Message: err.Error()}
-			}
-			return notification.InitBackfillResponse{SessionID: sessionId, Success: true, JobID: jobID}
-		}
-
-		importaction := func(backfill bool, jobID string) *tv1.ImportReply {
+		importaction := func() *tv1.ImportReply {
 			logger.Trace("received import action")
 			pause() // pause the consumer, if any, from processing any data while we are importing
-			schemaOnly := !backfill
-			success, _, msg, uploadLogPath := runImport(ctx, driverURL, schemaOnly, false, jobID)
+			success, _, msg, uploadLogPath := runImport(ctx, driverURL, false, false, "")
 			defer func() {
 				if uploadLogPath != nil {
 					publishLogUploadResponse(*uploadLogPath)
@@ -937,15 +847,11 @@ var serverCmd = &cobra.Command{
 			Shutdown:     shutdown,
 			Pause:        pause,
 			Unpause:      unpause,
-			Upgrade:      upgrade,
-			SendLogs:     sendLogs,
 			Configure:    configure,
-			BackfillInit: backFillInit,
 			Import:       importaction,
 			DriverConfig: driverconfig,
 			Validate:     validate,
 		})
-		publishLogUploadResponse = notificationConsumer.PublishSendLogsResponse
 
 		// setup tickers
 		duration, _ := cmd.Flags().GetDuration("renew-interval")
@@ -993,25 +899,28 @@ var serverCmd = &cobra.Command{
 				creds = insecure.NewCredentials()
 			} else {
 				// TODO: Implement credentials handling
-				logger.Error("Transmission credentials not yet implemented")
+				logger.Fatal("eds-v4-prototype credentials not yet implemented")
 			}
-			transmissionAddress := session.Transmission.Address
-			transmissionConnection, err := grpc.NewClient(
-				session.Transmission.Address,
+			if session.EdsV4Prototype == nil || session.EdsV4Prototype.Address == "" {
+				logger.Fatal("session start did not return an eds-v4-prototype address for server %s", edsServerId)
+			}
+			edsV4PrototypeAddress := session.EdsV4Prototype.Address
+			edsV4PrototypeConnection, err := grpc.NewClient(
+				edsV4PrototypeAddress,
 				grpc.WithTransportCredentials(creds),
 			)
 			if err != nil {
-				logger.Fatal("error creating transmission client for %s: %s", transmissionAddress, err)
+				logger.Fatal("error creating eds-v4-prototype client for %s: %s", edsV4PrototypeAddress, err)
 			}
-			defer transmissionConnection.Close()
-			logger.Debug("connected to Transmission session: %s", sessionId)
+			defer edsV4PrototypeConnection.Close()
+			logger.Debug("connected to eds-v4-prototype session: %s", sessionId)
 
 			sessionDir = filepath.Join(dataDir, sessionId)
 			if err := os.MkdirAll(sessionDir, 0700); err != nil {
 				logger.Fatal("failed to create session directory: %s", err)
 			}
 
-			if err := notificationConsumer.Start(ctx, transmissionConnection, sessionId, edsServerId); err != nil {
+			if err := notificationConsumer.Start(ctx, edsV4PrototypeConnection, sessionId, edsServerId); err != nil {
 				logger.Fatal("failed to start notification consumer: %s", err)
 			}
 
@@ -1033,7 +942,7 @@ var serverCmd = &cobra.Command{
 				"--logs-dir", sessionLogsDir,
 				"--url", driverURL,
 				"--server", natsurl,
-				"--transmission-address", transmissionAddress,
+				"--transmission-address", edsV4PrototypeAddress,
 				"--eds-id", edsServerId,
 				"--session-id", sessionId,
 			)
@@ -1065,14 +974,10 @@ var serverCmd = &cobra.Command{
 						logger.Error("failed to get remaining log: %s", err)
 					}
 					logsLock.Lock()
-					logPath, err := sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0 && ec != exitCodeRestart, logFile, filepath.Join(sessionDir, "server_stderr.txt"))
+					_, err = sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0 && ec != exitCodeRestart, logFile, filepath.Join(sessionDir, "server_stderr.txt"))
 					logsLock.Unlock()
 					if err != nil {
 						logger.Error("failed to send end and upload logs: %s", err)
-					} else {
-						if err := notificationConsumer.PublishSendLogsResponse(logPath); err != nil {
-							logger.Error("failed to publish send logs response: %s", err)
-						}
 					}
 				}
 				if ec == exitCodeDisconnected {

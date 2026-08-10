@@ -172,7 +172,7 @@ var forkCmd = &cobra.Command{
 			var client *consumer.Client
 			var err error
 			for !completed {
-				if !paused {
+				if !paused && client == nil {
 					client, err = consumer.NewClient(consumer.ClientConfig{
 						Context:               ctx,
 						Logger:                logger,

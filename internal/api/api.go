@@ -13,21 +13,21 @@ type DriverMeta struct {
 }
 
 type SessionStart struct {
-	Version           string      `json:"version"`
-	Hostname          string      `json:"hostname"`
-	IPAddress         string      `json:"ipAddress"`
-	MachineId         string      `json:"machineId"`
-	OsInfo            any         `json:"osinfo"`
-	Driver            *DriverMeta `json:"driver,omitempty"`
-	ServerID          string      `json:"serverId"`
-	CompanyIDs        []string    `json:"companyIds,omitempty"`
-	UseTransmission   bool        `json:"useTransmission,omitempty"`
+	Version    string      `json:"version"`
+	Hostname   string      `json:"hostname"`
+	IPAddress  string      `json:"ipAddress"`
+	MachineId  string      `json:"machineId"`
+	OsInfo     any         `json:"osinfo"`
+	Driver     *DriverMeta `json:"driver,omitempty"`
+	ServerID   string      `json:"serverId"`
+	CompanyIDs []string    `json:"companyIds,omitempty"`
+	UseEdsV4Prototype bool `json:"useEdsV4Prototype,omitempty"`
 }
 
 type EdsSession struct {
-	SessionId    string                  `json:"sessionId"`
-	Credential   *string                 `json:"credential"`
-	Transmission *TransmissionConnection `json:"transmission,omitempty"`
+	SessionId      string                    `json:"sessionId"`
+	Credential     *string                   `json:"credential"`
+	EdsV4Prototype *EdsV4PrototypeConnection `json:"edsV4Prototype,omitempty"`
 }
 
 type SessionStartResponse struct {
