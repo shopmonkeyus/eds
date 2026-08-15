@@ -12,76 +12,74 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
+const updatedDateColumn = "updatedDate"
+
 func quoteIdentifier(val string) string {
 	return "[" + val + "]"
 }
 
-func toSQLFromObject(model *internal.Schema, table string, object map[string]any, diff []string) string {
-	var sql strings.Builder
+func columnValueOrNull(name string, prop internal.SchemaProperty, object map[string]any) string {
+	v := "NULL"
+	if val, ok := object[name]; ok {
+		v = quoteValue(val)
+	}
+	return util.ToJSONStringVal(name, v, prop, false)
+}
 
+func toSQLFromObject(model *internal.Schema, table string, object map[string]any) string {
+	var updateValues []string
+	var insertColumns []string
+	var insertValues []string
+
+	for _, name := range model.Columns() {
+		v := columnValueOrNull(name, model.Properties[name], object)
+		insertColumns = append(insertColumns, quoteIdentifier(name))
+		insertValues = append(insertValues, v)
+		if name != "id" {
+			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+		}
+	}
+
+	// the source row carries updatedDate so a matched row can reject events that are
+	// older than what has already been written
+	_, hasUpdatedDate := model.Properties[updatedDateColumn]
+
+	var sql strings.Builder
 	sql.WriteString("MERGE ")
 	sql.WriteString(quoteIdentifier(table))
 	sql.WriteString(" AS target")
-	sql.WriteString(" USING (")
-	sql.WriteString("VALUES('")
-	sql.WriteString(object["id"].(string))
-	sql.WriteString("')")
-	sql.WriteString(") AS source (id)")
-	sql.WriteString(" ON target.id=source.id")
-	var updateValues []string
-	if len(diff) > 0 {
-		for _, name := range diff {
-			if !util.SliceContains(model.Columns(), name) || name == "id" {
-				continue
-			}
-			if val, ok := object[name]; ok {
-				prop := model.Properties[name]
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-			} else {
-				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name)))
-			}
-		}
-	} else {
-		for _, name := range model.Columns() {
-			if name == "id" {
-				continue
-			}
-			if val, ok := object[name]; ok {
-				prop := model.Properties[name]
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-			} else {
-				updateValues = append(updateValues, fmt.Sprintf("%s=NULL", quoteIdentifier(name)))
-			}
-		}
+	sql.WriteString(" USING (VALUES(")
+	sql.WriteString(quoteValue(object["id"]))
+	if hasUpdatedDate {
+		sql.WriteString(",")
+		sql.WriteString(quoteValue(object[updatedDateColumn]))
 	}
+	sql.WriteString(")) AS source (")
+	sql.WriteString(quoteIdentifier("id"))
+	if hasUpdatedDate {
+		sql.WriteString(",")
+		sql.WriteString(quoteIdentifier(updatedDateColumn))
+	}
+	sql.WriteString(") ON target.")
+	sql.WriteString(quoteIdentifier("id"))
+	sql.WriteString("=source.")
+	sql.WriteString(quoteIdentifier("id"))
 	if len(updateValues) > 0 {
-		sql.WriteString(" WHEN MATCHED THEN UPDATE SET ")
+		sql.WriteString(" WHEN MATCHED")
+		if hasUpdatedDate {
+			// a row that has never been stamped is always safe to overwrite
+			sql.WriteString(fmt.Sprintf(
+				" AND (target.%[1]s IS NULL OR source.%[1]s>target.%[1]s)",
+				quoteIdentifier(updatedDateColumn),
+			))
+		}
+		sql.WriteString(" THEN UPDATE SET ")
 		sql.WriteString(strings.Join(updateValues, ","))
 	}
 	sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
-	var columns []string
-	for _, name := range model.Columns() {
-		columns = append(columns, quoteIdentifier(name))
-	}
-	sql.WriteString(strings.Join(columns, ","))
-	var insertVals []string
-	for _, name := range model.Columns() {
-		if val, ok := object[name]; ok {
-			prop := model.Properties[name]
-			v := util.ToJSONStringVal(name, quoteValue(val), prop, false)
-			if name != "id" {
-				v = handleSchemaProperty(model.Properties[name], v)
-			}
-			insertVals = append(insertVals, v)
-		} else {
-			v := handleSchemaProperty(model.Properties[name], "NULL")
-			insertVals = append(insertVals, v)
-		}
-	}
+	sql.WriteString(strings.Join(insertColumns, ","))
 	sql.WriteString(") VALUES (")
-	sql.WriteString(strings.Join(insertVals, ","))
+	sql.WriteString(strings.Join(insertValues, ","))
 	sql.WriteString(");") // must be terminated for merge to work
 
 	return sql.String()
@@ -106,7 +104,7 @@ func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 		if err := json.Unmarshal(c.After, &o); err != nil {
 			return "", err
 		}
-		return toSQLFromObject(model, c.Table, o, c.Diff), nil
+		return toSQLFromObject(model, c.Table, o), nil
 	}
 }
 
@@ -138,35 +136,6 @@ func propTypeToSQLType(property internal.SchemaProperty, isPrimaryKey bool) stri
 	}
 }
 
-func handleSchemaProperty(prop internal.SchemaProperty, v string) string {
-	switch prop.Type {
-	case "object":
-		if prop.AdditionalProperties != nil && *prop.AdditionalProperties {
-			return v
-		}
-	case "boolean":
-		if strings.ToLower(v) == "true" || v == "1" {
-			return "1"
-		}
-		if !prop.Nullable && v == "" || strings.ToLower(v) == "false" || strings.ToLower(v) == "null" {
-			return "0"
-
-		}
-	case "integer":
-		if v == "NULL" {
-			return "0"
-		}
-	case "array":
-		//Arrays are stored as varchar
-		if !prop.Nullable && v == "NULL" {
-			return "''"
-		}
-	default:
-		return v
-	}
-	return v
-}
-
 func createSQL(s *internal.Schema) string {
 	var sql strings.Builder
 	sql.WriteString("DROP TABLE IF EXISTS ")
@@ -186,12 +155,13 @@ func createSQL(s *internal.Schema) string {
 	columns = append(s.PrimaryKeys, columns...)
 	for _, name := range columns {
 		prop := s.Properties[name]
+		isPrimaryKey := util.SliceContains(s.PrimaryKeys, name)
 		sql.WriteString("\t")
 		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
-		sql.WriteString(propTypeToSQLType(prop, util.SliceContains(s.PrimaryKeys, name)))
-		if util.SliceContains(s.Required, name) && !prop.Nullable {
-			sql.WriteString(" NOT NULL")
+		sql.WriteString(propTypeToSQLType(prop, isPrimaryKey))
+		if !isPrimaryKey {
+			sql.WriteString(" NULL")
 		}
 		sql.WriteString(",\n")
 	}
@@ -225,7 +195,7 @@ func addNewColumnsSQL(logger logger.Logger, columns []string, s *internal.Schema
 		sql.WriteString(quoteIdentifier(column))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop, false))
-		sql.WriteString(";")
+		sql.WriteString(" NULL;")
 		res = append(res, sql.String())
 	}
 	return res
