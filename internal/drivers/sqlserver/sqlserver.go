@@ -192,7 +192,7 @@ func (p *sqlserverDriver) ImportEvent(event internal.DBChangeEvent, schema *inte
 	if err != nil {
 		return err
 	}
-	sql := toSQLFromObject(schema, event.Table, object, nil)
+	sql := toSQLFromObject(schema, event.Table, object)
 	p.pending.WriteString(sql)
 	p.count++
 	p.size += len(sql)
