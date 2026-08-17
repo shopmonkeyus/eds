@@ -792,7 +792,8 @@ var serverCmd = &cobra.Command{
 		importaction := func() *tv1.ImportReply {
 			logger.Trace("received import action")
 			pause() // pause the consumer, if any, from processing any data while we are importing
-			success, _, msg, uploadLogPath := runImport(ctx, driverURL, false, false, "")
+			// backfill is gone, so this is always the schema-only path the old !backfill case took
+			success, _, msg, uploadLogPath := runImport(ctx, driverURL, true, false, "")
 			defer func() {
 				if uploadLogPath != nil {
 					publishLogUploadResponse(*uploadLogPath)

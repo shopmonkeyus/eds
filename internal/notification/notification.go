@@ -154,16 +154,8 @@ func (c *NotificationConsumer) publishSimpleStatus(action tv1.StatusAction, errM
 }
 
 func (c *NotificationConsumer) importaction(_ *tv1.Import) *tv1.ImportReply {
-
-	// This is only here for testing. We removed the backfill flag so in order to avoid the full import the following code was commented out.
-
-	// c.publishSimpleStatus(tv1.StatusAction_STATUS_ACTION_IMPORT, "")
-	// c.wg.Add(1)
-	// go func() {
-	// 	defer c.wg.Done()
-	// 	c.handler.Import()
-	// }()
-	return &tv1.ImportReply{Success: true}
+	c.publishSimpleStatus(tv1.StatusAction_STATUS_ACTION_IMPORT, "")
+	return c.handler.Import()
 }
 
 func (c *NotificationConsumer) driverconfig() *tv1.DriverConfigReply {
