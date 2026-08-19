@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	defaultMaxCount     = 200
+	defaultMaxCount     = 5
 	defaultFetchTimeout = 500 * time.Millisecond
 	extraFetchTimeout   = 500 * time.Millisecond
 
@@ -306,7 +306,7 @@ func (c *Client) fetchOnce() {
 	c.logger.Debug("fetching (maxCount=%d timeout=%s)", c.maxCount, c.fetchTimeout)
 
 	stream, err := c.client.Fetch(fetchCtx, &adsv1.FetchRequest{
-		EdsId:     c.edsID,
+		SessionId: c.sessionID,
 		MaxCount:  c.maxCount,
 		TimeoutMs: c.fetchTimeout.Milliseconds(),
 	})
