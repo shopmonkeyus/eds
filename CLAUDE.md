@@ -46,13 +46,25 @@ Non-negotiable. If a later rule seems to conflict with one of these, the invaria
 
 3. **Releases are PGP-signed.** The public key is committed as [`shopmonkey.asc`](./shopmonkey.asc), and the README tells customers to verify with it. Never publish an unsigned release. Never rotate that key without a customer communication plan — verification breaks the moment you do.
 
-4. **The inbound event shape is owned by `changefeed`.**
+4. **The inbound event shape is owned by `changefeed`.** Verified against `changefeed/pkg/types/types.go:180`:
 
    ```
-   dbchange.{table}.{operation}.{companyId}.{locationId}.{visibility}.{partition}{suffix}
+   dbchange.{table}.{operation}.{companyId}.{locationId}.{visibility}.{partition}.{primaryKey}{suffix}
    ```
+
+   `primaryKey` is never empty — `changefeed` errors out rather than emit one. With a compound key it is the key **minus its first element**, which is the region, joined by dots. So the token count after `{partition}` varies, and any wildcard must use `>` rather than a fixed number of `*`.
 
    EDS consumes it. If it changes upstream, every customer's stream stops. Coordinate with `changefeed`; never patch a mismatch locally.
+
+   **The subject filter is also where tenant isolation lives.** `internal/consumer/consumer.go` builds:
+
+   ```go
+   subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
+   ```
+
+   Two guarantees are enforced by that one string: the paired company is pinned in the `companyId` position, and only `PUBLIC` models are received at all. **Widening either token is a data-breach class change, not a tuning change.** See invariant 7.
+
+   Note the JSON is parsed by our own struct in `internal/dbchange.go`, not by a shared type — nothing upstream will fail to compile if `changefeed` retags a field. That struct currently ignores `region`, `sessionId` and `version`.
 
 5. **Backward compatibility on config and state.** The data directory, session state, and config file are written by older versions and read by newer ones. A migration must handle every prior layout, not just the last.
 
