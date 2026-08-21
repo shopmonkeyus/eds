@@ -46,13 +46,18 @@ Non-negotiable. If a later rule seems to conflict with one of these, the invaria
 
 3. **Releases are PGP-signed.** The public key is committed as [`shopmonkey.asc`](./shopmonkey.asc), and the README tells customers to verify with it. Never publish an unsigned release. Never rotate that key without a customer communication plan — verification breaks the moment you do.
 
-4. **The inbound event shape is owned by `changefeed`.** Verified against `changefeed/pkg/types/types.go:180`:
+4. **The inbound event shape is owned by `changefeed`.** Produced by `GenerateSubject()` at `changefeed/pkg/types/types.go:289`:
 
    ```
    dbchange.{table}.{operation}.{companyId}.{locationId}.{visibility}.{partition}.{primaryKey}{suffix}
    ```
 
-   `primaryKey` is never empty — `changefeed` errors out rather than emit one. With a compound key it is the key **minus its first element**, which is the region, joined by dots. So the token count after `{partition}` varies, and any wildcard must use `>` rather than a fixed number of `*`.
+   `primaryKey` is never empty — `changefeed` returns an error rather than emit one — and it is **always a single token**, because a compound key is joined with `-`. Extra tokens after it come only from `{suffix}`, so a wildcard needs `>` at the tail for that reason.
+
+   Two cautions if you go reading `changefeed` to check this:
+
+   - There is a second builder, `Subject()` at line 180, which joins a compound key with **`.`** instead. It has **no production callers**. Do not treat it as the contract.
+   - Both drop `Key[0]` on a compound key, on the assumption it is the region. **Whether that still holds is an open question** — see invariant 3 in `changefeed/CLAUDE.md`. It does not affect EDS today, because no table has a compound primary key.
 
    EDS consumes it. If it changes upstream, every customer's stream stops. Coordinate with `changefeed`; never patch a mismatch locally.
 
