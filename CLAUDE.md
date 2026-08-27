@@ -114,20 +114,15 @@ shopmonkey.asc            # PGP public key — customers verify against this
 
 `internal/driver.go` defines the interface every driver implements. Read it before adding a destination.
 
-## Releasing
+## Releasing — an agent must never do this
 
-Uses **goreleaser**.
+A release publishes signed binaries to a **public** repo, notifies watchers on GitHub, and reaches customer-installed servers we cannot patch, restart, or roll back. **It is the least reversible action in this codebase.**
 
-```bash
-git checkout main
-git tag -a vX.Y.Z -m "description"
-git push origin vX.Y.Z
-goreleaser release --clean
-```
+**The commands are deliberately not in this file, and a hook blocks them.** See `.claude/hooks/block-release.sh`. A human runs releases.
 
-Requirements: `goreleaser` installed, and a GitHub token with `write:packages`.
+**Before any release, a human must confirm with enterprise customers that nothing breaks.** They run processes involving customer money through EDS. See fact 3 above.
 
-**Before every release:** confirm with enterprise customers that nothing breaks. See fact 3 above.
+One thing not to confuse: the README's *"Creating a manual release locally"* uses `goreleaser release --snapshot --clean`. **`--snapshot` builds without publishing. That is not a release**, and the hook allows it.
 
 ## Internal development
 
