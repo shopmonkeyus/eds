@@ -84,21 +84,29 @@ func (c *DBChangeEvent) GetObject() (map[string]any, error) {
 	return nil, nil
 }
 
-func DBChangeEventFromMessage(msg jetstream.Msg) (DBChangeEvent, error) {
+func DBChangeEventFromPayload(payload []byte) (DBChangeEvent, error) {
 	var evt DBChangeEvent
-	buffer := msg.Data()
-	md, _ := msg.Metadata()
-	if err := json.Unmarshal(buffer, &evt); err != nil {
-		return evt, fmt.Errorf("error unmarshalling message into DBChangeEvent: %s (seq:%d) raw message:\n%s", err, md.Sequence.Consumer, string(buffer))
+	if err := json.Unmarshal(payload, &evt); err != nil {
+		return evt, fmt.Errorf("error unmarshalling message into DBChangeEvent: %s raw message:\n%s", err, string(payload))
 	}
 
 	if _, err := evt.GetObject(); err != nil {
-		return evt, fmt.Errorf("error getting object (before/after is malformed): %s (seq:%d) raw message:\n%s", err, md.Sequence.Consumer, string(buffer))
+		return evt, fmt.Errorf("error getting object (before/after is malformed): %s raw message:\n%s", err, string(payload))
 	}
 
 	pk := evt.GetPrimaryKey()
 	if pk == "" {
-		return evt, fmt.Errorf("primary key is empty: %s (seq:%d) raw message:\n%s", evt.ID, md.Sequence.Consumer, string(buffer))
+		return evt, fmt.Errorf("primary key is empty: %s raw message:\n%s", evt.ID, string(payload))
+	}
+
+	return evt, nil
+}
+
+func DBChangeEventFromMessage(msg jetstream.Msg) (DBChangeEvent, error) {
+	evt, err := DBChangeEventFromPayload(msg.Data())
+	if err != nil {
+		md, _ := msg.Metadata()
+		return evt, fmt.Errorf("%w (seq:%d)", err, md.Sequence.Consumer)
 	}
 
 	evt.NatsMsg = msg // in case the driver wants to get specific information from it for logging, etc

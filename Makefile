@@ -1,6 +1,12 @@
-.PHONY: all build lint release test vet tidy e2e
+.PHONY: all build lint release test vet tidy e2e proto proto-check
 
 all: build
+
+proto:
+	@cd proto && buf generate
+
+proto-check: proto
+	@git diff --exit-code pkg/transmission/v1
 
 build:
 	@go build -v -o /dev/null

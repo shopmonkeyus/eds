@@ -267,9 +267,9 @@ func createSQL(s *internal.Schema) string {
 		sql.WriteString(quoteIdentifier(name))
 		sql.WriteString(" ")
 		sql.WriteString(propTypeToSQLType(prop))
-		if util.SliceContains(s.Required, name) && !prop.Nullable {
-			sql.WriteString(" NOT NULL")
-		}
+		// if util.SliceContains(s.Required, name) && !prop.Nullable {
+		// 	sql.WriteString(" NOT NULL")
+		// }
 		sql.WriteString(",\n")
 	}
 	if len(s.PrimaryKeys) > 0 {

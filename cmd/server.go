@@ -13,18 +13,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	tv1 "eds-v4-prototype/pkg/ads/v1"
+
 	"github.com/fatih/color"
 	"github.com/shopmonkeyus/eds/internal"
 	"github.com/shopmonkeyus/eds/internal/api"
-	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/notification"
-	"github.com/shopmonkeyus/eds/internal/upgrade"
 	"github.com/shopmonkeyus/eds/internal/util"
 	"github.com/shopmonkeyus/go-common/command"
 	"github.com/shopmonkeyus/go-common/logger"
@@ -32,6 +33,9 @@ import (
 	"github.com/shopmonkeyus/go-common/sys"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 var Version string                // set in main
@@ -52,7 +56,7 @@ func writeCredsToFile(data string, filename string) error {
 
 var errAlreadyRunning = errors.New("already running")
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string, companyIds []string) (*api.EdsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string) (*api.EdsSession, error) {
 	var body api.SessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -76,7 +80,7 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.Version = Version
 	body.OsInfo = osinfo
 	body.ServerID = edsServerId
-	body.CompanyIDs = companyIds
+	body.UseEdsV4Prototype = true
 
 	if driverUrl != "" {
 		driverMetadata, err := internal.GetDriverMetadataForURL(driverUrl)
@@ -538,11 +542,6 @@ var serverCmd = &cobra.Command{
 		}()
 
 		port := mustFlagInt(cmd, "port", true)
-		oldHealthPort := mustFlagInt(cmd, "health-port", false)
-		if oldHealthPort > 0 {
-			port = oldHealthPort // allow it for now for backwards compatibility but eventually remove it
-		}
-		parentPort := mustFlagInt(cmd, "parent", true)
 
 		_args := collectCommandArgs()
 		_args = append(_args, "--port", fmt.Sprintf("%d", port))
@@ -557,6 +556,9 @@ var serverCmd = &cobra.Command{
 		processCallback := func(p *os.Process) {
 			logger.Debug("fork process started with pid: %d", p.Pid)
 		}
+
+		// need this to untangle log upload publish from notification handler functions
+		var publishLogUploadResponse func(logPath string) error = func(string) error { return nil }
 
 		restart := func() {
 			if configured {
@@ -626,131 +628,42 @@ var serverCmd = &cobra.Command{
 			return nil
 		}
 
-		upgrade := func(version string) notification.UpgradeResponse {
-			versionWithoutV := strings.TrimPrefix(version, "v")
-			logger.Info("server upgrade requested to version: %s", versionWithoutV)
-			if util.IsRunningInsideDocker() {
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   "upgrade is not supported inside a virtualized container system",
-					SessionID: sessionId,
-					Version:   version,
-				}
-			}
-			pause()
-			fn := filepath.Join(dataDir, "eds-"+versionWithoutV)
-			c := exec.Command(os.Args[0], "download", version, fn, fmt.Sprintf("--verbose=%v", verbose))
-			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
-			if err := c.Run(); err != nil {
-				logger.Error("upgrade failed: %s", err)
-				unpause()
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("failed to download version %s: %s", versionWithoutV, err),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
-				}
-			}
-			c = exec.Command(fn, "version")
-			var out strings.Builder
-			c.Stdout = &out
-			c.Stderr = os.Stderr
-			if err := c.Run(); err != nil {
-				logger.Error("upgrade failed checking version: %s", err)
-				unpause()
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("upgrade failed checking version: %s", err),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
-				}
-			}
-			newversion := strings.TrimSpace(out.String())
-			if newversion != versionWithoutV {
-				logger.Error("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion)
-				unpause()
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("upgrade failed checking version: %s, was: %s", versionWithoutV, newversion),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
-				}
-			}
-
-			exec := util.GetExecutable() // current running executable path
-
-			if err := upgrade.Apply(exec, fn); err != nil {
-				if rerr := upgrade.RollbackError(err); rerr != nil {
-					logger.Fatal("failed to apply upgrade: %s", rerr)
-				} else {
-					logger.Error("failed to apply upgrade: %s", err)
-					unpause()
-					return notification.UpgradeResponse{
-						Success:   false,
-						Message:   fmt.Sprintf("failed to rename old binary: %s", err),
-						SessionID: sessionId,
-						Version:   versionWithoutV,
-					}
-				}
-			}
-
-			// if we get here our new binary is in place and we can restart
-			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/restart", parentPort))
-			if err != nil {
-				logger.Fatal("restart failed: %s", err)
-				return notification.UpgradeResponse{
-					Success:   false,
-					Message:   fmt.Sprintf("upgrade failed. tried restarting: %s", err),
-					SessionID: sessionId,
-					Version:   versionWithoutV,
-				}
-			} else {
-				logger.Debug("restart response: %d", resp.StatusCode)
-				return notification.UpgradeResponse{
-					Success:   true,
-					SessionID: sessionId,
-					Version:   versionWithoutV,
-				}
-			}
-		}
-
 		var logsLock sync.Mutex
-		sendLogs := func() *notification.SendLogsResponse {
+		sendLogs := func() bool {
 			logger.Info("server logfile requested")
 			logsLock.Lock()
 			defer logsLock.Unlock()
 			if sessionId == "" {
 				logger.Error("no session ID to rotate logs")
-				return nil
+				return false
 			}
 			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/control/logfile", port))
 			if err != nil {
 				logger.Error("logfile failed: %s", err)
-				return nil
+				return false
 			}
 			logger.Debug("logfile response: %d", resp.StatusCode)
 			if resp.StatusCode != http.StatusOK {
 				logger.Error("logfile failed: %d", resp.StatusCode)
-				return nil
+				return false
 			}
 			defer resp.Body.Close()
 
 			buf, err := io.ReadAll(resp.Body)
 			if err != nil {
 				logger.Error("failed to read body: %s", err)
-				return nil
+				return false
 			}
 			logFile := string(buf)
 			uploadURL, err := getLogUploadURL(logger, apiurl, apikey, sessionId)
 			if err != nil {
 				logger.Error("failed to get upload URL: %s", err)
-				return nil
+				return false
 			}
 			path, err := uploadLogFile(logger, uploadURL, logFile)
 			if err != nil {
 				logger.Error("failed to upload logfile: %s", err)
-				return nil
+				return false
 			}
 
 			// fork will be done writing to the file, so we can remove it
@@ -759,13 +672,12 @@ var serverCmd = &cobra.Command{
 				os.Remove(logFile)
 			}
 
-			return &notification.SendLogsResponse{
-				Path:      path,
-				SessionID: sessionId,
-			}
+			publishLogUploadResponse(path)
+
+			return true
 		}
 
-		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool, jobId string) (bool, bool, *string, *string) {
+		runImport := func(ctx context.Context, url string, schemaOnly bool, validateOnly bool, jobId string) (bool, bool, string, *string) {
 			importargs := []string{"--url", url, "--api-key", apikey, "--no-confirm", "--data-dir", dataDir}
 			if schemaOnly {
 				importargs = append(importargs, "--schema-only")
@@ -796,7 +708,7 @@ var serverCmd = &cobra.Command{
 			})
 			if err != nil && result == nil {
 				s := "Error importing data. Please contact support for assistance."
-				return true, false, &s, nil
+				return true, false, s, nil
 			} else {
 				ec := result.ProcessState.ExitCode()
 				logger.Debug("import exit code: %d, last log line: %s", ec, result.LastErrorLines)
@@ -805,7 +717,7 @@ var serverCmd = &cobra.Command{
 				}
 				switch ec {
 				case 0:
-					return true, true, nil, nil
+					return true, true, "", nil
 				case exitCodeIncorrectUsage:
 					var msg string
 					tok := strings.Split(strings.TrimRight(result.LastErrorLines, "\n"), "\n")
@@ -814,7 +726,7 @@ var serverCmd = &cobra.Command{
 					} else {
 						msg = strings.TrimSpace(result.LastErrorLines)
 					}
-					return false, false, &msg, nil // this means the url is invalid
+					return false, false, msg, nil // this means the url is invalid
 				default:
 					logger.Error("import failed with exit code %d: %s", ec, result.LastErrorLines)
 					var uploadLogPath string
@@ -839,63 +751,56 @@ var serverCmd = &cobra.Command{
 						}
 					}
 					s := "Error importing data. See the error logs for more details or contact support for further assistance."
-					return true, false, &s, &uploadLogPath
+					return true, false, s, &uploadLogPath
 				}
 			}
 		}
 
-		configure := func(config *notification.ConfigureRequest) *notification.ConfigureResponse {
-			logger.Trace("received driver configuration. url: %s", cstr.Mask(config.URL))
-			success, validated, msg, uploadLogPath := runImport(ctx, config.URL, false, true, "")
-			var maskedURL *string
+		configure := func(config *tv1.Configure) *tv1.ConfigureReply {
+			url := config.GetUrl()
+			logger.Trace("received driver configuration. url: %s", cstr.Mask(url))
+			success, validated, msg, uploadLogPath := runImport(ctx, url, false, true, "")
+			if uploadLogPath != nil {
+				publishLogUploadResponse(*uploadLogPath)
+			}
+			var maskedURL string
 			if success && validated {
-				viper.Set("url", config.URL)
+				viper.Set("url", url)
 				if err := viper.WriteConfig(); err != nil {
 					logger.Error("failed to write config: %s", err)
 				}
 				logger.Info("driver configured successfully, waiting for import action...")
-				driverURL = config.URL
-				if masked, err := util.MaskURL(config.URL); err != nil {
+				driverURL = url
+				if masked, err := util.MaskURL(url); err != nil {
 					logger.Warn("could not mask URL, will not display in app: %s", err)
 				} else {
-					maskedURL = &masked
+					maskedURL = masked
 				}
 				if !configured {
 					// restart the server
 					restart()
 				}
 			}
-
-			return &notification.ConfigureResponse{
-				SessionID: sessionId,
+			return &tv1.ConfigureReply{
 				Success:   validated,
-				LogPath:   uploadLogPath,
-				MaskedURL: maskedURL,
+				MaskedUrl: maskedURL,
 				Message:   msg,
 				Backfill:  config.Backfill,
 			}
 		}
 
-		backFillInit := func(req *notification.InitBackfillRequest) *notification.InitBackfillResponse {
-			logger.Trace("received init backfill request")
-			if !req.Backfill {
-				return &notification.InitBackfillResponse{SessionID: sessionId, Success: true}
-			}
-			jobID, err := createExportJob(ctx, logger, apiurl, apikey, exportJobCreateRequest{})
-			if err != nil {
-				logger.Error("failed to create export job: %s", err)
-				errorMessage := err.Error()
-				return &notification.InitBackfillResponse{SessionID: sessionId, Success: false, Message: &errorMessage}
-			}
-			return &notification.InitBackfillResponse{SessionID: sessionId, Success: true, JobID: jobID}
-		}
-
-		importaction := func(req *notification.ImportRequest) *notification.ImportResponse {
+		importaction := func() *tv1.ImportReply {
 			logger.Trace("received import action")
 			pause() // pause the consumer, if any, from processing any data while we are importing
-			success, _, msg, uploadLogPath := runImport(ctx, driverURL, !req.Backfill, false, req.JobID)
+			// backfill is gone, so this is always the schema-only path the old !backfill case took
+			success, _, msg, uploadLogPath := runImport(ctx, driverURL, true, false, "")
+			defer func() {
+				if uploadLogPath != nil {
+					publishLogUploadResponse(*uploadLogPath)
+				}
+			}()
 			if !success {
-				return &notification.ImportResponse{SessionID: sessionId, Success: false, Message: msg, LogPath: uploadLogPath}
+				return &tv1.ImportReply{Success: false, Message: msg}
 			}
 			if !configured {
 				logger.Trace("driver configured")
@@ -903,28 +808,36 @@ var serverCmd = &cobra.Command{
 			} else {
 				restart() // once we have finished the import, restart the server to pick up the new timestamps, etc
 			}
-			return &notification.ImportResponse{SessionID: sessionId, Success: success, Message: msg, LogPath: uploadLogPath}
+			return &tv1.ImportReply{Success: success, Message: msg}
 		}
 
-		driverconfig := func() *notification.DriverConfigResponse {
+		driverconfig := func() *tv1.DriverConfigReply {
 			config := internal.GetDriverConfigurations()
-			return &notification.DriverConfigResponse{
-				SessionID: sessionId,
-				Drivers:   config,
+			bytes, err := json.Marshal(config)
+			if err != nil {
+				logger.Error("failed to marshal driver configurations: %s", err)
+				return nil
 			}
+			return &tv1.DriverConfigReply{Drivers: bytes}
 		}
 
-		validate := func(driver string, values map[string]any) *notification.ValidateResponse {
+		validate := func(driver string, values map[string]any) *tv1.ValidateReply {
 			url, fielderrs, err := internal.Validate(driver, values)
 			var msg string
 			if err != nil {
 				msg = err.Error()
 			}
-			return &notification.ValidateResponse{
+			var fieldErrorsProto []*tv1.FieldError
+			for _, fieldError := range fielderrs {
+				fieldErrorsProto = append(fieldErrorsProto, &tv1.FieldError{
+					Field:   fieldError.Field,
+					Message: fieldError.Message,
+				})
+			}
+			return &tv1.ValidateReply{
 				Success:     err == nil && url != "",
-				SessionID:   sessionId,
-				FieldErrors: fielderrs,
-				URL:         url,
+				FieldErrors: fieldErrorsProto,
+				Url:         url,
 				Message:     msg,
 			}
 		}
@@ -935,10 +848,7 @@ var serverCmd = &cobra.Command{
 			Shutdown:     shutdown,
 			Pause:        pause,
 			Unpause:      unpause,
-			Upgrade:      upgrade,
-			SendLogs:     sendLogs,
 			Configure:    configure,
-			BackfillInit: backFillInit,
 			Import:       importaction,
 			DriverConfig: driverconfig,
 			Validate:     validate,
@@ -957,14 +867,12 @@ var serverCmd = &cobra.Command{
 				select {
 				case <-logSenderTicker.C:
 					// ask the notification consumer to send the logs so it can report the success/failure
-					notificationConsumer.CallSendLogs()
+					sendLogs()
 				case <-renewTicker.C:
 					restart()
 				}
 			}
 		}()
-
-		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
 
 		// main loop
 		var failures int
@@ -972,38 +880,51 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId, companyIds)
+
+			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId)
 			if err != nil {
 				if errors.Is(err, errAlreadyRunning) {
 					logger.Info("another eds server is already running for this server (id: %s). Retrying in 5 seconds", edsServerId)
 					time.Sleep(time.Second * 5)
 					continue
 				}
-				logger.Fatal("failed to send session start: %s", err)
+				errorType := reflect.TypeOf(err)
+
+				logger.Fatal("failed to send session start: %s, error type: %s", err, errorType.String())
 			}
 			logger.Trace("session started: %s", util.JSONStringify(session))
 			sessionId = session.SessionId
+
+			var creds credentials.TransportCredentials
+			if session.Credential == nil {
+				creds = insecure.NewCredentials()
+			} else {
+				// TODO: Implement credentials handling
+				logger.Fatal("eds-v4-prototype credentials not yet implemented")
+			}
+			if session.EdsV4Prototype == nil || session.EdsV4Prototype.Address == "" {
+				logger.Fatal("session start did not return an eds-v4-prototype address for server %s", edsServerId)
+			}
+			edsV4PrototypeAddress := session.EdsV4Prototype.Address
+			edsV4PrototypeConnection, err := grpc.NewClient(
+				edsV4PrototypeAddress,
+				grpc.WithTransportCredentials(creds),
+			)
+			if err != nil {
+				logger.Fatal("error creating eds-v4-prototype client for %s: %s", edsV4PrototypeAddress, err)
+			}
+			defer edsV4PrototypeConnection.Close()
+			logger.Debug("connected to eds-v4-prototype session: %s", sessionId)
+
 			sessionDir = filepath.Join(dataDir, sessionId)
 			if err := os.MkdirAll(sessionDir, 0700); err != nil {
 				logger.Fatal("failed to create session directory: %s", err)
 			}
-			if session.Credential == nil {
-				logger.Fatal("no credential found in session")
+
+			if err := notificationConsumer.Start(ctx, edsV4PrototypeConnection, sessionId, edsServerId); err != nil {
+				logger.Fatal("failed to start notification consumer: %s", err)
 			}
-			// write credential to file
-			credsFile = filepath.Join(sessionDir, "nats.creds")
-			if err := writeCredsToFile(*session.Credential, credsFile); err != nil {
-				logger.Fatal("failed to write creds to file: %s", err)
-			}
-			logger.Trace("creds written to %s", credsFile)
-			if err := notificationConsumer.Start(credsFile); err != nil {
-				if strings.Contains(err.Error(), "error connecting to NATS") {
-					logger.Trace("error from nats: %s", err)
-					logger.Trace("nats not available, retrying in 5 seconds")
-					time.Sleep(time.Second * 5)
-					continue
-				}
-			}
+
 			if !configured {
 				logger.Info("Return to HQ and continue with configuring your server.")
 				select {
@@ -1022,6 +943,9 @@ var serverCmd = &cobra.Command{
 				"--logs-dir", sessionLogsDir,
 				"--url", driverURL,
 				"--server", natsurl,
+				"--transmission-address", edsV4PrototypeAddress,
+				"--eds-id", edsServerId,
+				"--session-id", sessionId,
 			)
 			result, err := command.Fork(command.ForkArgs{
 				Log:              logger,
@@ -1051,18 +975,15 @@ var serverCmd = &cobra.Command{
 						logger.Error("failed to get remaining log: %s", err)
 					}
 					logsLock.Lock()
-					logPath, err := sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0 && ec != exitCodeRestart, logFile, filepath.Join(sessionDir, "server_stderr.txt"))
+					_, err = sendEndAndUpload(logger, apiurl, apikey, session.SessionId, ec != 0 && ec != exitCodeRestart, logFile, filepath.Join(sessionDir, "server_stderr.txt"))
 					logsLock.Unlock()
 					if err != nil {
 						logger.Error("failed to send end and upload logs: %s", err)
-					} else {
-						if err := notificationConsumer.PublishSendLogsResponse(&notification.SendLogsResponse{Path: logPath, SessionID: sessionId}); err != nil {
-							logger.Error("failed to publish send logs response: %s", err)
-						}
 					}
 				}
-				if ec == exitCodeNatsDisconnected {
+				if ec == exitCodeDisconnected {
 					logger.Info("nats disconnected, retrying in 5 seconds")
+					notificationConsumer.Stop()
 					time.Sleep(time.Second * 5)
 					continue
 				}
@@ -1170,32 +1091,14 @@ func init() {
 	serverCmd.Flags().Int("port", getOSInt("PORT", 8080), "the port to listen for health checks, metrics etc")
 	serverCmd.Flags().String("eds-id", "", "the EDS server ID")
 	viper.BindPFlag("server_id", serverCmd.Flags().Lookup("eds-id"))
-	serverCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple, if not set will use all")
-	serverCmd.Flags().MarkHidden("companyIds") // not intended for production use
 	serverCmd.Flags().Bool("keep-logs", false, "keep logs after the server exits instead of deleting them")
 	viper.BindPFlag("keep_logs", serverCmd.Flags().Lookup("keep-logs"))
-
-	// deprecated but left for backwards compatibility
-	serverCmd.Flags().Int("health-port", 0, "the port to listen for health checks")
-	serverCmd.Flags().MarkDeprecated("health-port", "use --port instead")
 
 	// internal use only
 	serverCmd.Flags().String("api-url", "https://api.shopmonkey.cloud", "url to shopmonkey api")
 	serverCmd.Flags().MarkHidden("api-url")
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().MarkHidden("server")
-	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
-	serverCmd.Flags().MarkHidden("consumer-suffix")
-	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
-	serverCmd.Flags().MarkHidden("maxAckPending")
-	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
-	serverCmd.Flags().MarkHidden("maxPendingBuffer")
-	serverCmd.Flags().Duration("minPendingLatency", consumer.DefaultMinPendingLatency, "the minimum accumulation period before flushing (0 uses default)")
-	serverCmd.Flags().MarkHidden("minPendingLatency")
-	serverCmd.Flags().Duration("maxPendingLatency", consumer.DefaultMaxPendingLatency, "the maximum accumulation period before flushing (0 uses default)")
-	serverCmd.Flags().MarkHidden("maxPendingLatency")
-	serverCmd.Flags().Bool("restart", false, "restart the consumer from the beginning (only works on new consumers)")
-	serverCmd.Flags().MarkHidden("restart")
 	serverCmd.Flags().Duration("renew-interval", time.Hour*24, "the interval to renew the session")
 	serverCmd.Flags().MarkHidden("renew-interval")
 	serverCmd.Flags().Bool("wrapper", false, "running in wrapper mode")

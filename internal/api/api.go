@@ -21,11 +21,13 @@ type SessionStart struct {
 	Driver     *DriverMeta `json:"driver,omitempty"`
 	ServerID   string      `json:"serverId"`
 	CompanyIDs []string    `json:"companyIds,omitempty"`
+	UseEdsV4Prototype bool `json:"useEdsV4Prototype,omitempty"`
 }
 
 type EdsSession struct {
-	SessionId  string  `json:"sessionId"`
-	Credential *string `json:"credential"`
+	SessionId      string                    `json:"sessionId"`
+	Credential     *string                   `json:"credential"`
+	EdsV4Prototype *EdsV4PrototypeConnection `json:"edsV4Prototype,omitempty"`
 }
 
 type SessionStartResponse struct {

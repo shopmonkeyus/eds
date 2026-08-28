@@ -131,7 +131,7 @@ func TestImportActionReturnsErrorOnInitFailure(t *testing.T) {
 		logger: logger.NewTestLogger(),
 		handler: NotificationHandler{
 			BackfillInit: func(*InitBackfillRequest) *InitBackfillResponse {
-				return &InitBackfillResponse{Success: false, Message: &errMsg}
+				return &InitBackfillResponse{Success: false, Message: errMsg}
 			},
 		},
 	}
@@ -146,7 +146,7 @@ func TestImportActionReturnsErrorOnInitFailure(t *testing.T) {
 	var resp InitBackfillResponse
 	json.Unmarshal(reply.Data, &resp)
 	assert.False(t, resp.Success)
-	assert.Equal(t, "init failed", *resp.Message)
+	assert.Equal(t, "init failed", resp.Message)
 }
 
 func TestImportActionReturnsSuccessOnInitSuccess(t *testing.T) {
