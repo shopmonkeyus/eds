@@ -31,7 +31,7 @@ require (
 	github.com/prometheus/client_golang v1.23.0
 	github.com/prometheus/client_model v0.6.2
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
-	github.com/savsgio/gotils v0.0.0-20250408102913-196191ec6287
+	github.com/savsgio/gotils v0.0.0-20250924091648-bce9a52d7761
 	github.com/segmentio/kafka-go v0.4.48
 	github.com/shirou/gopsutil/v4 v4.25.10
 	github.com/shopmonkeyus/go-common v0.0.78
