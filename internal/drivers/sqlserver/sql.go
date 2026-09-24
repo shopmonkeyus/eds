@@ -27,13 +27,7 @@ func columnValueOrNull(name string, prop internal.SchemaProperty, object map[str
 // ledgerNotNewer is the predicate that is true when the ledger already holds a
 // version at least as new as the incoming one, i.e. the incoming event is stale.
 func ledgerNotNewer(table, pk, version string) string {
-	return fmt.Sprintf(
-		"EXISTS (SELECT 1 FROM %s l WHERE l.%s=%s AND l.%s=%s AND l.%s>=%s)",
-		quoteIdentifier(util.LedgerTableName),
-		quoteIdentifier("table_name"), quoteValue(table),
-		quoteIdentifier("pk"), quoteValue(pk),
-		quoteIdentifier("mvcc"), quoteValue(version),
-	)
+	return util.LedgerNotNewer(quoteIdentifier, quoteValue, table, pk, version)
 }
 
 // ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
@@ -175,14 +169,9 @@ func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 }
 
 // createLedgerTableSQL creates the side high-water-mark table if it does not
-// already exist.
-func createLedgerTableSQL() string {
-	return fmt.Sprintf(
-		"IF OBJECT_ID(N'%[1]s', N'U') IS NULL CREATE TABLE %[1]s (%[2]s VARCHAR(255) NOT NULL, %[3]s VARCHAR(255) NOT NULL, %[4]s VARCHAR(40) NOT NULL, %[5]s DATETIME2 NOT NULL, PRIMARY KEY (%[2]s,%[3]s));",
-		quoteIdentifier(util.LedgerTableName),
-		quoteIdentifier("table_name"), quoteIdentifier("pk"), quoteIdentifier("mvcc"), quoteIdentifier("updated_at"),
-	)
-}
+// already exist. The schema is fixed, so it is a static statement (no runtime
+// values) rather than a formatted string.
+const createLedgerTableSQL = "IF OBJECT_ID(N'[_eds_row_version]', N'U') IS NULL CREATE TABLE [_eds_row_version] ([table_name] VARCHAR(255) NOT NULL, [pk] VARCHAR(255) NOT NULL, [mvcc] VARCHAR(40) NOT NULL, [updated_at] DATETIME2 NOT NULL, PRIMARY KEY ([table_name],[pk]));"
 
 func propTypeToSQLType(property internal.SchemaProperty, isPrimaryKey bool) string {
 	switch property.Type {

@@ -78,7 +78,7 @@ func TestLedgerUpsertSQL(t *testing.T) {
 func TestCreateLedgerTableSQL(t *testing.T) {
 	assert.Equal(t,
 		`CREATE TABLE IF NOT EXISTS "_eds_row_version" ("table_name" VARCHAR(255) NOT NULL, "pk" VARCHAR(255) NOT NULL, "mvcc" VARCHAR(40) NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY ("table_name","pk"));`,
-		createLedgerTableSQL())
+		createLedgerTableSQL)
 }
 
 // the streaming upsert gates the insert on the version ledger and appends the

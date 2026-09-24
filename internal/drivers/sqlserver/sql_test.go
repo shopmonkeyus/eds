@@ -218,7 +218,7 @@ func TestLedgerUpsertSQL(t *testing.T) {
 func TestCreateLedgerTableSQL(t *testing.T) {
 	assert.Equal(t,
 		`IF OBJECT_ID(N'[_eds_row_version]', N'U') IS NULL CREATE TABLE [_eds_row_version] ([table_name] VARCHAR(255) NOT NULL, [pk] VARCHAR(255) NOT NULL, [mvcc] VARCHAR(40) NOT NULL, [updated_at] DATETIME2 NOT NULL, PRIMARY KEY ([table_name],[pk]));`,
-		createLedgerTableSQL())
+		createLedgerTableSQL)
 }
 
 // non-key columns are always nullable, even the ones the schema marks as required

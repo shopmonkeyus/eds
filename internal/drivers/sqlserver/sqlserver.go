@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +17,6 @@ import (
 
 const maxBytesSizeInsert = 5_000_000
 const maxBatchSize = 500
-const offendingSQLLog = "offending sql: %s"
-
-type pendingWrite struct {
-	version string
-	sql     string
-}
 
 type sqlserverDriver struct {
 	ctx          context.Context
@@ -32,7 +25,7 @@ type sqlserverDriver struct {
 	registry     internal.SchemaRegistry
 	waitGroup    sync.WaitGroup
 	once         sync.Once
-	writes       []pendingWrite
+	writes       []util.PendingWrite
 	pending      strings.Builder
 	count        int
 	importConfig internal.ImporterConfig
@@ -99,7 +92,7 @@ func (p *sqlserverDriver) Start(config internal.DriverConfig) error {
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
-	if _, err := db.ExecContext(config.Context, createLedgerTableSQL()); err != nil {
+	if _, err := db.ExecContext(config.Context, createLedgerTableSQL); err != nil {
 		return fmt.Errorf("unable to create version ledger table: %w", err)
 	}
 	return nil
@@ -146,7 +139,7 @@ func (p *sqlserverDriver) Process(logger logger.Logger, event internal.DBChangeE
 		return false, err
 	}
 	logger.Trace("sql: %s", sql)
-	p.writes = append(p.writes, pendingWrite{version: util.EventVersion(&event), sql: sql})
+	p.writes = append(p.writes, util.PendingWrite{Version: util.EventVersion(&event), SQL: sql})
 	return false, nil
 }
 
@@ -155,34 +148,8 @@ func (p *sqlserverDriver) Flush(logger logger.Logger) error {
 	logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	if len(p.writes) > 0 {
-		// apply in version order so in-batch reorders resolve correctly; the
-		// ledger still guards cross-batch and redelivery reordering
-		slices.SortFunc(p.writes, func(a, b pendingWrite) int {
-			return strings.Compare(a.version, b.version)
-		})
-		var pending strings.Builder
-		for _, w := range p.writes {
-			pending.WriteString(w.sql)
-		}
-		tx, err := p.db.BeginTx(p.ctx, nil)
-		if err != nil {
-			return fmt.Errorf("unable to start transaction: %w", err)
-		}
-		var success bool
-		defer func() {
-			if !success {
-				tx.Rollback()
-			}
-		}()
-		if _, err := tx.ExecContext(p.ctx, pending.String()); err != nil {
-			logger.Error(offendingSQLLog, pending.String())
-			return fmt.Errorf("unable to execute sql: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("unable to commit transaction: %w", err)
-		}
-		success = true
+	if err := util.FlushPendingWrites(p.ctx, p.db, logger, p.writes); err != nil {
+		return err
 	}
 	p.writes = nil
 	return nil
@@ -214,7 +181,7 @@ func (p *sqlserverDriver) ImportEvent(event internal.DBChangeEvent, schema *inte
 	p.size += len(sql)
 	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error(offendingSQLLog, p.pending.String())
+			p.logger.Error(util.OffendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		p.pending.Reset()
@@ -227,7 +194,7 @@ func (p *sqlserverDriver) ImportEvent(event internal.DBChangeEvent, schema *inte
 func (p *sqlserverDriver) ImportCompleted() error {
 	if p.size > 0 {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error(offendingSQLLog, p.pending.String())
+			p.logger.Error(util.OffendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 	}

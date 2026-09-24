@@ -96,7 +96,7 @@ func TestLedgerUpsertSQL(t *testing.T) {
 func TestCreateLedgerTableSQL(t *testing.T) {
 	assert.Equal(t,
 		"CREATE TABLE IF NOT EXISTS `_eds_row_version` (`table_name` VARCHAR(255) NOT NULL, `pk` VARCHAR(255) NOT NULL, `mvcc` VARCHAR(40) NOT NULL, `updated_at` TIMESTAMP NOT NULL, PRIMARY KEY (`table_name`,`pk`)) CHARACTER SET=utf8mb4;",
-		createLedgerTableSQL())
+		createLedgerTableSQL)
 }
 
 // the streaming upsert replaces REPLACE INTO with a ledger-gated INSERT ... ON

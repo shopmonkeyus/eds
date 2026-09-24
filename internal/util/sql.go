@@ -3,8 +3,10 @@ package util
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/shopmonkeyus/eds/internal"
@@ -23,6 +25,61 @@ func QuoteStringIdentifiers(vals []string) []string {
 		res[i] = QuoteIdentifier(val)
 	}
 	return res
+}
+
+// OffendingSQLLog is the log format used to surface the batch that failed to
+// execute, so the exact SQL can be inspected in customer logs.
+const OffendingSQLLog = "offending sql: %s"
+
+// ExecPendingInTx runs a pre-built batch of statements in a single transaction,
+// rolling back on any failure and logging the offending SQL. Consolidating this
+// here keeps the streaming apply identical across every SQL driver.
+func ExecPendingInTx(ctx context.Context, db *sql.DB, log logger.Logger, sql string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("unable to start transaction: %w", err)
+	}
+	var success bool
+	defer func() {
+		if !success {
+			tx.Rollback()
+		}
+	}()
+	if _, err := tx.ExecContext(ctx, sql); err != nil {
+		log.Error(OffendingSQLLog, sql)
+		return fmt.Errorf("unable to execute sql: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("unable to commit transaction: %w", err)
+	}
+	success = true
+	return nil
+}
+
+// PendingWrite is a single buffered statement tagged with its mvcc version so a
+// batch can be applied in version order.
+type PendingWrite struct {
+	Version string
+	SQL     string
+}
+
+// FlushPendingWrites sorts the buffered writes by version, concatenates them and
+// executes the batch in a single transaction. It is a no-op when there is
+// nothing pending. Shared so the streaming apply stays identical across drivers.
+func FlushPendingWrites(ctx context.Context, db *sql.DB, log logger.Logger, writes []PendingWrite) error {
+	if len(writes) == 0 {
+		return nil
+	}
+	// apply in version order so in-batch reorders resolve correctly; the
+	// ledger still guards cross-batch and redelivery reordering
+	slices.SortFunc(writes, func(a, b PendingWrite) int {
+		return strings.Compare(a.Version, b.Version)
+	})
+	var pending strings.Builder
+	for _, w := range writes {
+		pending.WriteString(w.SQL)
+	}
+	return ExecPendingInTx(ctx, db, log, pending.String())
 }
 
 // SQLExecuter returns a wrapper around a SQL database connection that can execute SQL statements or log them in dry-run mode
