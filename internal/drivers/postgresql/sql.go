@@ -131,92 +131,54 @@ func quoteIdentifier(val string) string {
 	return pq.QuoteIdentifier(val)
 }
 
-func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string) string {
-	var sql strings.Builder
-	sql.WriteString("INSERT INTO ")
-	sql.WriteString(quoteIdentifier(table))
-	var columns []string
-	for _, name := range model.Columns() {
-		columns = append(columns, quoteIdentifier(name))
-	}
-	sql.WriteString(" (")
-	sql.WriteString(strings.Join(columns, ","))
-	sql.WriteString(") VALUES (")
-	var insertVals []string
-	var updateValues []string
-	if operation == "UPDATE" {
-		for _, name := range diff {
-			if !util.SliceContains(model.Columns(), name) || name == "id" {
-				continue
-			}
-			prop := model.Properties[name]
-			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				updateValues = append(updateValues, v)
-			}
-		}
-		for _, name := range model.Columns() {
-			prop := model.Properties[name]
-			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-				insertVals = append(insertVals, v)
-			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				insertVals = append(insertVals, v)
-			}
-		}
-	} else {
-		for _, name := range model.Columns() {
-			prop := model.Properties[name]
-			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-				if name != "id" {
-					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-				}
-				insertVals = append(insertVals, v)
-			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-				insertVals = append(insertVals, v)
-			}
-		}
-	}
-	sql.WriteString(strings.Join(insertVals, ","))
-	sql.WriteString(") ON CONFLICT (id) DO ")
+// ledger renders this driver's guarded delete, row upsert, and stale-guard predicate.
+var ledger = util.SQLLedger{
+	QuoteIdentifier: quoteIdentifier,
+	QuoteValue:      quoteValue,
+	UpsertSQL:       ledgerUpsertSQL,
+	GuardPrefix:     " WHERE NOT ",
+	ConflictClause:  conflictClause,
+}
+
+// ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
+// stored and incoming versions, in the same transaction as the data write.
+func ledgerUpsertSQL(table, pk, version string) string {
+	return fmt.Sprintf(
+		"INSERT INTO %[1]s (%[2]s,%[3]s,%[4]s,%[5]s) VALUES (%[6]s,%[7]s,%[8]s,now())"+
+			" ON CONFLICT (%[2]s,%[3]s) DO UPDATE SET %[4]s=EXCLUDED.%[4]s,%[5]s=EXCLUDED.%[5]s WHERE EXCLUDED.%[4]s>%[1]s.%[4]s;\n",
+		quoteIdentifier(util.LedgerTableName),
+		quoteIdentifier("table_name"), quoteIdentifier("pk"), quoteIdentifier("mvcc"), quoteIdentifier("updated_at"),
+		quoteValue(table), quoteValue(pk), quoteValue(version),
+	)
+}
+
+// createLedgerTableSQL creates the side high-water-mark table if it does not
+// already exist. The schema is fixed, so it is a static statement (no runtime
+// values) rather than a formatted string.
+const createLedgerTableSQL = `CREATE TABLE IF NOT EXISTS "_eds_row_version" ("table_name" VARCHAR(255) NOT NULL, "pk" VARCHAR(255) NOT NULL, "mvcc" VARCHAR(40) NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY ("table_name","pk"));`
+
+// conflictClause renders the ON CONFLICT resolution for the upsert.
+func conflictClause(updateValues []string) string {
 	if len(updateValues) == 0 {
-		sql.WriteString("NOTHING")
-	} else {
-		sql.WriteString("UPDATE SET ")
-		sql.WriteString(strings.Join(updateValues, ","))
+		return " ON CONFLICT (id) DO NOTHING"
 	}
-	sql.WriteString(";\n")
-	return sql.String()
+	return " ON CONFLICT (id) DO UPDATE SET " + strings.Join(updateValues, ",")
+}
+
+func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string, version string) string {
+	return ledger.RowUpsertSQL(operation, model, table, o, diff, version)
 }
 
 func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
-	primaryKeys := model.PrimaryKeys
+	version := util.EventVersion(&c)
 	if c.Operation == "DELETE" {
-		var sql strings.Builder
-		sql.WriteString("DELETE FROM ")
-		sql.WriteString(quoteIdentifier(c.Table))
-		sql.WriteString(" WHERE ")
-		var predicate []string
-		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
-		}
-		sql.WriteString(strings.Join(predicate, " AND "))
-		sql.WriteString(";\n")
-		return sql.String(), nil
-	} else {
-		o := make(map[string]any)
-		if err := json.Unmarshal(c.After, &o); err != nil {
-			return "", err
-		}
-		return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff), nil
+		return ledger.DeleteSQL(c.Table, model.PrimaryKeys, c.Key, version), nil
 	}
+	o := make(map[string]any)
+	if err := json.Unmarshal(c.After, &o); err != nil {
+		return "", err
+	}
+	return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff, version), nil
 }
 
 func propTypeToSQLType(property internal.SchemaProperty) string {

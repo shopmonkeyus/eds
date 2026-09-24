@@ -12,8 +12,6 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-const updatedDateColumn = "updatedDate"
-
 func quoteIdentifier(val string) string {
 	return "[" + val + "]"
 }
@@ -26,11 +24,26 @@ func columnValueOrNull(name string, prop internal.SchemaProperty, object map[str
 	return util.ToJSONStringVal(name, v, prop, false)
 }
 
-func toSQLFromObject(model *internal.Schema, table string, object map[string]any) string {
-	var updateValues []string
-	var insertColumns []string
-	var insertValues []string
+// ledger renders this driver's guarded delete and stale-guard predicate.
+var ledger = util.SQLLedger{QuoteIdentifier: quoteIdentifier, QuoteValue: quoteValue, UpsertSQL: ledgerUpsertSQL}
 
+// ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
+// stored and incoming versions, in the same transaction as the data write.
+func ledgerUpsertSQL(table, pk, version string) string {
+	return fmt.Sprintf(
+		"MERGE %[1]s AS target USING (VALUES(%[2]s,%[3]s,%[4]s)) AS source (%[5]s,%[6]s,%[7]s)"+
+			" ON target.%[5]s=source.%[5]s AND target.%[6]s=source.%[6]s"+
+			" WHEN MATCHED AND source.%[7]s>target.%[7]s THEN UPDATE SET %[7]s=source.%[7]s,%[8]s=SYSUTCDATETIME()"+
+			" WHEN NOT MATCHED THEN INSERT (%[5]s,%[6]s,%[7]s,%[8]s) VALUES (source.%[5]s,source.%[6]s,source.%[7]s,SYSUTCDATETIME());\n",
+		quoteIdentifier(util.LedgerTableName),
+		quoteValue(table), quoteValue(pk), quoteValue(version),
+		quoteIdentifier("table_name"), quoteIdentifier("pk"), quoteIdentifier("mvcc"), quoteIdentifier("updated_at"),
+	)
+}
+
+// mergeColumns renders the quoted column list, the INSERT values, and the UPDATE
+// SET assignments (id is excluded from the latter) for the row.
+func mergeColumns(model *internal.Schema, object map[string]any) (insertColumns []string, insertValues []string, updateValues []string) {
 	for _, name := range model.Columns() {
 		v := columnValueOrNull(name, model.Properties[name], object)
 		insertColumns = append(insertColumns, quoteIdentifier(name))
@@ -39,74 +52,106 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 		}
 	}
+	return insertColumns, insertValues, updateValues
+}
 
-	// the source row carries updatedDate so a matched row can reject events that are
-	// older than what has already been written
-	_, hasUpdatedDate := model.Properties[updatedDateColumn]
+// mergeSource renders the USING source between "USING (" and the ON clause. When
+// guarded it LEFT JOINs the ledger so the source always yields exactly one row
+// (even with no ledger entry yet) and both merge branches can be gated on the
+// stored version — this is what stops a hard-deleted row from being resurrected by
+// a late event and a stale event from clobbering a newer row.
+func mergeSource(model *internal.Schema, table string, object map[string]any, guarded bool) string {
+	var sql strings.Builder
+	if guarded {
+		pk := util.LedgerPKFromObject(model.PrimaryKeys, object)
+		sql.WriteString("SELECT s.")
+		sql.WriteString(quoteIdentifier("id"))
+		sql.WriteString(", l.")
+		sql.WriteString(quoteIdentifier("mvcc"))
+		sql.WriteString(" AS __mvcc FROM (VALUES(")
+		sql.WriteString(quoteValue(object["id"]))
+		sql.WriteString(")) AS s (")
+		sql.WriteString(quoteIdentifier("id"))
+		sql.WriteString(") LEFT JOIN ")
+		sql.WriteString(quoteIdentifier(util.LedgerTableName))
+		sql.WriteString(" l ON l.")
+		sql.WriteString(quoteIdentifier("table_name"))
+		sql.WriteString("=")
+		sql.WriteString(quoteValue(table))
+		sql.WriteString(" AND l.")
+		sql.WriteString(quoteIdentifier("pk"))
+		sql.WriteString("=")
+		sql.WriteString(quoteValue(pk))
+		sql.WriteString(") AS source")
+	} else {
+		sql.WriteString("VALUES(")
+		sql.WriteString(quoteValue(object["id"]))
+		sql.WriteString(")) AS source (")
+		sql.WriteString(quoteIdentifier("id"))
+		sql.WriteString(")")
+	}
+	return sql.String()
+}
+
+// toSQLFromObject builds the upsert for a row. When version is non-empty the
+// upsert is gated on the ledger (streaming apply); an empty version is the
+// unguarded bulk-import path.
+func toSQLFromObject(model *internal.Schema, table string, object map[string]any, version string) string {
+	insertColumns, insertValues, updateValues := mergeColumns(model, object)
+
+	guarded := version != ""
+	var guard string
+	if guarded {
+		guard = fmt.Sprintf(" AND (source.__mvcc IS NULL OR %s>source.__mvcc)", quoteValue(version))
+	}
 
 	var sql strings.Builder
 	sql.WriteString("MERGE ")
 	sql.WriteString(quoteIdentifier(table))
-	sql.WriteString(" AS target")
-	sql.WriteString(" USING (VALUES(")
-	sql.WriteString(quoteValue(object["id"]))
-	if hasUpdatedDate {
-		sql.WriteString(",")
-		sql.WriteString(quoteValue(object[updatedDateColumn]))
-	}
-	sql.WriteString(")) AS source (")
-	sql.WriteString(quoteIdentifier("id"))
-	if hasUpdatedDate {
-		sql.WriteString(",")
-		sql.WriteString(quoteIdentifier(updatedDateColumn))
-	}
-	sql.WriteString(") ON target.")
+	sql.WriteString(" AS target USING (")
+	sql.WriteString(mergeSource(model, table, object, guarded))
+	sql.WriteString(" ON target.")
 	sql.WriteString(quoteIdentifier("id"))
 	sql.WriteString("=source.")
 	sql.WriteString(quoteIdentifier("id"))
 	if len(updateValues) > 0 {
 		sql.WriteString(" WHEN MATCHED")
-		if hasUpdatedDate {
-			// a row that has never been stamped is always safe to overwrite
-			sql.WriteString(fmt.Sprintf(
-				" AND (target.%[1]s IS NULL OR source.%[1]s>target.%[1]s)",
-				quoteIdentifier(updatedDateColumn),
-			))
-		}
+		sql.WriteString(guard)
 		sql.WriteString(" THEN UPDATE SET ")
 		sql.WriteString(strings.Join(updateValues, ","))
 	}
-	sql.WriteString(" WHEN NOT MATCHED THEN INSERT (")
+	sql.WriteString(" WHEN NOT MATCHED")
+	sql.WriteString(guard)
+	sql.WriteString(" THEN INSERT (")
 	sql.WriteString(strings.Join(insertColumns, ","))
 	sql.WriteString(") VALUES (")
 	sql.WriteString(strings.Join(insertValues, ","))
 	sql.WriteString(");") // must be terminated for merge to work
 
+	if guarded {
+		sql.WriteString("\n")
+		sql.WriteString(ledgerUpsertSQL(table, util.LedgerPKFromObject(model.PrimaryKeys, object), version))
+	}
+
 	return sql.String()
 }
 
 func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
-	primaryKeys := model.PrimaryKeys
+	version := util.EventVersion(&c)
 	if c.Operation == "DELETE" {
-		var sql strings.Builder
-		sql.WriteString("DELETE FROM ")
-		sql.WriteString(quoteIdentifier(c.Table))
-		sql.WriteString(" WHERE ")
-		var predicate []string
-		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
-		}
-		sql.WriteString(strings.Join(predicate, " AND "))
-		sql.WriteString(";\n")
-		return sql.String(), nil
-	} else {
-		o := make(map[string]any)
-		if err := json.Unmarshal(c.After, &o); err != nil {
-			return "", err
-		}
-		return toSQLFromObject(model, c.Table, o), nil
+		return ledger.DeleteSQL(c.Table, model.PrimaryKeys, c.Key, version), nil
 	}
+	o := make(map[string]any)
+	if err := json.Unmarshal(c.After, &o); err != nil {
+		return "", err
+	}
+	return toSQLFromObject(model, c.Table, o, version), nil
 }
+
+// createLedgerTableSQL creates the side high-water-mark table if it does not
+// already exist. The schema is fixed, so it is a static statement (no runtime
+// values) rather than a formatted string.
+const createLedgerTableSQL = "IF OBJECT_ID(N'[_eds_row_version]', N'U') IS NULL CREATE TABLE [_eds_row_version] ([table_name] VARCHAR(255) NOT NULL, [pk] VARCHAR(255) NOT NULL, [mvcc] VARCHAR(40) NOT NULL, [updated_at] DATETIME2 NOT NULL, PRIMARY KEY ([table_name],[pk]));"
 
 func propTypeToSQLType(property internal.SchemaProperty, isPrimaryKey bool) string {
 	switch property.Type {

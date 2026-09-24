@@ -25,6 +25,7 @@ type mysqlDriver struct {
 	db           *sql.DB
 	waitGroup    sync.WaitGroup
 	once         sync.Once
+	writes       []util.PendingWrite
 	pending      strings.Builder
 	count        int
 	executor     func(string) error
@@ -91,6 +92,9 @@ func (p *mysqlDriver) Start(config internal.DriverConfig) error {
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
+	if err := util.CreateLedgerTable(config.Context, db, createLedgerTableSQL); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -135,10 +139,7 @@ func (p *mysqlDriver) Process(logger logger.Logger, event internal.DBChangeEvent
 		return false, err
 	}
 	logger.Trace("sql: %s", sql)
-	if _, err := p.pending.WriteString(sql); err != nil {
-		return false, fmt.Errorf("error writing sql to pending buffer: %w", err)
-	}
-	p.count++
+	p.writes = append(p.writes, util.PendingWrite{Version: util.EventVersion(&event), SQL: sql})
 	return false, nil
 }
 
@@ -147,28 +148,10 @@ func (p *mysqlDriver) Flush(logger logger.Logger) error {
 	logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	if p.count > 0 {
-		tx, err := p.db.BeginTx(p.ctx, nil)
-		if err != nil {
-			return fmt.Errorf("unable to start transaction: %w", err)
-		}
-		var success bool
-		defer func() {
-			if !success {
-				tx.Rollback()
-			}
-		}()
-		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
-			logger.Error("offending sql: %s", p.pending.String())
-			return fmt.Errorf("unable to execute sql: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("unable to commit transaction: %w", err)
-		}
-		success = true
+	if err := util.FlushPendingWrites(p.ctx, p.db, logger, p.writes); err != nil {
+		return err
 	}
-	p.pending.Reset()
-	p.count = 0
+	p.writes = nil
 	return nil
 }
 
@@ -188,7 +171,7 @@ func (p *mysqlDriver) CreateDatasource(schema internal.SchemaMap) error {
 
 // ImportEvent allows the handler to process the event.
 func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.Schema) error {
-	sql, err := toSQLFromObject("INSERT", data, event.Table, event, nil)
+	sql, err := toSQLFromObject("INSERT", data, event.Table, event, nil, "")
 	if err != nil {
 		return err
 	}
@@ -197,7 +180,7 @@ func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.S
 	p.size += len(sql)
 	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error("offending sql: %s", p.pending.String())
+			p.logger.Error(util.OffendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		p.pending.Reset()
@@ -210,7 +193,7 @@ func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.S
 func (p *mysqlDriver) ImportCompleted() error {
 	if p.size > 0 {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error("offending sql: %s", p.pending.String())
+			p.logger.Error(util.OffendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 	}

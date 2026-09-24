@@ -24,6 +24,7 @@ type postgresqlDriver struct {
 	registry     internal.SchemaRegistry
 	waitGroup    sync.WaitGroup
 	once         sync.Once
+	writes       []util.PendingWrite
 	pending      strings.Builder
 	count        int
 	executor     func(string) error
@@ -89,6 +90,9 @@ func (p *postgresqlDriver) Start(config internal.DriverConfig) error {
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
+	if err := util.CreateLedgerTable(config.Context, db, createLedgerTableSQL); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -133,10 +137,7 @@ func (p *postgresqlDriver) Process(logger logger.Logger, event internal.DBChange
 		return false, err
 	}
 	logger.Trace("sql: %s", sql)
-	if _, err := p.pending.WriteString(sql); err != nil {
-		return false, fmt.Errorf("error writing sql to pending buffer: %w", err)
-	}
-	p.count++
+	p.writes = append(p.writes, util.PendingWrite{Version: util.EventVersion(&event), SQL: sql})
 	return false, nil
 }
 
@@ -145,29 +146,14 @@ func (p *postgresqlDriver) Flush(logger logger.Logger) error {
 	logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	if p.count > 0 {
-		tx, err := p.db.BeginTx(p.ctx, nil)
-		if err != nil {
-			return fmt.Errorf("unable to start transaction: %w", err)
-		}
-		var success bool
-		defer func() {
-			if !success {
-				tx.Rollback()
-			}
-		}()
-		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
-			logger.Error("offending sql: %s", p.pending.String())
-			return fmt.Errorf("unable to execute sql: %w", err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("unable to commit transaction: %w", err)
-		}
-		success = true
-		logger.Debug("flushed %d records", p.count)
+	count := len(p.writes)
+	if err := util.FlushPendingWrites(p.ctx, p.db, logger, p.writes); err != nil {
+		return err
 	}
-	p.pending.Reset()
-	p.count = 0
+	p.writes = nil
+	if count > 0 {
+		logger.Debug("flushed %d records", count)
+	}
 	return nil
 }
 
@@ -191,13 +177,13 @@ func (p *postgresqlDriver) ImportEvent(event internal.DBChangeEvent, data *inter
 	if err != nil {
 		return err
 	}
-	sql := toSQLFromObject("INSERT", data, event.Table, object, nil)
+	sql := toSQLFromObject("INSERT", data, event.Table, object, nil, "")
 	p.pending.WriteString(sql)
 	p.count++
 	p.size += len(sql)
 	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error("offending sql: %s", p.pending.String())
+			p.logger.Error(util.OffendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		p.pending.Reset()
@@ -210,7 +196,7 @@ func (p *postgresqlDriver) ImportEvent(event internal.DBChangeEvent, data *inter
 func (p *postgresqlDriver) ImportCompleted() error {
 	if p.size > 0 {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error("offending sql: %s", p.pending.String())
+			p.logger.Error(util.OffendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 	}

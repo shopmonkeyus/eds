@@ -20,6 +20,10 @@ func (d *driverPostgresTest) Name() string {
 	return "postgres"
 }
 
+func (d *driverPostgresTest) SupportsReorder() bool {
+	return true
+}
+
 func (d *driverPostgresTest) URL(dir string) string {
 	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:15432/%s?sslmode=disable", dbuser, dbpass, dbname)
 }
