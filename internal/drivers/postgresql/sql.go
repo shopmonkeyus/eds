@@ -133,7 +133,7 @@ func quoteIdentifier(val string) string {
 
 // ledgerNotNewer is true when the ledger already holds a version at least as new
 // as the incoming one, i.e. the incoming event is stale.
-func ledgerNotNewer(table string, pk string, version string) string {
+func ledgerNotNewer(table, pk, version string) string {
 	return fmt.Sprintf(
 		"EXISTS (SELECT 1 FROM %s l WHERE l.%s=%s AND l.%s=%s AND l.%s>=%s)",
 		quoteIdentifier(util.LedgerTableName),
@@ -145,7 +145,7 @@ func ledgerNotNewer(table string, pk string, version string) string {
 
 // ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
 // stored and incoming versions, in the same transaction as the data write.
-func ledgerUpsertSQL(table string, pk string, version string) string {
+func ledgerUpsertSQL(table, pk, version string) string {
 	return fmt.Sprintf(
 		"INSERT INTO %[1]s (%[2]s,%[3]s,%[4]s,%[5]s) VALUES (%[6]s,%[7]s,%[8]s,now())"+
 			" ON CONFLICT (%[2]s,%[3]s) DO UPDATE SET %[4]s=EXCLUDED.%[4]s,%[5]s=EXCLUDED.%[5]s WHERE EXCLUDED.%[4]s>%[1]s.%[4]s;\n",
@@ -165,66 +165,99 @@ func createLedgerTableSQL() string {
 	)
 }
 
-// toSQLFromObject builds the upsert for a row. When version is non-empty the
-// upsert is gated on the ledger (streaming apply); an empty version is the
-// unguarded bulk-import path.
-func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string, version string) string {
-	var sql strings.Builder
-	sql.WriteString("INSERT INTO ")
-	sql.WriteString(quoteIdentifier(table))
+// columnList returns the quoted column identifiers for the model, in column order.
+func columnList(model *internal.Schema) []string {
 	var columns []string
 	for _, name := range model.Columns() {
 		columns = append(columns, quoteIdentifier(name))
 	}
-	sql.WriteString(" (")
-	sql.WriteString(strings.Join(columns, ","))
+	return columns
+}
+
+// rowInsertValues renders every column's value for the INSERT tuple.
+func rowInsertValues(model *internal.Schema, o map[string]any) []string {
+	var insertVals []string
+	for _, name := range model.Columns() {
+		prop := model.Properties[name]
+		if val, ok := o[name]; ok {
+			insertVals = append(insertVals, util.ToJSONStringVal(name, quoteValue(val), prop, true))
+		} else {
+			insertVals = append(insertVals, util.ToJSONStringVal(name, "NULL", prop, true))
+		}
+	}
+	return insertVals
+}
+
+// updateDiffValues builds the SET assignments for an UPDATE from its diff list.
+func updateDiffValues(model *internal.Schema, o map[string]any, diff []string) []string {
+	var updateValues []string
+	for _, name := range diff {
+		if !util.SliceContains(model.Columns(), name) || name == "id" {
+			continue
+		}
+		prop := model.Properties[name]
+		if val, ok := o[name]; ok {
+			v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
+			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+		} else {
+			v := util.ToJSONStringVal(name, "NULL", prop, true)
+			updateValues = append(updateValues, v)
+		}
+	}
+	return updateValues
+}
+
+// insertRowValues builds the INSERT tuple and the full ON CONFLICT SET assignments
+// for a non-UPDATE upsert, where every column is written.
+func insertRowValues(model *internal.Schema, o map[string]any) (insertVals []string, updateValues []string) {
+	for _, name := range model.Columns() {
+		prop := model.Properties[name]
+		if val, ok := o[name]; ok {
+			v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
+			if name != "id" {
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+			}
+			insertVals = append(insertVals, v)
+		} else {
+			v := util.ToJSONStringVal(name, "NULL", prop, true)
+			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+			insertVals = append(insertVals, v)
+		}
+	}
+	return insertVals, updateValues
+}
+
+// columnValues returns the INSERT tuple and ON CONFLICT SET assignments for the row.
+func columnValues(operation string, model *internal.Schema, o map[string]any, diff []string) (insertVals []string, updateValues []string) {
+	if operation == "UPDATE" {
+		return rowInsertValues(model, o), updateDiffValues(model, o, diff)
+	}
+	return insertRowValues(model, o)
+}
+
+// conflictClause renders the ON CONFLICT resolution for the upsert.
+func conflictClause(updateValues []string) string {
+	if len(updateValues) == 0 {
+		return " ON CONFLICT (id) DO NOTHING"
+	}
+	return " ON CONFLICT (id) DO UPDATE SET " + strings.Join(updateValues, ",")
+}
+
+// toSQLFromObject builds the upsert for a row. When version is non-empty the
+// upsert is gated on the ledger (streaming apply); an empty version is the
+// unguarded bulk-import path.
+func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string, version string) string {
 	guarded := version != ""
+	insertVals, updateValues := columnValues(operation, model, o, diff)
+	var sql strings.Builder
+	sql.WriteString("INSERT INTO ")
+	sql.WriteString(quoteIdentifier(table))
+	sql.WriteString(" (")
+	sql.WriteString(strings.Join(columnList(model), ","))
 	if guarded {
 		sql.WriteString(") SELECT ")
 	} else {
 		sql.WriteString(") VALUES (")
-	}
-	var insertVals []string
-	var updateValues []string
-	if operation == "UPDATE" {
-		for _, name := range diff {
-			if !util.SliceContains(model.Columns(), name) || name == "id" {
-				continue
-			}
-			prop := model.Properties[name]
-			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				updateValues = append(updateValues, v)
-			}
-		}
-		for _, name := range model.Columns() {
-			prop := model.Properties[name]
-			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-				insertVals = append(insertVals, v)
-			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				insertVals = append(insertVals, v)
-			}
-		}
-	} else {
-		for _, name := range model.Columns() {
-			prop := model.Properties[name]
-			if val, ok := o[name]; ok {
-				v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-				if name != "id" {
-					updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-				}
-				insertVals = append(insertVals, v)
-			} else {
-				v := util.ToJSONStringVal(name, "NULL", prop, true)
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-				insertVals = append(insertVals, v)
-			}
-		}
 	}
 	sql.WriteString(strings.Join(insertVals, ","))
 	if guarded {
@@ -236,13 +269,7 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	} else {
 		sql.WriteString(")")
 	}
-	sql.WriteString(" ON CONFLICT (id) DO ")
-	if len(updateValues) == 0 {
-		sql.WriteString("NOTHING")
-	} else {
-		sql.WriteString("UPDATE SET ")
-		sql.WriteString(strings.Join(updateValues, ","))
-	}
+	sql.WriteString(conflictClause(updateValues))
 	sql.WriteString(";\n")
 	if guarded {
 		sql.WriteString(ledgerUpsertSQL(table, util.LedgerPKFromObject(model.PrimaryKeys, o), version))

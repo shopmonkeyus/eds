@@ -14,7 +14,7 @@ const ledgerPKSeparator = "|"
 
 // LedgerPKFromKeys builds the ledger primary-key string from an event's key
 // tuple, matching the columns the DELETE predicate is built from.
-func LedgerPKFromKeys(primaryKeys []string, keys []string) string {
+func LedgerPKFromKeys(primaryKeys, keys []string) string {
 	vals := make([]string, 0, len(primaryKeys))
 	for i := range primaryKeys {
 		if i < len(keys) {

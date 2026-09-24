@@ -18,6 +18,7 @@ import (
 
 const maxBytesSizeInsert = 5_000_000
 const maxBatchSize = 500
+const offendingSQLLog = "offending sql: %s"
 
 type pendingWrite struct {
 	version string
@@ -175,7 +176,7 @@ func (p *mysqlDriver) Flush(logger logger.Logger) error {
 			}
 		}()
 		if _, err := tx.ExecContext(p.ctx, pending.String()); err != nil {
-			logger.Error("offending sql: %s", pending.String())
+			logger.Error(offendingSQLLog, pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -212,7 +213,7 @@ func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.S
 	p.size += len(sql)
 	if p.size >= maxBytesSizeInsert || p.importConfig.Single {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error("offending sql: %s", p.pending.String())
+			p.logger.Error(offendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		p.pending.Reset()
@@ -225,7 +226,7 @@ func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.S
 func (p *mysqlDriver) ImportCompleted() error {
 	if p.size > 0 {
 		if err := p.executor(p.pending.String()); err != nil {
-			p.logger.Error("offending sql: %s", p.pending.String())
+			p.logger.Error(offendingSQLLog, p.pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 	}

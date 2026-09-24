@@ -58,9 +58,9 @@ type e2eTestReady interface {
 	WaitForReady(timeout time.Duration) error
 }
 
-// e2eReorderTest is implemented by drivers whose backing store enforces the mvcc
+// reorderSupporter is implemented by drivers whose backing store enforces the mvcc
 // ledger, so the out-of-order reorder scenarios only run where they are meaningful.
-type e2eReorderTest interface {
+type reorderSupporter interface {
 	SupportsReorder() bool
 }
 
@@ -137,24 +137,36 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 	return &event, nil
 }
 
+// versionedEvent scripts a single reorder-scenario event with an explicit key and
+// mvcc version.
+type versionedEvent struct {
+	table         string
+	operation     string
+	modelVersion  string
+	key           string
+	payload       string
+	mvccTimestamp string
+	diff          []string
+}
+
 // publishDBChangeEventVersioned publishes an event with an explicit key and mvcc
 // version so reorder scenarios can script exact versions. publishDBChangeEvent's
 // mvcc is time.Now().Nanosecond() (0..1e9, non-monotonic) and cannot order events.
-func publishDBChangeEventVersioned(logger logger.Logger, js jetstream.JetStream, table string, operation string, modelVersion string, key string, payload string, mvccTimestamp string, diff []string) (*internal.DBChangeEvent, error) {
+func publishDBChangeEventVersioned(logger logger.Logger, js jetstream.JetStream, ve versionedEvent) (*internal.DBChangeEvent, error) {
 	var event internal.DBChangeEvent
 	event.ID = util.Hash(time.Now())
-	event.Operation = operation
-	event.Table = table
-	event.Key = []string{key}
-	event.ModelVersion = modelVersion
+	event.Operation = ve.operation
+	event.Table = ve.table
+	event.Key = []string{ve.key}
+	event.ModelVersion = ve.modelVersion
 	event.Timestamp = time.Now().UnixMilli()
-	event.MVCCTimestamp = mvccTimestamp
-	if operation == "DELETE" {
-		event.Before = json.RawMessage([]byte(payload))
+	event.MVCCTimestamp = ve.mvccTimestamp
+	if ve.operation == "DELETE" {
+		event.Before = json.RawMessage([]byte(ve.payload))
 	} else {
-		event.After = json.RawMessage([]byte(payload))
-		if operation == "UPDATE" {
-			event.Diff = diff
+		event.After = json.RawMessage([]byte(ve.payload))
+		if ve.operation == "UPDATE" {
+			event.Diff = ve.diff
 		}
 	}
 	event.Imported = false
@@ -162,7 +174,7 @@ func publishDBChangeEventVersioned(logger logger.Logger, js jetstream.JetStream,
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling event: %w", err)
 	}
-	subject := fmt.Sprintf("dbchange.%s.%s."+companyId+".1.PUBLIC.2", table, operation)
+	subject := fmt.Sprintf("dbchange.%s.%s."+companyId+".1.PUBLIC.2", ve.table, ve.operation)
 	logger.Info("publishing event: %s => %v", subject, util.JSONStringify(event))
 	msgId := util.Hash(event)
 	if _, err := js.Publish(context.Background(), subject, buf, jetstream.WithMsgID(msgId)); err != nil {
@@ -191,17 +203,17 @@ func runDBChangeReorderResurrectionTest(logger logger.Logger, _ *nats.Conn, js j
 	const id = "reorder-resurrect"
 	base := reorderBase()
 	v1 := `{"id":"reorder-resurrect","name":"v1","updatedDate":"2026-03-01T10:00:00.000Z"}`
-	if _, err := publishDBChangeEventVersioned(logger, js, "customer", "INSERT", modelVersion, id, v1, mvccVersion(base+1), nil); err != nil {
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v1, mvccVersion(base + 1), nil}); err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
-	deleteEvent, err := publishDBChangeEventVersioned(logger, js, "customer", "DELETE", modelVersion, id, v1, mvccVersion(base+3), nil)
+	deleteEvent, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "DELETE", modelVersion, id, v1, mvccVersion(base + 3), nil})
 	if err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
 	v2 := `{"id":"reorder-resurrect","name":"v2-late","updatedDate":"2026-03-01T10:01:00.000Z"}`
-	if _, err := publishDBChangeEventVersioned(logger, js, "customer", "UPDATE", modelVersion, id, v2, mvccVersion(base+2), []string{"name", "updatedDate"}); err != nil {
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "UPDATE", modelVersion, id, v2, mvccVersion(base + 2), []string{"name", "updatedDate"}}); err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
@@ -215,17 +227,17 @@ func runDBChangeReorderStaleDeleteTest(logger logger.Logger, _ *nats.Conn, js je
 	const id = "reorder-stale"
 	base := reorderBase()
 	v1 := `{"id":"reorder-stale","name":"v1","updatedDate":"2026-03-02T10:00:00.000Z"}`
-	if _, err := publishDBChangeEventVersioned(logger, js, "customer", "INSERT", modelVersion, id, v1, mvccVersion(base+1), nil); err != nil {
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v1, mvccVersion(base + 1), nil}); err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
 	v3 := `{"id":"reorder-stale","name":"v3","updatedDate":"2026-03-02T12:00:00.000Z"}`
-	updateEvent, err := publishDBChangeEventVersioned(logger, js, "customer", "UPDATE", modelVersion, id, v3, mvccVersion(base+3), []string{"name", "updatedDate"})
+	updateEvent, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "UPDATE", modelVersion, id, v3, mvccVersion(base + 3), []string{"name", "updatedDate"}})
 	if err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
-	if _, err := publishDBChangeEventVersioned(logger, js, "customer", "DELETE", modelVersion, id, v1, mvccVersion(base+2), nil); err != nil {
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "DELETE", modelVersion, id, v1, mvccVersion(base + 2), nil}); err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
@@ -239,16 +251,16 @@ func runDBChangeReorderRecreateTest(logger logger.Logger, _ *nats.Conn, js jetst
 	const id = "reorder-recreate"
 	base := reorderBase()
 	v1 := `{"id":"reorder-recreate","name":"v1","updatedDate":"2026-03-03T10:00:00.000Z"}`
-	if _, err := publishDBChangeEventVersioned(logger, js, "customer", "INSERT", modelVersion, id, v1, mvccVersion(base+1), nil); err != nil {
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v1, mvccVersion(base + 1), nil}); err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
-	if _, err := publishDBChangeEventVersioned(logger, js, "customer", "DELETE", modelVersion, id, v1, mvccVersion(base+2), nil); err != nil {
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "DELETE", modelVersion, id, v1, mvccVersion(base + 2), nil}); err != nil {
 		return err
 	}
 	time.Sleep(eventDeliverDelay)
 	v3 := `{"id":"reorder-recreate","name":"v3","updatedDate":"2026-03-03T14:00:00.000Z"}`
-	recreateEvent, err := publishDBChangeEventVersioned(logger, js, "customer", "INSERT", modelVersion, id, v3, mvccVersion(base+3), nil)
+	recreateEvent, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v3, mvccVersion(base + 3), nil})
 	if err != nil {
 		return err
 	}
@@ -498,7 +510,7 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 					atomic.AddUint32(&pass, 1)
 					logger.Info("✅ dbchange insert (#2) test: %s succeeded in %s", name, time.Since(testStarted))
 				}
-				if rt, ok := test.(e2eReorderTest); ok && rt.SupportsReorder() {
+				if rt, ok := test.(reorderSupporter); ok && rt.SupportsReorder() {
 					testStarted = time.Now()
 					if err := runDBChangeReorderResurrectionTest(logger, nc, js, func(event internal.DBChangeEvent) error {
 						return test.Validate(_logger, tmpdir, url, event)

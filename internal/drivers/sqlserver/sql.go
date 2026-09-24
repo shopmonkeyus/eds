@@ -26,7 +26,7 @@ func columnValueOrNull(name string, prop internal.SchemaProperty, object map[str
 
 // ledgerNotNewer is the predicate that is true when the ledger already holds a
 // version at least as new as the incoming one, i.e. the incoming event is stale.
-func ledgerNotNewer(table string, pk string, version string) string {
+func ledgerNotNewer(table, pk, version string) string {
 	return fmt.Sprintf(
 		"EXISTS (SELECT 1 FROM %s l WHERE l.%s=%s AND l.%s=%s AND l.%s>=%s)",
 		quoteIdentifier(util.LedgerTableName),
@@ -38,7 +38,7 @@ func ledgerNotNewer(table string, pk string, version string) string {
 
 // ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
 // stored and incoming versions, in the same transaction as the data write.
-func ledgerUpsertSQL(table string, pk string, version string) string {
+func ledgerUpsertSQL(table, pk, version string) string {
 	return fmt.Sprintf(
 		"MERGE %[1]s AS target USING (VALUES(%[2]s,%[3]s,%[4]s)) AS source (%[5]s,%[6]s,%[7]s)"+
 			" ON target.%[5]s=source.%[5]s AND target.%[6]s=source.%[6]s"+
@@ -50,14 +50,9 @@ func ledgerUpsertSQL(table string, pk string, version string) string {
 	)
 }
 
-// toSQLFromObject builds the upsert for a row. When version is non-empty the
-// upsert is gated on the ledger (streaming apply); an empty version is the
-// unguarded bulk-import path.
-func toSQLFromObject(model *internal.Schema, table string, object map[string]any, version string) string {
-	var updateValues []string
-	var insertColumns []string
-	var insertValues []string
-
+// mergeColumns renders the quoted column list, the INSERT values, and the UPDATE
+// SET assignments (id is excluded from the latter) for the row.
+func mergeColumns(model *internal.Schema, object map[string]any) (insertColumns []string, insertValues []string, updateValues []string) {
 	for _, name := range model.Columns() {
 		v := columnValueOrNull(name, model.Properties[name], object)
 		insertColumns = append(insertColumns, quoteIdentifier(name))
@@ -66,22 +61,17 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
 		}
 	}
+	return insertColumns, insertValues, updateValues
+}
 
-	guarded := version != ""
-	var guard string
-	if guarded {
-		guard = fmt.Sprintf(" AND (source.__mvcc IS NULL OR %s>source.__mvcc)", quoteValue(version))
-	}
-
+// mergeSource renders the USING source between "USING (" and the ON clause. When
+// guarded it LEFT JOINs the ledger so the source always yields exactly one row
+// (even with no ledger entry yet) and both merge branches can be gated on the
+// stored version — this is what stops a hard-deleted row from being resurrected by
+// a late event and a stale event from clobbering a newer row.
+func mergeSource(model *internal.Schema, table string, object map[string]any, guarded bool) string {
 	var sql strings.Builder
-	sql.WriteString("MERGE ")
-	sql.WriteString(quoteIdentifier(table))
-	sql.WriteString(" AS target USING (")
 	if guarded {
-		// LEFT JOIN the ledger so the source always yields exactly one row (even
-		// when there is no ledger entry yet) and both merge branches can be gated
-		// on the stored version — this is what stops a hard-deleted row from being
-		// resurrected by a late event and a stale event from clobbering a newer row
 		pk := util.LedgerPKFromObject(model.PrimaryKeys, object)
 		sql.WriteString("SELECT s.")
 		sql.WriteString(quoteIdentifier("id"))
@@ -109,6 +99,26 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 		sql.WriteString(quoteIdentifier("id"))
 		sql.WriteString(")")
 	}
+	return sql.String()
+}
+
+// toSQLFromObject builds the upsert for a row. When version is non-empty the
+// upsert is gated on the ledger (streaming apply); an empty version is the
+// unguarded bulk-import path.
+func toSQLFromObject(model *internal.Schema, table string, object map[string]any, version string) string {
+	insertColumns, insertValues, updateValues := mergeColumns(model, object)
+
+	guarded := version != ""
+	var guard string
+	if guarded {
+		guard = fmt.Sprintf(" AND (source.__mvcc IS NULL OR %s>source.__mvcc)", quoteValue(version))
+	}
+
+	var sql strings.Builder
+	sql.WriteString("MERGE ")
+	sql.WriteString(quoteIdentifier(table))
+	sql.WriteString(" AS target USING (")
+	sql.WriteString(mergeSource(model, table, object, guarded))
 	sql.WriteString(" ON target.")
 	sql.WriteString(quoteIdentifier("id"))
 	sql.WriteString("=source.")
