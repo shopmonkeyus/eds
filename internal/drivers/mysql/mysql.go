@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,11 @@ import (
 const maxBytesSizeInsert = 5_000_000
 const maxBatchSize = 500
 
+type pendingWrite struct {
+	version string
+	sql     string
+}
+
 type mysqlDriver struct {
 	ctx          context.Context
 	logger       logger.Logger
@@ -25,6 +31,7 @@ type mysqlDriver struct {
 	db           *sql.DB
 	waitGroup    sync.WaitGroup
 	once         sync.Once
+	writes       []pendingWrite
 	pending      strings.Builder
 	count        int
 	executor     func(string) error
@@ -91,6 +98,9 @@ func (p *mysqlDriver) Start(config internal.DriverConfig) error {
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
+	if _, err := db.ExecContext(config.Context, createLedgerTableSQL()); err != nil {
+		return fmt.Errorf("unable to create version ledger table: %w", err)
+	}
 	return nil
 }
 
@@ -135,10 +145,7 @@ func (p *mysqlDriver) Process(logger logger.Logger, event internal.DBChangeEvent
 		return false, err
 	}
 	logger.Trace("sql: %s", sql)
-	if _, err := p.pending.WriteString(sql); err != nil {
-		return false, fmt.Errorf("error writing sql to pending buffer: %w", err)
-	}
-	p.count++
+	p.writes = append(p.writes, pendingWrite{version: util.EventVersion(&event), sql: sql})
 	return false, nil
 }
 
@@ -147,7 +154,16 @@ func (p *mysqlDriver) Flush(logger logger.Logger) error {
 	logger.Debug("flush")
 	p.waitGroup.Add(1)
 	defer p.waitGroup.Done()
-	if p.count > 0 {
+	if len(p.writes) > 0 {
+		// apply in version order so in-batch reorders resolve correctly; the
+		// ledger still guards cross-batch and redelivery reordering
+		slices.SortFunc(p.writes, func(a, b pendingWrite) int {
+			return strings.Compare(a.version, b.version)
+		})
+		var pending strings.Builder
+		for _, w := range p.writes {
+			pending.WriteString(w.sql)
+		}
 		tx, err := p.db.BeginTx(p.ctx, nil)
 		if err != nil {
 			return fmt.Errorf("unable to start transaction: %w", err)
@@ -158,8 +174,8 @@ func (p *mysqlDriver) Flush(logger logger.Logger) error {
 				tx.Rollback()
 			}
 		}()
-		if _, err := tx.ExecContext(p.ctx, p.pending.String()); err != nil {
-			logger.Error("offending sql: %s", p.pending.String())
+		if _, err := tx.ExecContext(p.ctx, pending.String()); err != nil {
+			logger.Error("offending sql: %s", pending.String())
 			return fmt.Errorf("unable to execute sql: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -167,8 +183,7 @@ func (p *mysqlDriver) Flush(logger logger.Logger) error {
 		}
 		success = true
 	}
-	p.pending.Reset()
-	p.count = 0
+	p.writes = nil
 	return nil
 }
 
@@ -188,7 +203,7 @@ func (p *mysqlDriver) CreateDatasource(schema internal.SchemaMap) error {
 
 // ImportEvent allows the handler to process the event.
 func (p *mysqlDriver) ImportEvent(event internal.DBChangeEvent, data *internal.Schema) error {
-	sql, err := toSQLFromObject("INSERT", data, event.Table, event, nil)
+	sql, err := toSQLFromObject("INSERT", data, event.Table, event, nil, "")
 	if err != nil {
 		return err
 	}

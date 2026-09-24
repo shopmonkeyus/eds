@@ -20,6 +20,10 @@ func (d *driverMySQLTest) Name() string {
 	return "mysql"
 }
 
+func (d *driverMySQLTest) SupportsReorder() bool {
+	return true
+}
+
 func (d *driverMySQLTest) URL(dir string) string {
 	return fmt.Sprintf("mysql://%s:%s@127.0.0.1:13306/%s", dbuser, dbpass, dbname)
 }

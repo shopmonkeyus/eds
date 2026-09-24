@@ -131,7 +131,44 @@ func quoteIdentifier(val string) string {
 	return pq.QuoteIdentifier(val)
 }
 
-func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string) string {
+// ledgerNotNewer is true when the ledger already holds a version at least as new
+// as the incoming one, i.e. the incoming event is stale.
+func ledgerNotNewer(table string, pk string, version string) string {
+	return fmt.Sprintf(
+		"EXISTS (SELECT 1 FROM %s l WHERE l.%s=%s AND l.%s=%s AND l.%s>=%s)",
+		quoteIdentifier(util.LedgerTableName),
+		quoteIdentifier("table_name"), quoteValue(table),
+		quoteIdentifier("pk"), quoteValue(pk),
+		quoteIdentifier("mvcc"), quoteValue(version),
+	)
+}
+
+// ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
+// stored and incoming versions, in the same transaction as the data write.
+func ledgerUpsertSQL(table string, pk string, version string) string {
+	return fmt.Sprintf(
+		"INSERT INTO %[1]s (%[2]s,%[3]s,%[4]s,%[5]s) VALUES (%[6]s,%[7]s,%[8]s,now())"+
+			" ON CONFLICT (%[2]s,%[3]s) DO UPDATE SET %[4]s=EXCLUDED.%[4]s,%[5]s=EXCLUDED.%[5]s WHERE EXCLUDED.%[4]s>%[1]s.%[4]s;\n",
+		quoteIdentifier(util.LedgerTableName),
+		quoteIdentifier("table_name"), quoteIdentifier("pk"), quoteIdentifier("mvcc"), quoteIdentifier("updated_at"),
+		quoteValue(table), quoteValue(pk), quoteValue(version),
+	)
+}
+
+// createLedgerTableSQL creates the side high-water-mark table if it does not
+// already exist.
+func createLedgerTableSQL() string {
+	return fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS %[1]s (%[2]s VARCHAR(255) NOT NULL, %[3]s VARCHAR(255) NOT NULL, %[4]s VARCHAR(40) NOT NULL, %[5]s TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY (%[2]s,%[3]s));",
+		quoteIdentifier(util.LedgerTableName),
+		quoteIdentifier("table_name"), quoteIdentifier("pk"), quoteIdentifier("mvcc"), quoteIdentifier("updated_at"),
+	)
+}
+
+// toSQLFromObject builds the upsert for a row. When version is non-empty the
+// upsert is gated on the ledger (streaming apply); an empty version is the
+// unguarded bulk-import path.
+func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string, version string) string {
 	var sql strings.Builder
 	sql.WriteString("INSERT INTO ")
 	sql.WriteString(quoteIdentifier(table))
@@ -141,7 +178,12 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 	}
 	sql.WriteString(" (")
 	sql.WriteString(strings.Join(columns, ","))
-	sql.WriteString(") VALUES (")
+	guarded := version != ""
+	if guarded {
+		sql.WriteString(") SELECT ")
+	} else {
+		sql.WriteString(") VALUES (")
+	}
 	var insertVals []string
 	var updateValues []string
 	if operation == "UPDATE" {
@@ -185,7 +227,16 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		}
 	}
 	sql.WriteString(strings.Join(insertVals, ","))
-	sql.WriteString(") ON CONFLICT (id) DO ")
+	if guarded {
+		// gate the insert on the ledger so a hard-deleted row is not resurrected
+		// by a late event and a stale event cannot clobber a newer row
+		pk := util.LedgerPKFromObject(model.PrimaryKeys, o)
+		sql.WriteString(" WHERE NOT ")
+		sql.WriteString(ledgerNotNewer(table, pk, version))
+	} else {
+		sql.WriteString(")")
+	}
+	sql.WriteString(" ON CONFLICT (id) DO ")
 	if len(updateValues) == 0 {
 		sql.WriteString("NOTHING")
 	} else {
@@ -193,12 +244,17 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, o m
 		sql.WriteString(strings.Join(updateValues, ","))
 	}
 	sql.WriteString(";\n")
+	if guarded {
+		sql.WriteString(ledgerUpsertSQL(table, util.LedgerPKFromObject(model.PrimaryKeys, o), version))
+	}
 	return sql.String()
 }
 
 func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 	primaryKeys := model.PrimaryKeys
+	version := util.EventVersion(&c)
 	if c.Operation == "DELETE" {
+		pk := util.LedgerPKFromKeys(primaryKeys, c.Key)
 		var sql strings.Builder
 		sql.WriteString("DELETE FROM ")
 		sql.WriteString(quoteIdentifier(c.Table))
@@ -208,14 +264,18 @@ func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
 		}
 		sql.WriteString(strings.Join(predicate, " AND "))
+		// only delete when no newer version has already been applied
+		sql.WriteString(" AND NOT ")
+		sql.WriteString(ledgerNotNewer(c.Table, pk, version))
 		sql.WriteString(";\n")
+		sql.WriteString(ledgerUpsertSQL(c.Table, pk, version))
 		return sql.String(), nil
 	} else {
 		o := make(map[string]any)
 		if err := json.Unmarshal(c.After, &o); err != nil {
 			return "", err
 		}
-		return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff), nil
+		return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff, version), nil
 	}
 }
 
