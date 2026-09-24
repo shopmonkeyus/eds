@@ -131,10 +131,13 @@ func quoteIdentifier(val string) string {
 	return pq.QuoteIdentifier(val)
 }
 
-// ledgerNotNewer is true when the ledger already holds a version at least as new
-// as the incoming one, i.e. the incoming event is stale.
-func ledgerNotNewer(table, pk, version string) string {
-	return util.LedgerNotNewer(quoteIdentifier, quoteValue, table, pk, version)
+// ledger renders this driver's guarded delete, row upsert, and stale-guard predicate.
+var ledger = util.SQLLedger{
+	QuoteIdentifier: quoteIdentifier,
+	QuoteValue:      quoteValue,
+	UpsertSQL:       ledgerUpsertSQL,
+	GuardPrefix:     " WHERE NOT ",
+	ConflictClause:  conflictClause,
 }
 
 // ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
@@ -162,67 +165,20 @@ func conflictClause(updateValues []string) string {
 	return " ON CONFLICT (id) DO UPDATE SET " + strings.Join(updateValues, ",")
 }
 
-// toSQLFromObject builds the upsert for a row. When version is non-empty the
-// upsert is gated on the ledger (streaming apply); an empty version is the
-// unguarded bulk-import path.
 func toSQLFromObject(operation string, model *internal.Schema, table string, o map[string]any, diff []string, version string) string {
-	guarded := version != ""
-	insertVals, updateValues := util.ColumnValues(quoteIdentifier, quoteValue, operation, model, o, diff)
-	var sql strings.Builder
-	sql.WriteString("INSERT INTO ")
-	sql.WriteString(quoteIdentifier(table))
-	sql.WriteString(" (")
-	sql.WriteString(strings.Join(util.ColumnList(quoteIdentifier, model), ","))
-	if guarded {
-		sql.WriteString(") SELECT ")
-	} else {
-		sql.WriteString(") VALUES (")
-	}
-	sql.WriteString(strings.Join(insertVals, ","))
-	if guarded {
-		// gate the insert on the ledger so a hard-deleted row is not resurrected
-		// by a late event and a stale event cannot clobber a newer row
-		pk := util.LedgerPKFromObject(model.PrimaryKeys, o)
-		sql.WriteString(" WHERE NOT ")
-		sql.WriteString(ledgerNotNewer(table, pk, version))
-	} else {
-		sql.WriteString(")")
-	}
-	sql.WriteString(conflictClause(updateValues))
-	sql.WriteString(";\n")
-	if guarded {
-		sql.WriteString(ledgerUpsertSQL(table, util.LedgerPKFromObject(model.PrimaryKeys, o), version))
-	}
-	return sql.String()
+	return ledger.RowUpsertSQL(operation, model, table, o, diff, version)
 }
 
 func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
-	primaryKeys := model.PrimaryKeys
 	version := util.EventVersion(&c)
 	if c.Operation == "DELETE" {
-		pk := util.LedgerPKFromKeys(primaryKeys, c.Key)
-		var sql strings.Builder
-		sql.WriteString("DELETE FROM ")
-		sql.WriteString(quoteIdentifier(c.Table))
-		sql.WriteString(" WHERE ")
-		var predicate []string
-		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
-		}
-		sql.WriteString(strings.Join(predicate, " AND "))
-		// only delete when no newer version has already been applied
-		sql.WriteString(" AND NOT ")
-		sql.WriteString(ledgerNotNewer(c.Table, pk, version))
-		sql.WriteString(";\n")
-		sql.WriteString(ledgerUpsertSQL(c.Table, pk, version))
-		return sql.String(), nil
-	} else {
-		o := make(map[string]any)
-		if err := json.Unmarshal(c.After, &o); err != nil {
-			return "", err
-		}
-		return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff, version), nil
+		return ledger.DeleteSQL(c.Table, model.PrimaryKeys, c.Key, version), nil
 	}
+	o := make(map[string]any)
+	if err := json.Unmarshal(c.After, &o); err != nil {
+		return "", err
+	}
+	return toSQLFromObject(c.Operation, model, c.Table, o, c.Diff, version), nil
 }
 
 func propTypeToSQLType(property internal.SchemaProperty) string {

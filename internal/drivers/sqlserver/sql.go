@@ -24,11 +24,8 @@ func columnValueOrNull(name string, prop internal.SchemaProperty, object map[str
 	return util.ToJSONStringVal(name, v, prop, false)
 }
 
-// ledgerNotNewer is the predicate that is true when the ledger already holds a
-// version at least as new as the incoming one, i.e. the incoming event is stale.
-func ledgerNotNewer(table, pk, version string) string {
-	return util.LedgerNotNewer(quoteIdentifier, quoteValue, table, pk, version)
-}
+// ledger renders this driver's guarded delete and stale-guard predicate.
+var ledger = util.SQLLedger{QuoteIdentifier: quoteIdentifier, QuoteValue: quoteValue, UpsertSQL: ledgerUpsertSQL}
 
 // ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
 // stored and incoming versions, in the same transaction as the data write.
@@ -140,32 +137,15 @@ func toSQLFromObject(model *internal.Schema, table string, object map[string]any
 }
 
 func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
-	primaryKeys := model.PrimaryKeys
 	version := util.EventVersion(&c)
 	if c.Operation == "DELETE" {
-		pk := util.LedgerPKFromKeys(primaryKeys, c.Key)
-		var sql strings.Builder
-		sql.WriteString("DELETE FROM ")
-		sql.WriteString(quoteIdentifier(c.Table))
-		sql.WriteString(" WHERE ")
-		var predicate []string
-		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
-		}
-		sql.WriteString(strings.Join(predicate, " AND "))
-		// only delete when no newer version has already been applied
-		sql.WriteString(" AND NOT ")
-		sql.WriteString(ledgerNotNewer(c.Table, pk, version))
-		sql.WriteString(";\n")
-		sql.WriteString(ledgerUpsertSQL(c.Table, pk, version))
-		return sql.String(), nil
-	} else {
-		o := make(map[string]any)
-		if err := json.Unmarshal(c.After, &o); err != nil {
-			return "", err
-		}
-		return toSQLFromObject(model, c.Table, o, version), nil
+		return ledger.DeleteSQL(c.Table, model.PrimaryKeys, c.Key, version), nil
 	}
+	o := make(map[string]any)
+	if err := json.Unmarshal(c.After, &o); err != nil {
+		return "", err
+	}
+	return toSQLFromObject(model, c.Table, o, version), nil
 }
 
 // createLedgerTableSQL creates the side high-water-mark table if it does not

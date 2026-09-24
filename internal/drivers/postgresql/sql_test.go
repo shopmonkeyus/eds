@@ -63,7 +63,7 @@ func TestDBChanges(t *testing.T) {
 	delPK := "zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae"
 	delVersion := util.EventVersion(&dbChange)
 	assert.Equal(t,
-		"DELETE FROM \"order\" WHERE \"id\"='"+delPK+"' AND NOT "+ledgerNotNewer("order", delPK, delVersion)+";\n"+
+		"DELETE FROM \"order\" WHERE \"id\"='"+delPK+"' AND NOT "+ledger.NotNewer("order", delPK, delVersion)+";\n"+
 			ledgerUpsertSQL("order", delPK, delVersion),
 		sql)
 }
@@ -99,7 +99,7 @@ func TestUpsertGuardedByLedger(t *testing.T) {
 
 	guarded := toSQLFromObject("INSERT", schema, "customer", o, nil, "V1")
 	assert.Equal(t,
-		`INSERT INTO "customer" ("id","name") SELECT '1','test' WHERE NOT `+ledgerNotNewer("customer", "1", "V1")+
+		`INSERT INTO "customer" ("id","name") SELECT '1','test' WHERE NOT `+ledger.NotNewer("customer", "1", "V1")+
 			` ON CONFLICT (id) DO UPDATE SET "name"='test';`+"\n"+ledgerUpsertSQL("customer", "1", "V1"),
 		guarded)
 }

@@ -15,10 +15,13 @@ func quoteIdentifier(val string) string {
 	return "`" + val + "`"
 }
 
-// ledgerNotNewer is true when the ledger already holds a version at least as new
-// as the incoming one, i.e. the incoming event is stale.
-func ledgerNotNewer(table, pk, version string) string {
-	return util.LedgerNotNewer(quoteIdentifier, quoteValue, table, pk, version)
+// ledger renders this driver's guarded delete, row upsert, and stale-guard predicate.
+var ledger = util.SQLLedger{
+	QuoteIdentifier: quoteIdentifier,
+	QuoteValue:      quoteValue,
+	UpsertSQL:       ledgerUpsertSQL,
+	GuardPrefix:     " FROM DUAL WHERE NOT ",
+	ConflictClause:  duplicateKeyClause,
 }
 
 // ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
@@ -46,69 +49,24 @@ func duplicateKeyClause(updateValues []string) string {
 	return " ON DUPLICATE KEY UPDATE " + strings.Join(updateValues, ",")
 }
 
-// toSQLFromObject builds the upsert for a row. When version is non-empty the
-// upsert is gated on the ledger (streaming apply); an empty version is the
-// unguarded bulk-import path.
+// toSQLFromObject builds the upsert for a row. Unlike postgres it must first pull
+// the object off the event; the shared builder renders the rest. REPLACE INTO gave
+// no way to reject stale events, so this uses an upsert keyed on the row whose
+// ON DUPLICATE KEY UPDATE applies newer values in place.
 func toSQLFromObject(operation string, model *internal.Schema, table string, event internal.DBChangeEvent, diff []string, version string) (string, error) {
 	o, err := event.GetObject()
 	if err != nil {
 		return "", err
 	}
-	guarded := version != ""
-	insertVals, updateValues := util.ColumnValues(quoteIdentifier, quoteValue, operation, model, o, diff)
-	var sql strings.Builder
-	sql.WriteString("INSERT INTO ")
-	sql.WriteString(quoteIdentifier(table))
-	sql.WriteString(" (")
-	sql.WriteString(strings.Join(util.ColumnList(quoteIdentifier, model), ","))
-	if guarded {
-		sql.WriteString(") SELECT ")
-	} else {
-		sql.WriteString(") VALUES (")
-	}
-	sql.WriteString(strings.Join(insertVals, ","))
-	if guarded {
-		// gate the insert on the ledger so a hard-deleted row is not resurrected
-		// by a late event and a stale event cannot clobber a newer row
-		pk := util.LedgerPKFromObject(model.PrimaryKeys, o)
-		sql.WriteString(" FROM DUAL WHERE NOT ")
-		sql.WriteString(ledgerNotNewer(table, pk, version))
-	} else {
-		sql.WriteString(")")
-	}
-	// REPLACE INTO gave no way to reject stale events; an upsert keyed on the row
-	// lets ON DUPLICATE KEY UPDATE apply the newer values in place
-	sql.WriteString(duplicateKeyClause(updateValues))
-	sql.WriteString(";\n")
-	if guarded {
-		sql.WriteString(ledgerUpsertSQL(table, util.LedgerPKFromObject(model.PrimaryKeys, o), version))
-	}
-	return sql.String(), nil
+	return ledger.RowUpsertSQL(operation, model, table, o, diff, version), nil
 }
 
 func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
-	primaryKeys := model.PrimaryKeys
 	version := util.EventVersion(&c)
 	if c.Operation == "DELETE" {
-		pk := util.LedgerPKFromKeys(primaryKeys, c.Key)
-		var sql strings.Builder
-		sql.WriteString("DELETE FROM ")
-		sql.WriteString(quoteIdentifier(c.Table))
-		sql.WriteString(" WHERE ")
-		var predicate []string
-		for i, pk := range primaryKeys {
-			predicate = append(predicate, fmt.Sprintf("%s=%s", quoteIdentifier(pk), quoteValue(c.Key[i])))
-		}
-		sql.WriteString(strings.Join(predicate, " AND "))
-		// only delete when no newer version has already been applied
-		sql.WriteString(" AND NOT ")
-		sql.WriteString(ledgerNotNewer(c.Table, pk, version))
-		sql.WriteString(";\n")
-		sql.WriteString(ledgerUpsertSQL(c.Table, pk, version))
-		return sql.String(), nil
-	} else {
-		return toSQLFromObject(c.Operation, model, c.Table, c, c.Diff, version)
+		return ledger.DeleteSQL(c.Table, model.PrimaryKeys, c.Key, version), nil
 	}
+	return toSQLFromObject(c.Operation, model, c.Table, c, c.Diff, version)
 }
 
 func propTypeToSQLType(property internal.SchemaProperty, isPrimaryKey bool) string {

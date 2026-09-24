@@ -92,8 +92,8 @@ func (p *sqlserverDriver) Start(config internal.DriverConfig) error {
 	p.registry = config.SchemaRegistry
 	p.db = db
 	p.ctx = config.Context
-	if _, err := db.ExecContext(config.Context, createLedgerTableSQL); err != nil {
-		return fmt.Errorf("unable to create version ledger table: %w", err)
+	if err := util.CreateLedgerTable(config.Context, db, createLedgerTableSQL); err != nil {
+		return err
 	}
 	return nil
 }

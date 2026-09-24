@@ -150,6 +150,91 @@ func DropTable(ctx context.Context, logger logger.Logger, db *sql.DB, table stri
 	return nil
 }
 
+// CreateLedgerTable creates the version high-water-mark table using the driver's
+// own DDL (the schema is fixed per driver, so the DDL is a static const).
+func CreateLedgerTable(ctx context.Context, db *sql.DB, ddl string) error {
+	if _, err := db.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("unable to create version ledger table: %w", err)
+	}
+	return nil
+}
+
+// SQLLedger bundles a driver's quoting and its ledger-upsert renderer so the
+// guarded DELETE and row-upsert paths — identical across drivers apart from
+// those — live in one place. UpsertSQL stays per-driver because the ledger upsert
+// dialect genuinely differs (ON CONFLICT / ON DUPLICATE KEY / MERGE).
+//
+// GuardPrefix and ConflictClause are only used by RowUpsertSQL (the postgres and
+// mysql upsert shape); SQL Server builds its row upsert as a MERGE and leaves
+// them unset.
+type SQLLedger struct {
+	QuoteIdentifier func(string) string
+	QuoteValue      func(any) string
+	UpsertSQL       func(table, pk, version string) string
+	GuardPrefix     string
+	ConflictClause  func(updateValues []string) string
+}
+
+// NotNewer renders the stale-guard predicate for this driver.
+func (l SQLLedger) NotNewer(table, pk, version string) string {
+	return LedgerNotNewer(l.QuoteIdentifier, l.QuoteValue, table, pk, version)
+}
+
+// RowUpsertSQL builds the row upsert for the postgres/mysql shape. When version
+// is non-empty the insert is gated on the ledger (streaming apply) and the ledger
+// high-water mark is advanced; an empty version is the unguarded bulk-import path.
+func (l SQLLedger) RowUpsertSQL(operation string, model *internal.Schema, table string, o map[string]any, diff []string, version string) string {
+	guarded := version != ""
+	insertVals, updateValues := ColumnValues(l.QuoteIdentifier, l.QuoteValue, operation, model, o, diff)
+	pk := LedgerPKFromObject(model.PrimaryKeys, o)
+	var sql strings.Builder
+	sql.WriteString("INSERT INTO ")
+	sql.WriteString(l.QuoteIdentifier(table))
+	sql.WriteString(" (")
+	sql.WriteString(strings.Join(ColumnList(l.QuoteIdentifier, model), ","))
+	if guarded {
+		sql.WriteString(") SELECT ")
+	} else {
+		sql.WriteString(") VALUES (")
+	}
+	sql.WriteString(strings.Join(insertVals, ","))
+	if guarded {
+		// gate the insert on the ledger so a hard-deleted row is not resurrected
+		// by a late event and a stale event cannot clobber a newer row
+		sql.WriteString(l.GuardPrefix)
+		sql.WriteString(l.NotNewer(table, pk, version))
+	} else {
+		sql.WriteString(")")
+	}
+	sql.WriteString(l.ConflictClause(updateValues))
+	sql.WriteString(";\n")
+	if guarded {
+		sql.WriteString(l.UpsertSQL(table, pk, version))
+	}
+	return sql.String()
+}
+
+// DeleteSQL builds a DELETE gated on the ledger, followed by the ledger
+// high-water-mark upsert, in the same statement batch.
+func (l SQLLedger) DeleteSQL(table string, primaryKeys, keys []string, version string) string {
+	pk := LedgerPKFromKeys(primaryKeys, keys)
+	var sql strings.Builder
+	sql.WriteString("DELETE FROM ")
+	sql.WriteString(l.QuoteIdentifier(table))
+	sql.WriteString(" WHERE ")
+	var predicate []string
+	for i, name := range primaryKeys {
+		predicate = append(predicate, fmt.Sprintf("%s=%s", l.QuoteIdentifier(name), l.QuoteValue(keys[i])))
+	}
+	sql.WriteString(strings.Join(predicate, " AND "))
+	// only delete when no newer version has already been applied
+	sql.WriteString(" AND NOT ")
+	sql.WriteString(l.NotNewer(table, pk, version))
+	sql.WriteString(";\n")
+	sql.WriteString(l.UpsertSQL(table, pk, version))
+	return sql.String()
+}
+
 // The row-building helpers below are shared by the SQL drivers whose upsert shape
 // is identical apart from how identifiers and values are quoted (postgres, mysql).
 // Each takes the driver's own quoting functions so the generated SQL is unchanged.

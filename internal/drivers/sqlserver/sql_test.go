@@ -83,7 +83,7 @@ func TestDBChanges(t *testing.T) {
 	delPK := "zzdb46f9-b4d1-4d53-9a1e-f9a878ff03ae"
 	delVersion := util.EventVersion(&dbChange)
 	assert.Equal(t,
-		"DELETE FROM [order] WHERE [id]='"+delPK+"' AND NOT "+ledgerNotNewer("order", delPK, delVersion)+";\n"+
+		"DELETE FROM [order] WHERE [id]='"+delPK+"' AND NOT "+ledger.NotNewer("order", delPK, delVersion)+";\n"+
 			ledgerUpsertSQL("order", delPK, delVersion),
 		sql)
 
