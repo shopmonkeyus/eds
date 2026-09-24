@@ -38,76 +38,6 @@ func ledgerUpsertSQL(table, pk, version string) string {
 // values) rather than a formatted string.
 const createLedgerTableSQL = "CREATE TABLE IF NOT EXISTS `_eds_row_version` (`table_name` VARCHAR(255) NOT NULL, `pk` VARCHAR(255) NOT NULL, `mvcc` VARCHAR(40) NOT NULL, `updated_at` TIMESTAMP NOT NULL, PRIMARY KEY (`table_name`,`pk`)) CHARACTER SET=utf8mb4;"
 
-// columnList returns the quoted column identifiers for the model, in column order.
-func columnList(model *internal.Schema) []string {
-	var columns []string
-	for _, name := range model.Columns() {
-		columns = append(columns, quoteIdentifier(name))
-	}
-	return columns
-}
-
-// rowInsertValues renders every column's value for the INSERT tuple.
-func rowInsertValues(model *internal.Schema, o map[string]any) []string {
-	var insertVals []string
-	for _, name := range model.Columns() {
-		prop := model.Properties[name]
-		if val, ok := o[name]; ok {
-			insertVals = append(insertVals, util.ToJSONStringVal(name, quoteValue(val), prop, true))
-		} else {
-			insertVals = append(insertVals, util.ToJSONStringVal(name, "NULL", prop, true))
-		}
-	}
-	return insertVals
-}
-
-// updateDiffValues builds the SET assignments for an UPDATE from its diff list.
-func updateDiffValues(model *internal.Schema, o map[string]any, diff []string) []string {
-	var updateValues []string
-	for _, name := range diff {
-		if !util.SliceContains(model.Columns(), name) || name == "id" {
-			continue
-		}
-		prop := model.Properties[name]
-		if val, ok := o[name]; ok {
-			v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-		} else {
-			v := util.ToJSONStringVal(name, "NULL", prop, true)
-			updateValues = append(updateValues, v)
-		}
-	}
-	return updateValues
-}
-
-// insertRowValues builds the INSERT tuple and the full ON DUPLICATE KEY assignments
-// for a non-UPDATE upsert, where every column is written.
-func insertRowValues(model *internal.Schema, o map[string]any) (insertVals []string, updateValues []string) {
-	for _, name := range model.Columns() {
-		prop := model.Properties[name]
-		if val, ok := o[name]; ok {
-			v := util.ToJSONStringVal(name, quoteValue(val), prop, true)
-			if name != "id" {
-				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-			}
-			insertVals = append(insertVals, v)
-		} else {
-			v := util.ToJSONStringVal(name, "NULL", prop, true)
-			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
-			insertVals = append(insertVals, v)
-		}
-	}
-	return insertVals, updateValues
-}
-
-// columnValues returns the INSERT tuple and ON DUPLICATE KEY assignments for the row.
-func columnValues(operation string, model *internal.Schema, o map[string]any, diff []string) (insertVals []string, updateValues []string) {
-	if operation == "UPDATE" {
-		return rowInsertValues(model, o), updateDiffValues(model, o, diff)
-	}
-	return insertRowValues(model, o)
-}
-
 // duplicateKeyClause renders the ON DUPLICATE KEY UPDATE resolution for the upsert.
 func duplicateKeyClause(updateValues []string) string {
 	if len(updateValues) == 0 {
@@ -125,12 +55,12 @@ func toSQLFromObject(operation string, model *internal.Schema, table string, eve
 		return "", err
 	}
 	guarded := version != ""
-	insertVals, updateValues := columnValues(operation, model, o, diff)
+	insertVals, updateValues := util.ColumnValues(quoteIdentifier, quoteValue, operation, model, o, diff)
 	var sql strings.Builder
 	sql.WriteString("INSERT INTO ")
 	sql.WriteString(quoteIdentifier(table))
 	sql.WriteString(" (")
-	sql.WriteString(strings.Join(columnList(model), ","))
+	sql.WriteString(strings.Join(util.ColumnList(quoteIdentifier, model), ","))
 	if guarded {
 		sql.WriteString(") SELECT ")
 	} else {

@@ -149,3 +149,77 @@ func DropTable(ctx context.Context, logger logger.Logger, db *sql.DB, table stri
 	}
 	return nil
 }
+
+// The row-building helpers below are shared by the SQL drivers whose upsert shape
+// is identical apart from how identifiers and values are quoted (postgres, mysql).
+// Each takes the driver's own quoting functions so the generated SQL is unchanged.
+
+// ColumnList returns the quoted column identifiers for the model, in column order.
+func ColumnList(quoteIdentifier func(string) string, model *internal.Schema) []string {
+	var columns []string
+	for _, name := range model.Columns() {
+		columns = append(columns, quoteIdentifier(name))
+	}
+	return columns
+}
+
+// RowInsertValues renders every column's value for the INSERT tuple.
+func RowInsertValues(quoteValue func(any) string, model *internal.Schema, o map[string]any) []string {
+	var insertVals []string
+	for _, name := range model.Columns() {
+		prop := model.Properties[name]
+		if val, ok := o[name]; ok {
+			insertVals = append(insertVals, ToJSONStringVal(name, quoteValue(val), prop, true))
+		} else {
+			insertVals = append(insertVals, ToJSONStringVal(name, "NULL", prop, true))
+		}
+	}
+	return insertVals
+}
+
+// UpdateDiffValues builds the SET assignments for an UPDATE from its diff list.
+func UpdateDiffValues(quoteIdentifier func(string) string, quoteValue func(any) string, model *internal.Schema, o map[string]any, diff []string) []string {
+	var updateValues []string
+	for _, name := range diff {
+		if !SliceContains(model.Columns(), name) || name == "id" {
+			continue
+		}
+		prop := model.Properties[name]
+		if val, ok := o[name]; ok {
+			v := ToJSONStringVal(name, quoteValue(val), prop, true)
+			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+		} else {
+			v := ToJSONStringVal(name, "NULL", prop, true)
+			updateValues = append(updateValues, v)
+		}
+	}
+	return updateValues
+}
+
+// InsertRowValues builds the INSERT tuple and the full SET assignments for a
+// non-UPDATE upsert, where every column is written.
+func InsertRowValues(quoteIdentifier func(string) string, quoteValue func(any) string, model *internal.Schema, o map[string]any) (insertVals []string, updateValues []string) {
+	for _, name := range model.Columns() {
+		prop := model.Properties[name]
+		if val, ok := o[name]; ok {
+			v := ToJSONStringVal(name, quoteValue(val), prop, true)
+			if name != "id" {
+				updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+			}
+			insertVals = append(insertVals, v)
+		} else {
+			v := ToJSONStringVal(name, "NULL", prop, true)
+			updateValues = append(updateValues, fmt.Sprintf("%s=%s", quoteIdentifier(name), v))
+			insertVals = append(insertVals, v)
+		}
+	}
+	return insertVals, updateValues
+}
+
+// ColumnValues returns the INSERT tuple and SET assignments for the row.
+func ColumnValues(quoteIdentifier func(string) string, quoteValue func(any) string, operation string, model *internal.Schema, o map[string]any, diff []string) (insertVals []string, updateValues []string) {
+	if operation == "UPDATE" {
+		return RowInsertValues(quoteValue, model, o), UpdateDiffValues(quoteIdentifier, quoteValue, model, o, diff)
+	}
+	return InsertRowValues(quoteIdentifier, quoteValue, model, o)
+}
