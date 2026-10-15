@@ -32,7 +32,6 @@ jobs:
         run: docker logs eds-init-kafka-1
       - name: Run tests
         env:
-          SM_SNOWFLAKE_PASSWORD: ${{ secrets.SM_SNOWFLAKE_PASSWORD }}
           SNOWFLAKE_SECRET_ACCESS_KEY: ${{ secrets.SNOWFLAKE_SECRET_ACCESS_KEY }}
           GCS_ACCESS_KEY_ID: ${{ secrets.GCS_ACCESS_KEY_ID }}
           GCS_SECRET_ACCESS_KEY: ${{ secrets.GCS_SECRET_ACCESS_KEY }}
