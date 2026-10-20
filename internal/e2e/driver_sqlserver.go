@@ -20,6 +20,10 @@ func (d *driverSQLServerTest) Name() string {
 	return "sqlserver"
 }
 
+func (d *driverSQLServerTest) SupportsReorder() bool {
+	return true
+}
+
 func (d *driverSQLServerTest) URL(dir string) string {
 	return fmt.Sprintf("sqlserver://sa:%s@127.0.0.1:1433/master", dbpass)
 }

@@ -58,6 +58,12 @@ type e2eTestReady interface {
 	WaitForReady(timeout time.Duration) error
 }
 
+// reorderSupporter is implemented by the drivers that keep a version ledger, so
+// the out-of-order scenarios only run where they mean something.
+type reorderSupporter interface {
+	SupportsReorder() bool
+}
+
 var tests = make([]e2eTest, 0)
 
 func registerTest(t e2eTest) {
@@ -106,7 +112,9 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 	event.Key = []string{"12345"}
 	event.ModelVersion = modelVersion
 	event.Timestamp = time.Now().UnixMilli()
-	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().Nanosecond())
+	// UnixNano, not Nanosecond: Nanosecond restarts every second, so the versions
+	// would not always increase.
+	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().UnixNano())
 	if operation == "DELETE" {
 		event.Before = json.RawMessage([]byte(payload))
 	} else {
@@ -127,6 +135,131 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 		return nil, fmt.Errorf("error publishing event: %w", err)
 	}
 	return &event, nil
+}
+
+// versionedEvent is one event of a reorder scenario, with its key and version
+// set by hand.
+type versionedEvent struct {
+	table         string
+	operation     string
+	modelVersion  string
+	key           string
+	payload       string
+	mvccTimestamp string
+	diff          []string
+}
+
+// publishDBChangeEventVersioned publishes an event with the key and version set
+// by hand, which the reorder scenarios need and publishDBChangeEvent cannot do.
+func publishDBChangeEventVersioned(logger logger.Logger, js jetstream.JetStream, ve versionedEvent) (*internal.DBChangeEvent, error) {
+	var event internal.DBChangeEvent
+	event.ID = util.Hash(time.Now())
+	event.Operation = ve.operation
+	event.Table = ve.table
+	event.Key = []string{ve.key}
+	event.ModelVersion = ve.modelVersion
+	event.Timestamp = time.Now().UnixMilli()
+	event.MVCCTimestamp = ve.mvccTimestamp
+	if ve.operation == "DELETE" {
+		event.Before = json.RawMessage([]byte(ve.payload))
+	} else {
+		event.After = json.RawMessage([]byte(ve.payload))
+		if ve.operation == "UPDATE" {
+			event.Diff = ve.diff
+		}
+	}
+	event.Imported = false
+	buf, err := json.Marshal(event)
+	if err != nil {
+		return nil, fmt.Errorf("error marshalling event: %w", err)
+	}
+	subject := fmt.Sprintf("dbchange.%s.%s."+companyId+".1.PUBLIC.2", ve.table, ve.operation)
+	logger.Info("publishing event: %s => %v", subject, util.JSONStringify(event))
+	msgId := util.Hash(event)
+	if _, err := js.Publish(context.Background(), subject, buf, jetstream.WithMsgID(msgId)); err != nil {
+		return nil, fmt.Errorf("error publishing event: %w", err)
+	}
+	return &event, nil
+}
+
+// reorderBase starts the versions above anything a previous run left in the
+// ledger, so these tests can be run again.
+func reorderBase() int64 {
+	return time.Now().UnixNano()
+}
+
+// mvccVersion builds a version string that sorts in the order we intend.
+func mvccVersion(n int64) string {
+	return strconv.FormatInt(n, 10)
+}
+
+// runDBChangeReorderResurrectionTest checks that a late UPDATE cannot bring back
+// a deleted row: INSERT v1, DELETE v3, then UPDATE v2. The row should be gone.
+func runDBChangeReorderResurrectionTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	const id = "reorder-resurrect"
+	base := reorderBase()
+	v1 := `{"id":"reorder-resurrect","name":"v1","updatedDate":"2026-03-01T10:00:00.000Z"}`
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v1, mvccVersion(base + 1), nil}); err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	deleteEvent, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "DELETE", modelVersion, id, v1, mvccVersion(base + 3), nil})
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	v2 := `{"id":"reorder-resurrect","name":"v2-late","updatedDate":"2026-03-01T10:01:00.000Z"}`
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "UPDATE", modelVersion, id, v2, mvccVersion(base + 2), []string{"name", "updatedDate"}}); err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*deleteEvent)
+}
+
+// runDBChangeReorderStaleDeleteTest checks that an old DELETE cannot remove a
+// newer row: INSERT v1, UPDATE v3, then DELETE v2. The v3 row should survive.
+func runDBChangeReorderStaleDeleteTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	const id = "reorder-stale"
+	base := reorderBase()
+	v1 := `{"id":"reorder-stale","name":"v1","updatedDate":"2026-03-02T10:00:00.000Z"}`
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v1, mvccVersion(base + 1), nil}); err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	v3 := `{"id":"reorder-stale","name":"v3","updatedDate":"2026-03-02T12:00:00.000Z"}`
+	updateEvent, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "UPDATE", modelVersion, id, v3, mvccVersion(base + 3), []string{"name", "updatedDate"}})
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "DELETE", modelVersion, id, v1, mvccVersion(base + 2), nil}); err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*updateEvent)
+}
+
+// runDBChangeReorderRecreateTest checks that genuinely re-creating a row still
+// works: INSERT v1, DELETE v2, then INSERT v3. The v3 row should be there.
+func runDBChangeReorderRecreateTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
+	const id = "reorder-recreate"
+	base := reorderBase()
+	v1 := `{"id":"reorder-recreate","name":"v1","updatedDate":"2026-03-03T10:00:00.000Z"}`
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v1, mvccVersion(base + 1), nil}); err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	if _, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "DELETE", modelVersion, id, v1, mvccVersion(base + 2), nil}); err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	v3 := `{"id":"reorder-recreate","name":"v3","updatedDate":"2026-03-03T14:00:00.000Z"}`
+	recreateEvent, err := publishDBChangeEventVersioned(logger, js, versionedEvent{"customer", "INSERT", modelVersion, id, v3, mvccVersion(base + 3), nil})
+	if err != nil {
+		return err
+	}
+	time.Sleep(eventDeliverDelay)
+	return readResult(*recreateEvent)
 }
 
 func runDBChangeNewTableTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
@@ -370,6 +503,38 @@ func RunTests(logger logger.Logger, only []string) (bool, error) {
 				} else {
 					atomic.AddUint32(&pass, 1)
 					logger.Info("✅ dbchange insert (#2) test: %s succeeded in %s", name, time.Since(testStarted))
+				}
+				if rt, ok := test.(reorderSupporter); ok && rt.SupportsReorder() {
+					testStarted = time.Now()
+					if err := runDBChangeReorderResurrectionTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+						return test.Validate(_logger, tmpdir, url, event)
+					}); err != nil {
+						atomic.AddUint32(&fail, 1)
+						logger.Error("🔴 dbchange reorder resurrection test: %s failed: %s", name, err)
+					} else {
+						atomic.AddUint32(&pass, 1)
+						logger.Info("✅ dbchange reorder resurrection test: %s succeeded in %s", name, time.Since(testStarted))
+					}
+					testStarted = time.Now()
+					if err := runDBChangeReorderStaleDeleteTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+						return test.Validate(_logger, tmpdir, url, event)
+					}); err != nil {
+						atomic.AddUint32(&fail, 1)
+						logger.Error("🔴 dbchange reorder stale delete test: %s failed: %s", name, err)
+					} else {
+						atomic.AddUint32(&pass, 1)
+						logger.Info("✅ dbchange reorder stale delete test: %s succeeded in %s", name, time.Since(testStarted))
+					}
+					testStarted = time.Now()
+					if err := runDBChangeReorderRecreateTest(logger, nc, js, func(event internal.DBChangeEvent) error {
+						return test.Validate(_logger, tmpdir, url, event)
+					}); err != nil {
+						atomic.AddUint32(&fail, 1)
+						logger.Error("🔴 dbchange reorder re-create test: %s failed: %s", name, err)
+					} else {
+						atomic.AddUint32(&pass, 1)
+						logger.Info("✅ dbchange reorder re-create test: %s succeeded in %s", name, time.Since(testStarted))
+					}
 				}
 			}, func(ec int) bool {
 				if ec == lookingForExitCode {
