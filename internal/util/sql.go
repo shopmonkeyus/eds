@@ -27,13 +27,12 @@ func QuoteStringIdentifiers(vals []string) []string {
 	return res
 }
 
-// OffendingSQLLog is the log format used to surface the batch that failed to
-// execute, so the exact SQL can be inspected in customer logs.
+// OffendingSQLLog is the log format for a failed batch, so the SQL that failed
+// can be found in customer logs.
 const OffendingSQLLog = "offending sql: %s"
 
-// ExecPendingInTx runs a pre-built batch of statements in a single transaction,
-// rolling back on any failure and logging the offending SQL. Consolidating this
-// here keeps the streaming apply identical across every SQL driver.
+// ExecPendingInTx runs a batch of statements in one transaction, rolling back
+// and logging the SQL if any of them fail.
 func ExecPendingInTx(ctx context.Context, db *sql.DB, log logger.Logger, sql string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -56,22 +55,20 @@ func ExecPendingInTx(ctx context.Context, db *sql.DB, log logger.Logger, sql str
 	return nil
 }
 
-// PendingWrite is a single buffered statement tagged with its mvcc version so a
-// batch can be applied in version order.
+// PendingWrite is a buffered statement and the mvcc version it belongs to.
 type PendingWrite struct {
 	Version string
 	SQL     string
 }
 
-// FlushPendingWrites sorts the buffered writes by version, concatenates them and
-// executes the batch in a single transaction. It is a no-op when there is
-// nothing pending. Shared so the streaming apply stays identical across drivers.
+// FlushPendingWrites runs the buffered writes in version order, in one
+// transaction. Does nothing when there is nothing buffered.
 func FlushPendingWrites(ctx context.Context, db *sql.DB, log logger.Logger, writes []PendingWrite) error {
 	if len(writes) == 0 {
 		return nil
 	}
-	// apply in version order so in-batch reorders resolve correctly; the
-	// ledger still guards cross-batch and redelivery reordering
+	// sorting fixes the order within this batch; the ledger catches events
+	// that arrive in a later batch or are redelivered
 	slices.SortFunc(writes, func(a, b PendingWrite) int {
 		return strings.Compare(a.Version, b.Version)
 	})
@@ -150,8 +147,7 @@ func DropTable(ctx context.Context, logger logger.Logger, db *sql.DB, table stri
 	return nil
 }
 
-// CreateLedgerTable creates the version high-water-mark table using the driver's
-// own DDL (the schema is fixed per driver, so the DDL is a static const).
+// CreateLedgerTable creates the version table using the driver's own DDL.
 func CreateLedgerTable(ctx context.Context, db *sql.DB, ddl string) error {
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("unable to create version ledger table: %w", err)
@@ -159,14 +155,9 @@ func CreateLedgerTable(ctx context.Context, db *sql.DB, ddl string) error {
 	return nil
 }
 
-// SQLLedger bundles a driver's quoting and its ledger-upsert renderer so the
-// guarded DELETE and row-upsert paths — identical across drivers apart from
-// those — live in one place. UpsertSQL stays per-driver because the ledger upsert
-// dialect genuinely differs (ON CONFLICT / ON DUPLICATE KEY / MERGE).
-//
-// GuardPrefix and ConflictClause are only used by RowUpsertSQL (the postgres and
-// mysql upsert shape); SQL Server builds its row upsert as a MERGE and leaves
-// them unset.
+// SQLLedger holds the per-driver pieces of the delete and upsert statements, so
+// the rest can be written once. SQL Server leaves GuardPrefix and ConflictClause
+// unset because it builds its upsert as a MERGE.
 type SQLLedger struct {
 	QuoteIdentifier func(string) string
 	QuoteValue      func(any) string
@@ -175,14 +166,15 @@ type SQLLedger struct {
 	ConflictClause  func(updateValues []string) string
 }
 
-// NotNewer renders the stale-guard predicate for this driver.
+// NotNewer builds the check that is true when the stored version is already as
+// new as the incoming one.
 func (l SQLLedger) NotNewer(table, pk, version string) string {
 	return LedgerNotNewer(l.QuoteIdentifier, l.QuoteValue, table, pk, version)
 }
 
-// RowUpsertSQL builds the row upsert for the postgres/mysql shape. When version
-// is non-empty the insert is gated on the ledger (streaming apply) and the ledger
-// high-water mark is advanced; an empty version is the unguarded bulk-import path.
+// RowUpsertSQL builds the row upsert for postgres and mysql. With a version it
+// checks the ledger first and then records the version; without one it is the
+// bulk import path and does neither.
 func (l SQLLedger) RowUpsertSQL(operation string, model *internal.Schema, table string, o map[string]any, diff []string, version string) string {
 	guarded := version != ""
 	insertVals, updateValues := ColumnValues(l.QuoteIdentifier, l.QuoteValue, operation, model, o, diff)
@@ -199,8 +191,8 @@ func (l SQLLedger) RowUpsertSQL(operation string, model *internal.Schema, table 
 	}
 	sql.WriteString(strings.Join(insertVals, ","))
 	if guarded {
-		// gate the insert on the ledger so a hard-deleted row is not resurrected
-		// by a late event and a stale event cannot clobber a newer row
+		// skip the insert when the ledger already has this version or newer, so a
+		// late event cannot resurrect a deleted row or overwrite a newer one
 		sql.WriteString(l.GuardPrefix)
 		sql.WriteString(l.NotNewer(table, pk, version))
 	} else {
@@ -214,8 +206,8 @@ func (l SQLLedger) RowUpsertSQL(operation string, model *internal.Schema, table 
 	return sql.String()
 }
 
-// DeleteSQL builds a DELETE gated on the ledger, followed by the ledger
-// high-water-mark upsert, in the same statement batch.
+// DeleteSQL builds a DELETE that checks the ledger first, then records the
+// version, in the same batch.
 func (l SQLLedger) DeleteSQL(table string, primaryKeys, keys []string, version string) string {
 	pk := LedgerPKFromKeys(primaryKeys, keys)
 	var sql strings.Builder
@@ -235,11 +227,10 @@ func (l SQLLedger) DeleteSQL(table string, primaryKeys, keys []string, version s
 	return sql.String()
 }
 
-// The row-building helpers below are shared by the SQL drivers whose upsert shape
-// is identical apart from how identifiers and values are quoted (postgres, mysql).
-// Each takes the driver's own quoting functions so the generated SQL is unchanged.
+// The helpers below are shared by postgres and mysql, whose upserts differ only
+// in quoting. Each takes the driver's own quoting functions.
 
-// ColumnList returns the quoted column identifiers for the model, in column order.
+// ColumnList returns the quoted column names, in column order.
 func ColumnList(quoteIdentifier func(string) string, model *internal.Schema) []string {
 	var columns []string
 	for _, name := range model.Columns() {
@@ -248,7 +239,7 @@ func ColumnList(quoteIdentifier func(string) string, model *internal.Schema) []s
 	return columns
 }
 
-// RowInsertValues renders every column's value for the INSERT tuple.
+// RowInsertValues returns the values for the INSERT tuple, in column order.
 func RowInsertValues(quoteValue func(any) string, model *internal.Schema, o map[string]any) []string {
 	var insertVals []string
 	for _, name := range model.Columns() {
@@ -262,7 +253,7 @@ func RowInsertValues(quoteValue func(any) string, model *internal.Schema, o map[
 	return insertVals
 }
 
-// UpdateDiffValues builds the SET assignments for an UPDATE from its diff list.
+// UpdateDiffValues returns the SET assignments for the changed columns only.
 func UpdateDiffValues(quoteIdentifier func(string) string, quoteValue func(any) string, model *internal.Schema, o map[string]any, diff []string) []string {
 	var updateValues []string
 	for _, name := range diff {
@@ -281,8 +272,8 @@ func UpdateDiffValues(quoteIdentifier func(string) string, quoteValue func(any) 
 	return updateValues
 }
 
-// InsertRowValues builds the INSERT tuple and the full SET assignments for a
-// non-UPDATE upsert, where every column is written.
+// InsertRowValues returns the INSERT tuple and the SET assignments that write
+// every column.
 func InsertRowValues(quoteIdentifier func(string) string, quoteValue func(any) string, model *internal.Schema, o map[string]any) (insertVals []string, updateValues []string) {
 	for _, name := range model.Columns() {
 		prop := model.Properties[name]

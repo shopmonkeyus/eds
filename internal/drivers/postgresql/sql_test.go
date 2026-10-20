@@ -81,8 +81,8 @@ func TestCreateLedgerTableSQL(t *testing.T) {
 		createLedgerTableSQL)
 }
 
-// the streaming upsert gates the insert on the version ledger and appends the
-// ledger upsert; the bulk-import path (empty version) does neither
+// the insert checks the ledger and then records the version; the bulk import
+// path does neither
 func TestUpsertGuardedByLedger(t *testing.T) {
 	schema := &internal.Schema{
 		Table:       "customer",

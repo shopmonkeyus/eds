@@ -182,8 +182,6 @@ func getSmallSchema() *internal.Schema {
 	}
 }
 
-// the bulk-import path (empty version) writes every column on every merge and
-// carries no ledger guard
 func TestMergeWritesAllColumns(t *testing.T) {
 	sql := toSQLFromObject(getSmallSchema(), "order", map[string]any{"id": "1", "updatedDate": "2024-07-11T21:16:51.70856Z"}, "")
 	assert.Equal(t, `MERGE [order] AS target USING (VALUES('1')) AS source ([id]) ON target.[id]=source.[id]`+
@@ -193,8 +191,8 @@ func TestMergeWritesAllColumns(t *testing.T) {
 		` VALUES ('1','[]','{}',NULL,NULL,'2024-07-11 21:16:51.70856');`, sql)
 }
 
-// the streaming path gates both merge branches on the version ledger and appends
-// the ledger upsert so a hard-deleted row cannot be resurrected out of order
+// both branches of the MERGE check the ledger, so a late event cannot bring a
+// deleted row back
 func TestMergeGuardedByLedger(t *testing.T) {
 	sql := toSQLFromObject(getSmallSchema(), "order", map[string]any{"id": "1", "updatedDate": "2024-07-11T21:16:51.70856Z"}, "V1")
 	expected := `MERGE [order] AS target USING (SELECT s.[id], l.[mvcc] AS __mvcc FROM (VALUES('1')) AS s ([id])` +

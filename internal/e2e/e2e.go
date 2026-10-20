@@ -58,8 +58,8 @@ type e2eTestReady interface {
 	WaitForReady(timeout time.Duration) error
 }
 
-// reorderSupporter is implemented by drivers whose backing store enforces the mvcc
-// ledger, so the out-of-order reorder scenarios only run where they are meaningful.
+// reorderSupporter is implemented by the drivers that keep a version ledger, so
+// the out-of-order scenarios only run where they mean something.
 type reorderSupporter interface {
 	SupportsReorder() bool
 }
@@ -112,8 +112,8 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 	event.Key = []string{"12345"}
 	event.ModelVersion = modelVersion
 	event.Timestamp = time.Now().UnixMilli()
-	// UnixNano (not Nanosecond, which wraps at 1e9) so the ledger version guard
-	// sees these serially-published events as monotonically increasing.
+	// UnixNano, not Nanosecond: Nanosecond restarts every second, so the versions
+	// would not always increase.
 	event.MVCCTimestamp = fmt.Sprintf("%d", time.Now().UnixNano())
 	if operation == "DELETE" {
 		event.Before = json.RawMessage([]byte(payload))
@@ -137,8 +137,8 @@ func publishDBChangeEvent(logger logger.Logger, js jetstream.JetStream, table st
 	return &event, nil
 }
 
-// versionedEvent scripts a single reorder-scenario event with an explicit key and
-// mvcc version.
+// versionedEvent is one event of a reorder scenario, with its key and version
+// set by hand.
 type versionedEvent struct {
 	table         string
 	operation     string
@@ -149,9 +149,8 @@ type versionedEvent struct {
 	diff          []string
 }
 
-// publishDBChangeEventVersioned publishes an event with an explicit key and mvcc
-// version so reorder scenarios can script exact versions. publishDBChangeEvent's
-// mvcc is time.Now().Nanosecond() (0..1e9, non-monotonic) and cannot order events.
+// publishDBChangeEventVersioned publishes an event with the key and version set
+// by hand, which the reorder scenarios need and publishDBChangeEvent cannot do.
 func publishDBChangeEventVersioned(logger logger.Logger, js jetstream.JetStream, ve versionedEvent) (*internal.DBChangeEvent, error) {
 	var event internal.DBChangeEvent
 	event.ID = util.Hash(time.Now())
@@ -183,22 +182,19 @@ func publishDBChangeEventVersioned(logger logger.Logger, js jetstream.JetStream,
 	return &event, nil
 }
 
-// reorderBase returns a unix-nanos base for scripting versions. Deriving it from
-// wall-clock nanos (not a fixed constant) keeps each run's versions above the
-// ledger high-water mark left by any prior run, so the scenarios stay re-runnable.
+// reorderBase starts the versions above anything a previous run left in the
+// ledger, so these tests can be run again.
 func reorderBase() int64 {
 	return time.Now().UnixNano()
 }
 
-// mvccVersion renders a monotonic, fixed-width mvcc string (unix-nanos scale) so
-// NormalizeMVCC's lexical compare reflects the intended ordering.
+// mvccVersion builds a version string that sorts in the order we intend.
 func mvccVersion(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
 
-// runDBChangeReorderResurrectionTest proves a late UPDATE cannot resurrect a
-// hard-deleted row: INSERT(v1) → DELETE(v3) → late UPDATE(v2), v2 < v3, each in a
-// separate flush ⇒ row absent. Validated against the delete event (asserts absence).
+// runDBChangeReorderResurrectionTest checks that a late UPDATE cannot bring back
+// a deleted row: INSERT v1, DELETE v3, then UPDATE v2. The row should be gone.
 func runDBChangeReorderResurrectionTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	const id = "reorder-resurrect"
 	base := reorderBase()
@@ -220,9 +216,8 @@ func runDBChangeReorderResurrectionTest(logger logger.Logger, _ *nats.Conn, js j
 	return readResult(*deleteEvent)
 }
 
-// runDBChangeReorderStaleDeleteTest proves a stale DELETE cannot remove a newer
-// row: INSERT(v1) → UPDATE(v3) → stale DELETE(v2), v2 < v3, each in a separate
-// flush ⇒ row present with the v3 values. Validated against the v3 update event.
+// runDBChangeReorderStaleDeleteTest checks that an old DELETE cannot remove a
+// newer row: INSERT v1, UPDATE v3, then DELETE v2. The v3 row should survive.
 func runDBChangeReorderStaleDeleteTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	const id = "reorder-stale"
 	base := reorderBase()
@@ -244,9 +239,8 @@ func runDBChangeReorderStaleDeleteTest(logger logger.Logger, _ *nats.Conn, js je
 	return readResult(*updateEvent)
 }
 
-// runDBChangeReorderRecreateTest proves a legit re-create still lands: INSERT(v1)
-// → DELETE(v2) → re-INSERT(v3), v3 > v2, each in a separate flush ⇒ row present
-// with the v3 values. Validated against the re-insert event.
+// runDBChangeReorderRecreateTest checks that genuinely re-creating a row still
+// works: INSERT v1, DELETE v2, then INSERT v3. The v3 row should be there.
 func runDBChangeReorderRecreateTest(logger logger.Logger, _ *nats.Conn, js jetstream.JetStream, readResult checkValidEvent) error {
 	const id = "reorder-recreate"
 	base := reorderBase()

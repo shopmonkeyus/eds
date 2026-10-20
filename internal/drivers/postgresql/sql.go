@@ -131,7 +131,6 @@ func quoteIdentifier(val string) string {
 	return pq.QuoteIdentifier(val)
 }
 
-// ledger renders this driver's guarded delete, row upsert, and stale-guard predicate.
 var ledger = util.SQLLedger{
 	QuoteIdentifier: quoteIdentifier,
 	QuoteValue:      quoteValue,
@@ -140,8 +139,8 @@ var ledger = util.SQLLedger{
 	ConflictClause:  conflictClause,
 }
 
-// ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
-// stored and incoming versions, in the same transaction as the data write.
+// ledgerUpsertSQL keeps whichever version is newer, the stored one or the
+// incoming one.
 func ledgerUpsertSQL(table, pk, version string) string {
 	return fmt.Sprintf(
 		"INSERT INTO %[1]s (%[2]s,%[3]s,%[4]s,%[5]s) VALUES (%[6]s,%[7]s,%[8]s,now())"+
@@ -152,12 +151,8 @@ func ledgerUpsertSQL(table, pk, version string) string {
 	)
 }
 
-// createLedgerTableSQL creates the side high-water-mark table if it does not
-// already exist. The schema is fixed, so it is a static statement (no runtime
-// values) rather than a formatted string.
 const createLedgerTableSQL = `CREATE TABLE IF NOT EXISTS "_eds_row_version" ("table_name" VARCHAR(255) NOT NULL, "pk" VARCHAR(255) NOT NULL, "mvcc" VARCHAR(40) NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY ("table_name","pk"));`
 
-// conflictClause renders the ON CONFLICT resolution for the upsert.
 func conflictClause(updateValues []string) string {
 	if len(updateValues) == 0 {
 		return " ON CONFLICT (id) DO NOTHING"

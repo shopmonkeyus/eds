@@ -8,17 +8,16 @@ import (
 	"github.com/shopmonkeyus/eds/internal"
 )
 
-// MVCC versions arrive in two shapes: the CRDB changefeed emits "walltime.logical"
-// while the importer emits pure integer nanos. Zero-padding both to a fixed width
-// lets a lexical compare stand in for a numeric one without losing precision to
-// float64 (a 19-digit nanos value overflows the float64 mantissa).
+// Versions arrive in two shapes: the changefeed sends "walltime.logical", the
+// importer sends whole nanoseconds. Padding both to a fixed width lets us
+// compare them as text, which a float64 cannot do without losing digits.
 const (
 	mvccWalltimeWidth = 20
 	mvccLogicalWidth  = 10
 )
 
-// NormalizeMVCC converts a raw mvccTimestamp into a fixed-width, zero-padded
-// "walltime+logical" string such that a > b lexically iff version(a) > version(b).
+// NormalizeMVCC pads a raw mvccTimestamp so that comparing two of them as text
+// gives the same answer as comparing the versions.
 func NormalizeMVCC(raw string) string {
 	if raw == "" {
 		return ""
@@ -27,8 +26,8 @@ func NormalizeMVCC(raw string) string {
 	return padLeft(walltime, mvccWalltimeWidth) + padLeft(logical, mvccLogicalWidth)
 }
 
-// EventVersion returns the comparable version string for an event, falling back
-// to the event timestamp (ms, scaled to nanos) when the mvcc clock is absent.
+// EventVersion returns the version to compare an event on, falling back to its
+// timestamp when there is no mvcc value.
 func EventVersion(event *internal.DBChangeEvent) string {
 	if event == nil {
 		return ""

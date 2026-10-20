@@ -24,11 +24,10 @@ func columnValueOrNull(name string, prop internal.SchemaProperty, object map[str
 	return util.ToJSONStringVal(name, v, prop, false)
 }
 
-// ledger renders this driver's guarded delete and stale-guard predicate.
 var ledger = util.SQLLedger{QuoteIdentifier: quoteIdentifier, QuoteValue: quoteValue, UpsertSQL: ledgerUpsertSQL}
 
-// ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
-// stored and incoming versions, in the same transaction as the data write.
+// ledgerUpsertSQL keeps whichever version is newer, the stored one or the
+// incoming one.
 func ledgerUpsertSQL(table, pk, version string) string {
 	return fmt.Sprintf(
 		"MERGE %[1]s AS target USING (VALUES(%[2]s,%[3]s,%[4]s)) AS source (%[5]s,%[6]s,%[7]s)"+
@@ -41,8 +40,8 @@ func ledgerUpsertSQL(table, pk, version string) string {
 	)
 }
 
-// mergeColumns renders the quoted column list, the INSERT values, and the UPDATE
-// SET assignments (id is excluded from the latter) for the row.
+// mergeColumns returns the column list, the INSERT values and the UPDATE
+// assignments. id is left out of the UPDATE.
 func mergeColumns(model *internal.Schema, object map[string]any) (insertColumns []string, insertValues []string, updateValues []string) {
 	for _, name := range model.Columns() {
 		v := columnValueOrNull(name, model.Properties[name], object)
@@ -55,11 +54,9 @@ func mergeColumns(model *internal.Schema, object map[string]any) (insertColumns 
 	return insertColumns, insertValues, updateValues
 }
 
-// mergeSource renders the USING source between "USING (" and the ON clause. When
-// guarded it LEFT JOINs the ledger so the source always yields exactly one row
-// (even with no ledger entry yet) and both merge branches can be gated on the
-// stored version — this is what stops a hard-deleted row from being resurrected by
-// a late event and a stale event from clobbering a newer row.
+// mergeSource builds the USING clause. It LEFT JOINs the ledger so the source
+// always returns exactly one row, even when the ledger has no entry yet, which
+// lets both branches of the MERGE check the stored version.
 func mergeSource(model *internal.Schema, table string, object map[string]any, guarded bool) string {
 	var sql strings.Builder
 	if guarded {
@@ -93,9 +90,8 @@ func mergeSource(model *internal.Schema, table string, object map[string]any, gu
 	return sql.String()
 }
 
-// toSQLFromObject builds the upsert for a row. When version is non-empty the
-// upsert is gated on the ledger (streaming apply); an empty version is the
-// unguarded bulk-import path.
+// toSQLFromObject builds the upsert for a row. With a version it checks the
+// ledger first; without one it is the bulk import path and does not.
 func toSQLFromObject(model *internal.Schema, table string, object map[string]any, version string) string {
 	insertColumns, insertValues, updateValues := mergeColumns(model, object)
 
@@ -148,9 +144,6 @@ func toSQL(c internal.DBChangeEvent, model *internal.Schema) (string, error) {
 	return toSQLFromObject(model, c.Table, o, version), nil
 }
 
-// createLedgerTableSQL creates the side high-water-mark table if it does not
-// already exist. The schema is fixed, so it is a static statement (no runtime
-// values) rather than a formatted string.
 const createLedgerTableSQL = "IF OBJECT_ID(N'[_eds_row_version]', N'U') IS NULL CREATE TABLE [_eds_row_version] ([table_name] VARCHAR(255) NOT NULL, [pk] VARCHAR(255) NOT NULL, [mvcc] VARCHAR(40) NOT NULL, [updated_at] DATETIME2 NOT NULL, PRIMARY KEY ([table_name],[pk]));"
 
 func propTypeToSQLType(property internal.SchemaProperty, isPrimaryKey bool) string {

@@ -15,7 +15,6 @@ func quoteIdentifier(val string) string {
 	return "`" + val + "`"
 }
 
-// ledger renders this driver's guarded delete, row upsert, and stale-guard predicate.
 var ledger = util.SQLLedger{
 	QuoteIdentifier: quoteIdentifier,
 	QuoteValue:      quoteValue,
@@ -24,8 +23,8 @@ var ledger = util.SQLLedger{
 	ConflictClause:  duplicateKeyClause,
 }
 
-// ledgerUpsertSQL advances the ledger high-water mark to the greatest of the
-// stored and incoming versions, in the same transaction as the data write.
+// ledgerUpsertSQL keeps whichever version is newer, the stored one or the
+// incoming one.
 func ledgerUpsertSQL(table, pk, version string) string {
 	return fmt.Sprintf(
 		"INSERT INTO %[1]s (%[2]s,%[3]s,%[4]s,%[5]s) VALUES (%[6]s,%[7]s,%[8]s,NOW())"+
@@ -36,12 +35,8 @@ func ledgerUpsertSQL(table, pk, version string) string {
 	)
 }
 
-// createLedgerTableSQL creates the side high-water-mark table if it does not
-// already exist. The schema is fixed, so it is a static statement (no runtime
-// values) rather than a formatted string.
 const createLedgerTableSQL = "CREATE TABLE IF NOT EXISTS `_eds_row_version` (`table_name` VARCHAR(255) NOT NULL, `pk` VARCHAR(255) NOT NULL, `mvcc` VARCHAR(40) NOT NULL, `updated_at` TIMESTAMP NOT NULL, PRIMARY KEY (`table_name`,`pk`)) CHARACTER SET=utf8mb4;"
 
-// duplicateKeyClause renders the ON DUPLICATE KEY UPDATE resolution for the upsert.
 func duplicateKeyClause(updateValues []string) string {
 	if len(updateValues) == 0 {
 		return fmt.Sprintf(" ON DUPLICATE KEY UPDATE %[1]s=%[1]s", quoteIdentifier("id"))
@@ -49,10 +44,8 @@ func duplicateKeyClause(updateValues []string) string {
 	return " ON DUPLICATE KEY UPDATE " + strings.Join(updateValues, ",")
 }
 
-// toSQLFromObject builds the upsert for a row. Unlike postgres it must first pull
-// the object off the event; the shared builder renders the rest. REPLACE INTO gave
-// no way to reject stale events, so this uses an upsert keyed on the row whose
-// ON DUPLICATE KEY UPDATE applies newer values in place.
+// toSQLFromObject builds the upsert for a row. REPLACE INTO had no way to
+// reject a stale event, so this uses INSERT ... ON DUPLICATE KEY UPDATE.
 func toSQLFromObject(operation string, model *internal.Schema, table string, event internal.DBChangeEvent, diff []string, version string) (string, error) {
 	o, err := event.GetObject()
 	if err != nil {
