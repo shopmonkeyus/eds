@@ -15,11 +15,15 @@ import (
 	"github.com/shopmonkeyus/go-common/logger"
 )
 
-var snowflakeUserKeypair = "EDS_E2E_TEST_KEYPAIR"
-var snowflakeKeypairSecretKey = os.Getenv("SNOWFLAKE_SECRET_ACCESS_KEY")
+var (
+	snowflakeUserKeypair      = "EDS_E2E_TEST_KEYPAIR"
+	snowflakeKeypairSecretKey = os.Getenv("SNOWFLAKE_SECRET_ACCESS_KEY")
+	snowflakeDB               = "EDS_E2E"
+	snowflakeSchema           = "PUBLIC"
+	snowflakeHost             = "TFLXCJY-LU41015"
+)
 
 type driverSnowflakeKeypairTest struct {
-	driverSnowflakeTest
 	db *sql.DB
 }
 
@@ -40,6 +44,18 @@ func (d *driverSnowflakeKeypairTest) Disabled() bool {
 
 func (d *driverSnowflakeKeypairTest) Name() string {
 	return "snowflake-keypair"
+}
+
+func (d *driverSnowflakeKeypairTest) QuoteTable(table string) string {
+	return fmt.Sprintf(`"%s"`, table)
+}
+
+func (d *driverSnowflakeKeypairTest) QuoteColumn(column string) string {
+	return fmt.Sprintf(`"%s"`, column)
+}
+
+func (d *driverSnowflakeKeypairTest) QuoteValue(value string) string {
+	return fmt.Sprintf(`'%s'`, value)
 }
 
 func (d *driverSnowflakeKeypairTest) URL(dir string) string {
