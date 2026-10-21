@@ -27,9 +27,6 @@ func ServeConsumerRequests(nc *nats.Conn, js jetstream.JetStream, serverID strin
 			return
 		}
 		name := "eds-" + serverID
-		if req.Suffix != "" {
-			name += "-" + req.Suffix
-		}
 		var subjects []string
 		for _, companyID := range req.CompanyIDs {
 			subjects = append(subjects, "dbchange.*.*."+companyID+".*.PUBLIC.>")

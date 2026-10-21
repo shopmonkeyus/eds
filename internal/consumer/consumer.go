@@ -54,9 +54,6 @@ type ConsumerConfig struct {
 	// CompanyIDs is the list of company IDs to listen for. If empty, all companies will be listened to.
 	CompanyIDs []string
 
-	// Suffix for the consumer name
-	Suffix string
-
 	// MaxAckPending is the maximum number of messages that can be in-flight at once.
 	MaxAckPending int
 
@@ -579,7 +576,6 @@ type consumerRequest struct {
 	MaxAckPending   int        `json:"maxAckPending"`
 	MaxRequestBatch int        `json:"maxRequestBatch"`
 	StartTime       *time.Time `json:"startTime,omitempty"`
-	Suffix          string     `json:"suffix,omitempty"`
 }
 
 type consumerResponse struct {
@@ -624,7 +620,8 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	}
 
 	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials)
+	// the credential only allows receiving replies on this session's inbox prefix
+	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials, nats.CustomInboxPrefix("eds_inbox_"+info.SessionID))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
 	}
@@ -812,7 +809,6 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 		MaxAckPending:   consumer.max,
 		MaxRequestBatch: config.MaxPendingBuffer,
 		StartTime:       startAt,
-		Suffix:          config.Suffix,
 	})
 	if err != nil {
 		nc.Close()

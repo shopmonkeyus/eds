@@ -139,12 +139,12 @@ func createNatsTestServer(dir string, port int) (*server.Server, *nats.Conn, str
 		"$JS.API.CONSUMER.MSG.NEXT.dbchange." + consumerName,
 		"$JS.ACK.dbchange." + consumerName + ".>",
 		fmt.Sprintf("eds.client.%s.>", sessionId),
-		"_INBOX.>",
 	}
+	uc.Resp = &jwt.ResponsePermission{MaxMsgs: 1}
 	uc.Sub.Allow = []string{
 		fmt.Sprintf("dbchange.*.*.%s.*.PUBLIC.>", companyId),
 		fmt.Sprintf("eds.notify.%s.>", sessionId),
-		"_INBOX.>",
+		fmt.Sprintf("eds_inbox_%s.>", sessionId),
 	}
 
 	// since the jwt will be issued by a signing key, the issuer account

@@ -52,7 +52,7 @@ func writeCredsToFile(data string, filename string) error {
 
 var errAlreadyRunning = errors.New("already running")
 
-func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string, companyIds []string, consumerSuffix string) (*api.EdsSession, error) {
+func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl string, edsServerId string, companyIds []string) (*api.EdsSession, error) {
 	var body api.SessionStart
 	ipaddress, err := util.GetLocalIP()
 	if err != nil {
@@ -77,7 +77,6 @@ func sendStart(logger logger.Logger, apiURL string, apiKey string, driverUrl str
 	body.OsInfo = osinfo
 	body.ServerID = edsServerId
 	body.CompanyIDs = companyIds
-	body.ConsumerSuffix = consumerSuffix
 
 	if driverUrl != "" {
 		driverMetadata, err := internal.GetDriverMetadataForURL(driverUrl)
@@ -966,7 +965,6 @@ var serverCmd = &cobra.Command{
 		}()
 
 		companyIds, _ := cmd.Flags().GetStringSlice("companyIds")
-		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 
 		// main loop
 		var failures int
@@ -974,7 +972,7 @@ var serverCmd = &cobra.Command{
 			if failures >= maxFailures {
 				logger.Fatal("too many failures after %d attempts, exiting", failures)
 			}
-			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId, companyIds, consumerSuffix)
+			session, err := sendStart(logger, apiurl, apikey, driverURL, edsServerId, companyIds)
 			if err != nil {
 				if errors.Is(err, errAlreadyRunning) {
 					logger.Info("another eds server is already running for this server (id: %s). Retrying in 5 seconds", edsServerId)
@@ -1187,7 +1185,7 @@ func init() {
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().MarkHidden("server")
 	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
-	serverCmd.Flags().MarkHidden("consumer-suffix")
+	serverCmd.Flags().MarkDeprecated("consumer-suffix", "the consumer name is now set by Shopmonkey; this flag is ignored")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	serverCmd.Flags().MarkHidden("maxAckPending")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")

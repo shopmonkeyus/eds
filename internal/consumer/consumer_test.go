@@ -1147,10 +1147,9 @@ func TestRequestConsumer(t *testing.T) {
 		c, err := requestConsumer(context.Background(), nc, js, "session-1", consumerRequest{
 			CompanyIDs:    []string{"company-1"},
 			MaxAckPending: 10,
-			Suffix:        "test",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, "eds-dev-test", c.CachedInfo().Name)
+		assert.Equal(t, "eds-dev", c.CachedInfo().Name)
 		assert.Equal(t, []string{"dbchange.*.*.company-1.*.PUBLIC.>"}, c.CachedInfo().Config.FilterSubjects)
 	})
 }
