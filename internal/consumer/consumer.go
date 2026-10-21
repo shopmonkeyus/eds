@@ -581,12 +581,15 @@ type consumerRequest struct {
 type consumerResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
-	Name    string `json:"name"`
+}
+
+func consumerName(serverID string) string {
+	return "eds-" + serverID
 }
 
 // requestConsumer asks the backend to create or update the consumer, since the credential cannot.
-func requestConsumer(ctx context.Context, nc *nats.Conn, js jetstream.JetStream, sessionID string, req consumerRequest) (jetstream.Consumer, error) {
-	msg, err := nc.RequestWithContext(ctx, fmt.Sprintf("eds.client.%s.consumer", sessionID), []byte(util.JSONStringify(req)))
+func requestConsumer(ctx context.Context, nc *nats.Conn, js jetstream.JetStream, info *CredentialInfo, req consumerRequest) (jetstream.Consumer, error) {
+	msg, err := nc.RequestWithContext(ctx, fmt.Sprintf("eds.client.%s.consumer", info.SessionID), []byte(util.JSONStringify(req)))
 	if err != nil {
 		return nil, fmt.Errorf("error requesting jetstream consumer: %w", err)
 	}
@@ -597,7 +600,7 @@ func requestConsumer(ctx context.Context, nc *nats.Conn, js jetstream.JetStream,
 	if !resp.Success {
 		return nil, fmt.Errorf("error requesting jetstream consumer: %s", resp.Message)
 	}
-	return js.Consumer(ctx, "dbchange", resp.Name)
+	return js.Consumer(ctx, "dbchange", consumerName(info.ServerID))
 }
 
 func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Conn, *CredentialInfo, error) {
@@ -803,7 +806,7 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 	configConsumerCtx, cancelConfig := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
 	defer cancelConfig()
 
-	c, err := requestConsumer(configConsumerCtx, nc, js, info.SessionID, consumerRequest{
+	c, err := requestConsumer(configConsumerCtx, nc, js, info, consumerRequest{
 		CompanyIDs:      info.CompanyIDs,
 		DeliverAll:      config.DeliverAll,
 		MaxAckPending:   consumer.max,

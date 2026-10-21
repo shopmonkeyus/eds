@@ -26,7 +26,7 @@ func ServeConsumerRequests(nc *nats.Conn, js jetstream.JetStream, serverID strin
 			respond(consumerResponse{Message: "no permitted companies"})
 			return
 		}
-		name := "eds-" + serverID
+		name := consumerName(serverID)
 		var subjects []string
 		for _, companyID := range req.CompanyIDs {
 			subjects = append(subjects, "dbchange.*.*."+companyID+".*.PUBLIC.>")
@@ -63,6 +63,6 @@ func ServeConsumerRequests(nc *nats.Conn, js jetstream.JetStream, serverID strin
 			respond(consumerResponse{Message: err.Error()})
 			return
 		}
-		respond(consumerResponse{Success: true, Name: name})
+		respond(consumerResponse{Success: true})
 	})
 }

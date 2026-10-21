@@ -1144,7 +1144,7 @@ func TestDisconnectedHandler(t *testing.T) {
 
 func TestRequestConsumer(t *testing.T) {
 	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
-		c, err := requestConsumer(context.Background(), nc, js, "session-1", consumerRequest{
+		c, err := requestConsumer(context.Background(), nc, js, &CredentialInfo{ServerID: "dev", SessionID: "session-1"}, consumerRequest{
 			CompanyIDs:    []string{"company-1"},
 			MaxAckPending: 10,
 		})
@@ -1156,7 +1156,7 @@ func TestRequestConsumer(t *testing.T) {
 
 func TestRequestConsumerFailure(t *testing.T) {
 	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
-		_, err := requestConsumer(context.Background(), nc, js, "session-1", consumerRequest{})
+		_, err := requestConsumer(context.Background(), nc, js, &CredentialInfo{ServerID: "dev", SessionID: "session-1"}, consumerRequest{})
 		assert.ErrorContains(t, err, "no permitted companies")
 	})
 }
