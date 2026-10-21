@@ -1148,7 +1148,9 @@ func TestRequestConsumer(t *testing.T) {
 			CompanyIDs:    []string{"company-1"},
 			MaxAckPending: 10,
 		})
-		assert.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
 		assert.Equal(t, "eds-dev", c.CachedInfo().Name)
 		assert.Equal(t, []string{"dbchange.*.*.company-1.*.PUBLIC.>"}, c.CachedInfo().Config.FilterSubjects)
 		assert.Equal(t, jetstream.DeliverNewPolicy, c.CachedInfo().Config.DeliverPolicy)
@@ -1266,4 +1268,90 @@ func TestRequestConsumerRequestErrors(t *testing.T) {
 
 	_, err = requestConsumer(context.Background(), nc, nil, info, req)
 	assert.ErrorContains(t, err, "error decoding jetstream consumer response")
+}
+
+func TestNewConsumerBackendRefuses(t *testing.T) {
+	port, err := util.GetFreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := natsserver.DefaultTestOptions
+	opts.Port = port
+	opts.Cluster.Name = "testing"
+	srv := natsserver.RunServer(&opts)
+	defer srv.Shutdown()
+	url := fmt.Sprintf("nats://localhost:%d", port)
+	nc, err := nats.Connect(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+
+	const backendMessage = "consumer quota exceeded"
+	body, err := json.Marshal(consumerResponse{Message: backendMessage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := nc.Subscribe("eds.client.*.consumer", func(msg *nats.Msg) {
+		msg.Respond(body)
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer sub.Unsubscribe()
+	if !assert.NoError(t, nc.Flush()) {
+		return
+	}
+
+	_, err = NewConsumer(ConsumerConfig{
+		Context: context.Background(),
+		Logger:  logger.NewTestLogger(),
+		Driver:  &mockDriver{},
+		URL:     url,
+	})
+	assert.ErrorContains(t, err, backendMessage)
+}
+
+func TestRequestConsumerSuccessWithoutConsumer(t *testing.T) {
+	port, err := util.GetFreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := natsserver.DefaultTestOptions
+	opts.Port = port
+	opts.Cluster.Name = "testing"
+	opts.JetStream = true
+	srv := natsserver.RunServer(&opts)
+	defer srv.Shutdown()
+	nc, err := nats.Connect(fmt.Sprintf("nats://localhost:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := js.CreateStream(context.Background(), jetstream.StreamConfig{
+		Name:     "dbchange",
+		Subjects: []string{"dbchange.>"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sub, err := nc.Subscribe("eds.client.*.consumer", func(msg *nats.Msg) {
+		msg.Respond([]byte(`{"success":true}`))
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer sub.Unsubscribe()
+	if !assert.NoError(t, nc.Flush()) {
+		return
+	}
+
+	_, err = requestConsumer(context.Background(), nc, js, &CredentialInfo{ServerID: "dev", SessionID: "session-1"}, consumerRequest{
+		CompanyIDs: []string{"company-1"},
+	})
+	assert.ErrorIs(t, err, jetstream.ErrConsumerNotFound)
 }
