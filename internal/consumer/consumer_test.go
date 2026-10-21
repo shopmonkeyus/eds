@@ -49,6 +49,11 @@ func runNatsTestServer(fn func(natsurl string, nc *nats.Conn, js jetstream.JetSt
 	}); err != nil {
 		panic(err)
 	}
+	sub, err := ServeConsumerRequests(nc, js, "dev")
+	if err != nil {
+		panic(err)
+	}
+	defer sub.Unsubscribe()
 	fn(url, nc, js, srv)
 }
 
@@ -1134,5 +1139,25 @@ func TestDisconnectedHandler(t *testing.T) {
 
 		assert.NoError(t, consumer.Stop())
 		assert.True(t, closed)
+	})
+}
+
+func TestRequestConsumer(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
+		c, err := requestConsumer(context.Background(), nc, js, "session-1", consumerRequest{
+			CompanyIDs:    []string{"company-1"},
+			MaxAckPending: 10,
+			Suffix:        "test",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "eds-dev-test", c.CachedInfo().Name)
+		assert.Equal(t, []string{"dbchange.*.*.company-1.*.PUBLIC.>"}, c.CachedInfo().Config.FilterSubjects)
+	})
+}
+
+func TestRequestConsumerFailure(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
+		_, err := requestConsumer(context.Background(), nc, js, "session-1", consumerRequest{})
+		assert.ErrorContains(t, err, "no permitted companies")
 	})
 }

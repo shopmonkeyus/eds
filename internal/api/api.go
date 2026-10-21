@@ -21,6 +21,8 @@ type SessionStart struct {
 	Driver     *DriverMeta `json:"driver,omitempty"`
 	ServerID   string      `json:"serverId"`
 	CompanyIDs []string    `json:"companyIds,omitempty"`
+	// always sent, it tells the backend this version needs it to manage the consumer
+	ConsumerSuffix string `json:"consumerSuffix"`
 }
 
 type EdsSession struct {
