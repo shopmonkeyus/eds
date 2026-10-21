@@ -56,6 +56,9 @@ func ServeConsumerRequests(nc *nats.Conn, js jetstream.JetStream, serverID strin
 			} else if req.StartTime != nil {
 				config.DeliverPolicy = jetstream.DeliverByStartTimePolicy
 				config.OptStartTime = req.StartTime
+			} else {
+				// the zero value is DeliverAll; a server with no import should only see new messages
+				config.DeliverPolicy = jetstream.DeliverNewPolicy
 			}
 			_, err = js.CreateConsumer(ctx, "dbchange", config)
 		}

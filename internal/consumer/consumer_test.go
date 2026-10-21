@@ -1151,6 +1151,7 @@ func TestRequestConsumer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "eds-dev", c.CachedInfo().Name)
 		assert.Equal(t, []string{"dbchange.*.*.company-1.*.PUBLIC.>"}, c.CachedInfo().Config.FilterSubjects)
+		assert.Equal(t, jetstream.DeliverNewPolicy, c.CachedInfo().Config.DeliverPolicy)
 	})
 }
 
