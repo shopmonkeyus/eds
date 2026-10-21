@@ -1161,3 +1161,109 @@ func TestRequestConsumerFailure(t *testing.T) {
 		assert.ErrorContains(t, err, "no permitted companies")
 	})
 }
+
+func TestRequestConsumerDeliverAll(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
+		c, err := requestConsumer(context.Background(), nc, js, &CredentialInfo{ServerID: "dev", SessionID: "session-1"}, consumerRequest{
+			CompanyIDs:    []string{"company-1"},
+			DeliverAll:    true,
+			MaxAckPending: 10,
+		})
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, jetstream.DeliverAllPolicy, c.CachedInfo().Config.DeliverPolicy)
+		assert.Nil(t, c.CachedInfo().Config.OptStartTime)
+	})
+}
+
+func TestRequestConsumerStartTime(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
+		start := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+		c, err := requestConsumer(context.Background(), nc, js, &CredentialInfo{ServerID: "dev", SessionID: "session-1"}, consumerRequest{
+			CompanyIDs:    []string{"company-1"},
+			MaxAckPending: 10,
+			StartTime:     &start,
+		})
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, jetstream.DeliverByStartTimePolicy, c.CachedInfo().Config.DeliverPolicy)
+		if assert.NotNil(t, c.CachedInfo().Config.OptStartTime) {
+			assert.WithinDuration(t, start, *c.CachedInfo().Config.OptStartTime, time.Millisecond)
+		}
+	})
+}
+
+func TestRequestConsumerUpdateKeepsDelivery(t *testing.T) {
+	runNatsTestServer(func(natsurl string, nc *nats.Conn, js jetstream.JetStream, srv *server.Server) {
+		start := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+		later := start.Add(time.Minute)
+		info := &CredentialInfo{ServerID: "dev", SessionID: "session-1"}
+		c, err := requestConsumer(context.Background(), nc, js, info, consumerRequest{
+			CompanyIDs:    []string{"company-1"},
+			MaxAckPending: 10,
+			StartTime:     &start,
+		})
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, 10, c.CachedInfo().Config.MaxAckPending)
+		assert.Equal(t, jetstream.DeliverByStartTimePolicy, c.CachedInfo().Config.DeliverPolicy)
+
+		c, err = requestConsumer(context.Background(), nc, js, info, consumerRequest{
+			CompanyIDs:    []string{"company-1"},
+			DeliverAll:    true,
+			MaxAckPending: 25,
+			StartTime:     &later,
+		})
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, 25, c.CachedInfo().Config.MaxAckPending)
+		assert.Equal(t, jetstream.DeliverByStartTimePolicy, c.CachedInfo().Config.DeliverPolicy)
+		if assert.NotNil(t, c.CachedInfo().Config.OptStartTime) {
+			assert.WithinDuration(t, start, *c.CachedInfo().Config.OptStartTime, time.Millisecond)
+		}
+	})
+}
+
+func TestRequestConsumerRequestErrors(t *testing.T) {
+	port, err := util.GetFreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := natsserver.DefaultTestOptions
+	opts.Port = port
+	opts.Cluster.Name = "testing"
+	srv := natsserver.RunServer(&opts)
+	defer srv.Shutdown()
+	nc, err := nats.Connect(fmt.Sprintf("nats://localhost:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+
+	info := &CredentialInfo{ServerID: "dev", SessionID: "session-1"}
+	req := consumerRequest{CompanyIDs: []string{"company-1"}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = requestConsumer(ctx, nc, nil, info, req)
+	assert.ErrorContains(t, err, "error requesting jetstream consumer")
+	assert.ErrorIs(t, err, nats.ErrNoResponders)
+
+	sub, err := nc.Subscribe("eds.client.*.consumer", func(msg *nats.Msg) {
+		msg.Respond([]byte("not-json"))
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	defer sub.Unsubscribe()
+	if !assert.NoError(t, nc.Flush()) {
+		return
+	}
+
+	_, err = requestConsumer(context.Background(), nc, nil, info, req)
+	assert.ErrorContains(t, err, "error decoding jetstream consumer response")
+}
