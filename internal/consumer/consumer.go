@@ -3,6 +3,7 @@ package consumer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,9 +53,6 @@ type ConsumerConfig struct {
 
 	// CompanyIDs is the list of company IDs to listen for. If empty, all companies will be listened to.
 	CompanyIDs []string
-
-	// Suffix for the consumer name
-	Suffix string
 
 	// MaxAckPending is the maximum number of messages that can be in-flight at once.
 	MaxAckPending int
@@ -572,6 +570,39 @@ type CredentialInfo struct {
 	SessionID  string
 }
 
+type consumerRequest struct {
+	CompanyIDs      []string   `json:"companyIds"`
+	DeliverAll      bool       `json:"deliverAll,omitempty"`
+	MaxAckPending   int        `json:"maxAckPending"`
+	MaxRequestBatch int        `json:"maxRequestBatch"`
+	StartTime       *time.Time `json:"startTime,omitempty"`
+}
+
+type consumerResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+func consumerName(serverID string) string {
+	return "eds-" + serverID
+}
+
+// requestConsumer asks the backend to create or update the consumer, since the credential cannot.
+func requestConsumer(ctx context.Context, nc *nats.Conn, js jetstream.JetStream, info *CredentialInfo, req consumerRequest) (jetstream.Consumer, error) {
+	msg, err := nc.RequestWithContext(ctx, fmt.Sprintf("eds.client.%s.consumer", info.SessionID), []byte(util.JSONStringify(req)))
+	if err != nil {
+		return nil, fmt.Errorf("error requesting jetstream consumer: %w", err)
+	}
+	var resp consumerResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return nil, fmt.Errorf("error decoding jetstream consumer response: %w", err)
+	}
+	if !resp.Success {
+		return nil, fmt.Errorf("error requesting jetstream consumer: %s", resp.Message)
+	}
+	return js.Consumer(ctx, "dbchange", consumerName(info.ServerID))
+}
+
 func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Conn, *CredentialInfo, error) {
 	var natsCredentials nats.Option
 	var info *CredentialInfo
@@ -592,7 +623,8 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 	}
 
 	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials)
+	// the credential only allows receiving replies on this session's inbox prefix
+	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials, nats.CustomInboxPrefix("eds_inbox_"+info.SessionID))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
 	}
@@ -770,76 +802,20 @@ func CreateConsumer(config ConsumerConfig) (*Consumer, error) {
 
 	consumer.logger.Info("using info from credentials, server: %s companies: %s, session: %s", info.ServerID, info.CompanyIDs, info.SessionID)
 
-	var suffix string
-	if config.Suffix != "" {
-		suffix = "-" + config.Suffix
-	}
-	name := fmt.Sprintf("eds-%s%s", info.ServerID, suffix)
-	var subjects []string
-	for _, companyID := range info.CompanyIDs {
-		subject := "dbchange.*.*." + companyID + ".*.PUBLIC.>"
-		subjects = append(subjects, subject)
-	}
-
-	jsConfig := jetstream.ConsumerConfig{
-		Durable:           name,
-		MaxAckPending:     consumer.max,
-		MaxDeliver:        20,
-		AckWait:           time.Minute * 5,
-		MaxRequestBatch:   config.MaxPendingBuffer,
-		FilterSubjects:    subjects,
-		AckPolicy:         jetstream.AckExplicitPolicy,
-		InactiveThreshold: time.Hour * 24 * 3, // expire if unused 3 days from first creating
-		MaxWaiting:        1,                  // only 1 consumer allowed
-	}
-
 	// create a context with a longer deadline for creating the consumer
 	configConsumerCtx, cancelConfig := context.WithDeadline(config.Context, time.Now().Add(time.Minute*10))
 	defer cancelConfig()
 
-	// setup the consumer
-	c, err := js.Consumer(configConsumerCtx, "dbchange", jsConfig.Durable)
+	c, err := requestConsumer(configConsumerCtx, nc, js, info, consumerRequest{
+		CompanyIDs:      info.CompanyIDs,
+		DeliverAll:      config.DeliverAll,
+		MaxAckPending:   consumer.max,
+		MaxRequestBatch: config.MaxPendingBuffer,
+		StartTime:       startAt,
+	})
 	if err != nil {
-		if !errors.Is(err, jetstream.ErrConsumerNotFound) {
-			nc.Close()
-			return nil, fmt.Errorf("error getting jetstream consumer: %w", err)
-		}
-		// consumer not found, create it
-
-		// only set the deliver policy if we are creating a new consumer, it will error if we try to update it
-		if config.DeliverAll {
-			jsConfig.DeliverPolicy = jetstream.DeliverAllPolicy
-		} else if startAt != nil {
-			jsConfig.DeliverPolicy = jetstream.DeliverByStartTimePolicy
-			jsConfig.OptStartTime = startAt
-		} else {
-			jsConfig.DeliverPolicy = jetstream.DeliverNewPolicy
-			consumer.logger.Warn("no import timestamp found, starting data stream from now")
-		}
-
-		c, err = js.CreateConsumer(configConsumerCtx, "dbchange", jsConfig)
-		if err != nil {
-			nc.Close()
-			return nil, fmt.Errorf("error creating jetstream consumer: %w", err)
-		}
-	} else {
-		preUpdateInfo, err := c.Info(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("error getting consumer info: %w", err)
-		}
-
-		jsConfig.DeliverPolicy = preUpdateInfo.Config.DeliverPolicy
-		jsConfig.OptStartTime = preUpdateInfo.Config.OptStartTime
-		jsConfig.MaxWaiting = preUpdateInfo.Config.MaxWaiting
-		consumer.logger.Debug("consumer found, setting delivery policy to %v and start time to %v", jsConfig.DeliverPolicy, jsConfig.OptStartTime)
-
-		// consumer found, update it
-		// TODO: we should check if the consumer is already in the correct state and skip this
-		c, err = js.UpdateConsumer(configConsumerCtx, "dbchange", jsConfig)
-		if err != nil {
-			nc.Close()
-			return nil, fmt.Errorf("error updating jetstream consumer: %w", err)
-		}
+		nc.Close()
+		return nil, err
 	}
 	cancelConfig()
 

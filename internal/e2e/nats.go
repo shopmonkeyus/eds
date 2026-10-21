@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
+	"github.com/shopmonkeyus/eds/internal/consumer"
 	"github.com/shopmonkeyus/eds/internal/util"
 )
 
@@ -132,21 +133,18 @@ func createNatsTestServer(dir string, port int) (*server.Server, *nats.Conn, str
 	}
 	uc := jwt.NewUserClaims(upk)
 	uc.Name = serverID
+	consumerName := "eds-" + serverID
 	uc.Pub.Allow = []string{
-		"$JS.API.STREAM.NAMES",
-		"$JS.ACK.dbchange.>",
-		"$JS.API.CONSUMER.MSG.NEXT.dbchange.>",
-		"$JS.API.STREAM.CREATE.dbchange",
-		"$JS.API.CONSUMER.>",
-		"$JS.API.CONSUMER.*.dbchange.*",
+		"$JS.API.CONSUMER.INFO.dbchange." + consumerName,
+		"$JS.API.CONSUMER.MSG.NEXT.dbchange." + consumerName,
+		"$JS.ACK.dbchange." + consumerName + ".>",
 		fmt.Sprintf("eds.client.%s.>", sessionId),
-		"_INBOX.>",
-		"dbchange.>",
 	}
+	uc.Resp = &jwt.ResponsePermission{MaxMsgs: 1}
 	uc.Sub.Allow = []string{
 		fmt.Sprintf("dbchange.*.*.%s.*.PUBLIC.>", companyId),
 		fmt.Sprintf("eds.notify.%s.>", sessionId),
-		"_INBOX.>",
+		fmt.Sprintf("eds_inbox_%s.>", sessionId),
 	}
 
 	// since the jwt will be issued by a signing key, the issuer account
@@ -216,7 +214,23 @@ system_account: %s
 	srv.ConfigureLogger()
 	srv.Start()
 
-	nc, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(credsPath))
+	// the test harness connects as an unrestricted user, standing in for the backend
+	bkp, err := nkeys.CreateUser()
+	if err != nil {
+		panic(err)
+	}
+	bpk, err := bkp.PublicKey()
+	if err != nil {
+		panic(err)
+	}
+	bc := jwt.NewUserClaims(bpk)
+	bc.Name = "backend"
+	bc.IssuerAccount = apk
+	backendJwt, err := bc.Encode(askp)
+	if err != nil {
+		panic(err)
+	}
+	nc, err := nats.Connect(srv.ClientURL(), nats.UserJWT(func() (string, error) { return backendJwt, nil }, func(nonce []byte) ([]byte, error) { return bkp.Sign(nonce) }))
 	if err != nil {
 		panic(err)
 	}
@@ -252,5 +266,10 @@ func runNatsTestServer(fn func(nc *nats.Conn, js jetstream.JetStream, srv *serve
 	}); err != nil {
 		panic(err)
 	}
+	sub, err := consumer.ServeConsumerRequests(nc, js, serverID)
+	if err != nil {
+		panic(err)
+	}
+	defer sub.Unsubscribe()
 	fn(nc, js, srv, userCreds)
 }

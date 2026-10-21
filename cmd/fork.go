@@ -72,7 +72,6 @@ var forkCmd = &cobra.Command{
 		natsurl := mustFlagString(cmd, "server", true)
 		url := mustFlagString(cmd, "url", true)
 		creds := mustFlagString(cmd, "creds", !util.IsLocalhost(natsurl))
-		consumerSuffix := mustFlagString(cmd, "consumer-suffix", false)
 		maxAckPending := mustFlagInt(cmd, "maxAckPending", false)
 		maxPendingBuffer := mustFlagInt(cmd, "maxPendingBuffer", false)
 		minPendingLatency, _ := cmd.Flags().GetDuration("minPendingLatency")
@@ -181,7 +180,6 @@ var forkCmd = &cobra.Command{
 						Logger:                logger,
 						URL:                   natsurl,
 						Credentials:           creds,
-						Suffix:                consumerSuffix,
 						MaxAckPending:         maxAckPending,
 						MaxPendingBuffer:      maxPendingBuffer,
 						Driver:                driver,
@@ -305,6 +303,7 @@ func init() {
 	// these flags are passed through from the server
 	forkCmd.Flags().Int("port", 0, "the port to listen for health checks and metrics")
 	forkCmd.Flags().StringSlice("companyIds", nil, "restrict to a specific company ID or multiple")
-	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name")
+	forkCmd.Flags().String("consumer-suffix", "", "a suffix to use for the consumer group name (deprecated: ignored)")
+	forkCmd.Flags().MarkDeprecated("consumer-suffix", "the consumer name is now set by Shopmonkey; this flag is ignored")
 	forkCmd.Flags().String("server", "", "the nats server url, could be multiple comma separated")
 }

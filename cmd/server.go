@@ -1185,7 +1185,7 @@ func init() {
 	serverCmd.Flags().String("server", "nats://connect.nats.shopmonkey.pub", "the nats server url, could be multiple comma separated")
 	serverCmd.Flags().MarkHidden("server")
 	serverCmd.Flags().String("consumer-suffix", "", "suffix which is appended to the nats consumer group name")
-	serverCmd.Flags().MarkHidden("consumer-suffix")
+	serverCmd.Flags().MarkDeprecated("consumer-suffix", "the consumer name is now set by Shopmonkey; this flag is ignored")
 	serverCmd.Flags().Int("maxAckPending", defaultMaxAckPending, "the number of max ack pending messages")
 	serverCmd.Flags().MarkHidden("maxAckPending")
 	serverCmd.Flags().Int("maxPendingBuffer", defaultMaxPendingBuffer, "the maximum number of messages to pull from nats to buffer")
