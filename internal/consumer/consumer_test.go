@@ -1136,3 +1136,12 @@ func TestDisconnectedHandler(t *testing.T) {
 		assert.True(t, closed)
 	})
 }
+
+func TestNewNatsConnectionUsesSessionInbox(t *testing.T) {
+	runNatsTestServer(func(natsurl string, _ *nats.Conn, _ jetstream.JetStream, _ *server.Server) {
+		nc, info, err := NewNatsConnection(logger.NewTestLogger(), natsurl, "")
+		assert.NoError(t, err)
+		defer nc.Close()
+		assert.Regexp(t, `^_INBOX\.`+info.SessionID+`\.[A-Za-z0-9]+$`, nc.NewInbox())
+	})
+}

@@ -591,8 +591,9 @@ func NewNatsConnection(logger logger.Logger, url string, creds string) (*nats.Co
 		}
 	}
 
-	// Nats connection to main NATS server
-	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials)
+	// Nats connection to main NATS server. The credential only lets this server receive replies under
+	// its own session, so every request has to ask for its reply there.
+	nc, err := cnats.NewNats(logger, "eds-"+info.ServerID, url, natsCredentials, nats.CustomInboxPrefix("_INBOX."+info.SessionID))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating nats connection: %w", err)
 	}
