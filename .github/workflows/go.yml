@@ -12,8 +12,13 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_SONAR_TOKEN: ${{ secrets.SONAR_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # SonarCloud needs the full history to find new code.
+          fetch-depth: 0
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -21,4 +26,11 @@ jobs:
       - name: Go Build
         run: go build -v ./...
       - name: Go Unit Tests
-        run: go test -v ./...
+        run: go test -v -coverprofile=coverage.out ./...
+      # Fork and Dependabot pull requests get no secrets, so they get no scan.
+      # SonarCloud posts the "SonarCloud Code Analysis" check itself.
+      - name: SonarCloud Scan
+        if: env.HAS_SONAR_TOKEN == 'true'
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
