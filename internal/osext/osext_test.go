@@ -25,6 +25,15 @@ const (
 	executableEnvValueDelete = "delete"
 )
 
+// The child prints its path to stderr. A binary built with -coverprofile
+// also prints a warning to stderr when GOCOVERDIR is not set.
+func childEnv(t *testing.T, value string) []string {
+	return []string{
+		fmt.Sprintf("%s=%s", executableEnvVar, value),
+		"GOCOVERDIR=" + t.TempDir(),
+	}
+}
+
 func TestPrintExecutable(t *testing.T) {
 	ef, err := Executable()
 	if err != nil {
@@ -65,7 +74,7 @@ func TestExecutableMatch(t *testing.T) {
 	cmd := &exec.Cmd{
 		Dir:  dir,
 		Path: fullpath,
-		Env:  []string{fmt.Sprintf("%s=%s", executableEnvVar, executableEnvValueMatch)},
+		Env:  childEnv(t, executableEnvValueMatch),
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -94,7 +103,7 @@ func TestExecutableDelete(t *testing.T) {
 	stdoutBuff := &bytes.Buffer{}
 	cmd := &exec.Cmd{
 		Path:   fpath,
-		Env:    []string{fmt.Sprintf("%s=%s", executableEnvVar, executableEnvValueDelete)},
+		Env:    childEnv(t, executableEnvValueDelete),
 		Stdin:  r,
 		Stderr: stderrBuff,
 		Stdout: stdoutBuff,
